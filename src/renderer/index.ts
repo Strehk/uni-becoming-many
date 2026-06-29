@@ -12,7 +12,13 @@
 //
 // The scene below is deliberately the smallest thing that exercises all three: one plane
 // whose color is read from the buffer, and one compute pass that animates the buffer.
+//
+// VR: WebGPU drives WebXR through the same `renderer.xr` manager as the WebGL backend
+// (supported since r167; uses an internal `XRGPUBinding`). We flip `renderer.xr.enabled`
+// on and expose a `VRButton` overlay; entering VR needs HTTPS (we already serve it).
 
+// `three/addons/*` maps to `three/examples/jsm/*`; types ship with @types/three.
+import { VRButton } from "three/addons/webxr/VRButton.js";
 import { Fn, instancedArray, time, vec3, vec4 } from "three/tsl";
 import * as THREE from "three/webgpu";
 
@@ -39,6 +45,8 @@ export type RenderBuffer = ReturnType<typeof createBuffer>;
 export interface Renderer {
   /** The WebGPU canvas, ready to mount into the DOM. */
   readonly canvas: HTMLCanvasElement;
+  /** "Enter VR" overlay button; mount it anywhere in the DOM. */
+  readonly vrButton: HTMLElement;
   /** The Rendering BufferArray. Read from / write to this everywhere. */
   readonly buffer: RenderBuffer;
   /** Begin the animation loop (compute → render each frame). */
@@ -58,7 +66,11 @@ export async function createRenderer(): Promise<Renderer> {
   const renderer = new THREE.WebGPURenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true; // route the render loop through WebXR when a session starts
   await renderer.init();
+
+  // "Enter VR" button; three handles the session + per-eye cameras once it's clicked.
+  const vrButton = VRButton.createButton(renderer);
 
   // --- The Rendering BufferArray: GPU-resident source of truth. ---
   const buffer = createBuffer();
@@ -74,11 +86,14 @@ export async function createRenderer(): Promise<Renderer> {
   // Scene: one plane whose color is *read* from the buffer.
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
-  camera.position.z = 2;
+  // Eye height (~1.6 m). In VR the headset overrides this transform, but the rig's
+  // floor-relative origin means starting here keeps the plane in front of the user.
+  camera.position.set(0, 1.6, 0);
 
   const material = new THREE.MeshBasicNodeMaterial();
   material.colorNode = vec4(buffer.element(0), 1.0);
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+  mesh.position.set(0, 1.6, -3); // 3 m ahead at eye height — visible in VR and on desktop
   scene.add(mesh);
 
   const onResize = (): void => {
@@ -101,5 +116,5 @@ export async function createRenderer(): Promise<Renderer> {
     renderer.dispose();
   }
 
-  return { canvas: renderer.domElement, buffer, start, dispose };
+  return { canvas: renderer.domElement, vrButton, buffer, start, dispose };
 }

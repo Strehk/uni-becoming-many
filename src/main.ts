@@ -10,6 +10,7 @@ if (!app) {
 // `createRenderer` is async — WebGPU must finish `init()` before the first frame.
 const renderer = await createRenderer();
 app.append(renderer.canvas);
+document.body.append(renderer.vrButton); // "Enter VR" overlay
 renderer.start();
 
 createSenses(renderer.canvas);
