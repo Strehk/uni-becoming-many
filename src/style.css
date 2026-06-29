@@ -16,13 +16,11 @@ body {
 }
 
 #app {
-  display: grid;
-  place-items: center;
   width: 100vw;
   height: 100vh;
 }
 
+/* The WebGPU renderer sizes the canvas to the viewport; let it fill the screen. */
 canvas {
-  image-rendering: pixelated;
-  border: 1px solid #1c2230;
+  display: block;
 }

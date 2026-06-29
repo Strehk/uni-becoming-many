@@ -25,13 +25,23 @@ There is no test runner yet. `bun run build` is the gate — it typechecks befor
 
 `src/main.ts` is the single entry point (loaded by `index.html`). It wires three modules together end-to-end:
 
-- `src/terrain-generator/` — `generateTerrain(w, h, seed)` returns a `Terrain` (a row-major `Float32Array` heightfield, values in `[0,1]`). Pure/deterministic; current noise is a placeholder.
-- `src/renderer/` — `createRenderer(scale)` returns a `Renderer` owning its own `<canvas>`; `render(terrain)` paints the heightfield as a grayscale `ImageData`.
+- `src/terrain-generator/` — `generateTerrain(w, h, seed)` returns a `Terrain` (a row-major `Float32Array` heightfield, values in `[0,1]`). Pure/deterministic; current noise is a placeholder. Not yet wired into the GPU scene.
+- `src/renderer/` — `createRenderer()` returns a `Promise<Renderer>` owning a WebGPU `<canvas>`. See **WebGPU rendering** below.
 - `src/senses/` — `createSenses(target)` is the input/perception layer; currently tracks normalized pointer position over a target element.
 
-Data flow: `main.ts` generates a terrain → renders it onto the renderer's canvas → mounts that canvas into `#app` → attaches senses to the canvas. Each module is a factory returning an interface; they depend on each other only through exported types (`renderer` imports `Terrain` as a type). Keep that boundary: modules talk via typed data structures, not shared globals.
+Data flow: `main.ts` `await`s the renderer → mounts its canvas into `#app` → starts the loop → attaches senses to the canvas. Each module is a factory returning an interface; they depend on each other only through exported types. Keep that boundary: modules talk via typed data structures, not shared globals.
 
 Intra-`src` imports use explicit `.ts` extensions (e.g. `import ... from "./renderer/index.ts"`), enabled by `allowImportingTsExtensions`. Follow that convention in new files.
+
+## WebGPU rendering (hard rules)
+
+The renderer uses **three.js (r185) WebGPU + TSL**. These paradigms are non-negotiable — follow them in every new renderer/material/compute file:
+
+- **Always import from `three/webgpu` and `three/tsl`.** `import * as THREE from "three/webgpu"` for the renderer, scene objects, and `*NodeMaterial`s; TSL node functions (`Fn`, `instancedArray`, `time`, `vec3`, …) come from `three/tsl` (they are **not** re-exported from `three/webgpu`). Never import the classic WebGL `three` entry.
+- **Use TSL for all shading and compute.** Node materials (`MeshBasicNodeMaterial`, …) with TSL node graphs assigned to `.colorNode`, `.positionNode`, etc., and `Fn(() => …)().compute(n)` for compute passes. No GLSL strings, no classic (non-`Node`) materials.
+- **The Rendering BufferArray is the source of truth.** The renderer exposes `renderer.buffer` — a GPU-resident storage buffer created with TSL `instancedArray(count, type)` (`RenderBuffer` type). Compute nodes *write* it, material nodes *read* it (`buffer.element(i)`), and app state lives **in** it. This extends the "modules talk via typed data structures" rule onto the GPU: work through the buffer, don't shuttle CPU arrays around. CPU readback, when needed, is `await renderer.getArrayBufferAsync(attribute)` → wrap in the matching `TypedArray`.
+- **WebGPURenderer is async.** `createRenderer()` returns a `Promise` because `await renderer.init()` must run before the first frame (skip it → blank canvas, no error). The loop is `renderer.setAnimationLoop(() => { renderer.computeAsync(update); renderer.render(scene, camera); })`. `main.ts` therefore uses top-level `await`, which is why `vite.config.ts` sets `build.target: "esnext"`.
+- **Strict TS still applies.** The TSL node graph is loosely typed; keep graphs shallow so no `as`/`any` is needed (both are banned). If a cast ever seems unavoidable, wrap it in one typed helper rather than weakening the gates.
 
 ## Strict pass rules
 

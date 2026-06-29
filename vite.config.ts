@@ -7,4 +7,9 @@ export default defineConfig({
   server: {
     https: true,
   },
+  // WebGPU already requires a modern browser; target esnext so top-level await
+  // (used in src/main.ts to await the async WebGPU init) survives the build.
+  build: {
+    target: "esnext",
+  },
 });
