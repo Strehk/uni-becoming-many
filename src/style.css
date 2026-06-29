@@ -1,0 +1,28 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #0b0e14;
+  color: #e6e6e6;
+  overflow: hidden;
+}
+
+#app {
+  display: grid;
+  place-items: center;
+  width: 100vw;
+  height: 100vh;
+}
+
+canvas {
+  image-rendering: pixelated;
+  border: 1px solid #1c2230;
+}
