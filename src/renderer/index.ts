@@ -18,9 +18,24 @@
 // on and expose a `VRButton` overlay; entering VR needs HTTPS (we already serve it).
 
 // `three/addons/*` maps to `three/examples/jsm/*`; types ship with @types/three.
+import { Inspector } from "three/addons/inspector/Inspector.js";
 import { VRButton } from "three/addons/webxr/VRButton.js";
-import { Fn, instancedArray, time, vec3, vec4 } from "three/tsl";
+import {
+  Fn,
+  float,
+  instancedArray,
+  min,
+  mix,
+  positionWorld,
+  smoothstep,
+  time,
+  vec3,
+  vec4,
+} from "three/tsl";
 import * as THREE from "three/webgpu";
+
+/** Grid floor cell size, in world units (metres) — a spatial reference so flight is visible. */
+const GRID_CELL = 2;
 
 /**
  * Length of the Rendering BufferArray. For now it holds a single RGB color (one `vec3`);
@@ -49,8 +64,15 @@ export interface Renderer {
   readonly vrButton: HTMLElement;
   /** The Rendering BufferArray. Read from / write to this everywhere. */
   readonly buffer: RenderBuffer;
-  /** Begin the animation loop (compute → render each frame). */
-  start(): void;
+  /** The scene graph — add world objects (e.g. a player rig) to it. */
+  readonly scene: THREE.Scene;
+  /** The camera. Prefer moving a parent rig over mutating this directly (VR owns its pose). */
+  readonly camera: THREE.PerspectiveCamera;
+  /**
+   * Begin the animation loop (per-frame `onFrame` → compute → render).
+   * @param onFrame optional callback given the seconds elapsed since the previous frame.
+   */
+  start(onFrame?: (dtSeconds: number) => void): void;
   /** Stop the loop, drop listeners, and release GPU resources. */
   dispose(): void;
 }
@@ -63,10 +85,20 @@ export interface Renderer {
  * gives an automatic WebGL2 fallback when WebGPU is unavailable.
  */
 export async function createRenderer(): Promise<Renderer> {
-  const renderer = new THREE.WebGPURenderer({ antialias: true });
+  // `trackTimestamp` records GPU frame timing (needs the `timestamp-query` feature); the
+  // Inspector's Performance tab reads it.
+  const renderer = new THREE.WebGPURenderer({ antialias: true, trackTimestamp: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true; // route the render loop through WebXR when a session starts
+
+  // three.js WebGPU dev panel (Performance / Console / Parameters / Viewer tabs), as used
+  // in the official webgpu_compute_particles_fluid example. MUST be assigned BEFORE
+  // `init()` — the panel's DOM is mounted from inside the renderer's own init. It ships its
+  // own toggle button and self-mounts next to the canvas (via a MutationObserver if the
+  // canvas isn't in the DOM yet), so no manual DOM wiring is needed.
+  renderer.inspector = new Inspector();
+
   await renderer.init();
 
   // "Enter VR" button; three handles the session + per-eye cameras once it's clicked.
@@ -85,7 +117,7 @@ export async function createRenderer(): Promise<Renderer> {
 
   // Scene: one plane whose color is *read* from the buffer.
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
   // Eye height (~1.6 m). In VR the headset overrides this transform, but the rig's
   // floor-relative origin means starting here keeps the plane in front of the user.
   camera.position.set(0, 1.6, 0);
@@ -96,15 +128,34 @@ export async function createRenderer(): Promise<Renderer> {
   mesh.position.set(0, 1.6, -3); // 3 m ahead at eye height — visible in VR and on desktop
   scene.add(mesh);
 
+  // Grid floor: a spatial reference so flying reads as motion. Pure TSL — the colour is a
+  // function of world XZ position, so the grid stays fixed in the world as the player moves
+  // over it. Anti-aliased lines every `GRID_CELL` units.
+  const floorMaterial = new THREE.MeshBasicNodeMaterial();
+  floorMaterial.colorNode = Fn(() => {
+    const cell = positionWorld.xz.div(GRID_CELL);
+    const f = cell.fract();
+    const toLine = min(f, f.oneMinus()); // per-axis distance to the nearest grid line
+    const line = smoothstep(float(0), float(0.05), min(toLine.x, toLine.y)).oneMinus();
+    return vec4(mix(vec3(0.04, 0.06, 0.09), vec3(0.22, 0.32, 0.48), line), 1.0);
+  })();
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), floorMaterial);
+  floor.rotation.x = -Math.PI / 2; // lay the XY plane flat onto the XZ ground
+  scene.add(floor);
+
   const onResize = (): void => {
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
   };
 
-  function start(): void {
+  function start(onFrame?: (dtSeconds: number) => void): void {
     window.addEventListener("resize", onResize);
-    renderer.setAnimationLoop(() => {
+    let lastMs = 0;
+    renderer.setAnimationLoop((nowMs: number) => {
+      const dtSeconds = lastMs === 0 ? 0 : (nowMs - lastMs) / 1000;
+      lastMs = nowMs;
+      onFrame?.(dtSeconds);
       void renderer.computeAsync(update);
       renderer.render(scene, camera);
     });
@@ -116,5 +167,5 @@ export async function createRenderer(): Promise<Renderer> {
     renderer.dispose();
   }
 
-  return { canvas: renderer.domElement, vrButton, buffer, start, dispose };
+  return { canvas: renderer.domElement, vrButton, buffer, scene, camera, start, dispose };
 }

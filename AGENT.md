@@ -4,13 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Stack
 
-Vite 6 + vanilla TypeScript (no framework, no router — single page). Biome is the **only** formatter and linter (Prettier is intentionally not used). Package manager is **bun**. Dev server runs over **HTTPS by default** via `vite-plugin-mkcert`, which generates locally-trusted certs into `~/.vite-plugin-mkcert/` on first start.
+Vite 6 + vanilla TypeScript (no framework, no router — single page). Rendering is three.js (r185) WebGPU + TSL (see below). Biome is the **only** formatter and linter (Prettier is intentionally not used). Package manager is **bun**. Dev server runs over **HTTPS by default** via `vite-plugin-mkcert`, which generates locally-trusted certs into `~/.vite-plugin-mkcert/` on first start.
 
 ## Commands
 
 ```
 bun install
-bun run dev        # https://localhost:5173/  (mkcert HTTPS)
+bun run dev        # https://localhost:5173/  (mkcert HTTPS, LAN-exposed via --host)
+bun start <ip>     # dev server pointed at an ICAROS host, e.g. `bun start 192.168.1.50`
+                   #   (scripts/start.ts: normalizes to https://<ip>:5183, sets
+                   #    VITE_ICAROS_HOST, runs `bun run dev`)
 bun run build      # tsc (typecheck) then vite build -> dist/
 bun run preview    # serve the production build
 bun run typecheck  # tsc --noEmit
@@ -26,10 +29,12 @@ There is no test runner yet. `bun run build` is the gate — it typechecks befor
 `src/main.ts` is the single entry point (loaded by `index.html`). It wires three modules together end-to-end:
 
 - `src/terrain-generator/` — `generateTerrain(w, h, seed)` returns a `Terrain` (a row-major `Float32Array` heightfield, values in `[0,1]`). Pure/deterministic; current noise is a placeholder. Not yet wired into the GPU scene.
-- `src/renderer/` — `createRenderer()` returns a `Promise<Renderer>` owning a WebGPU `<canvas>`. See **WebGPU rendering** below.
+- `src/renderer/` — `createRenderer()` returns a `Promise<Renderer>` owning a WebGPU `<canvas>`. Exposes `scene` and `camera` (add world objects / rigs to `scene`), a TSL grid floor as a spatial reference, and `start(onFrame?)` — the loop calls `onFrame(dtSeconds)` before each compute+render. Status/debug HUD is the three.js WebGPU `Inspector` (`three/addons/inspector/Inspector.js`) — Performance (GPU frame timing via the renderer's `trackTimestamp`), Console, Parameters, Viewer tabs. It's assigned to `renderer.inspector` **before** `renderer.init()` and self-mounts next to the canvas with its own toggle button. See **WebGPU rendering** below.
 - `src/senses/` — `createSenses(target)` is the input/perception layer; currently tracks normalized pointer position over a target element.
+- `src/player/` — `createPlayer(camera, options)` is locomotion: it reparents the camera into a rig `Group` and flies forward at a constant `speed`, steered by a normalized `{ pitch, roll }` input via `update(dtSeconds, input)`. Move the **rig**, not the camera — in VR the headset writes the camera's pose within the rig, so flying the rig composes with head tracking. Add `player.rig` to `renderer.scene`.
+- `src/icaros/` — `connectHost(options)` connects this client to an ICAROS Host over the "neural-flight.v1" WebSocket contract: registers on `/ws/runtime` (`client.hello` → `client.registered`/`rejected`), heartbeats every 4s, and receives validated `control.orientation` frames from `/ws/control/main`. Returns a teardown that stops the heartbeat and closes both sockets. Host frames are treated as `unknown` and narrowed through typed guards before reaching the caller. Deliberately out of scope (per the contract): direct M5 access, `/ws/device`, `/api/m5-pairing`, and reconnection.
 
-Data flow: `main.ts` `await`s the renderer → mounts its canvas into `#app` → starts the loop → attaches senses to the canvas. Each module is a factory returning an interface; they depend on each other only through exported types. Keep that boundary: modules talk via typed data structures, not shared globals.
+Data flow: `main.ts` `await`s the renderer → mounts its canvas into `#app` → creates the player and adds `player.rig` to `renderer.scene` → attaches senses to the canvas → `connectHost(...)` to the ICAROS host, feeding validated orientation into a live `orientation` holder → `renderer.start(onFrame)` where each frame steers the player by that orientation and advances it (`player.update(dt, orientation)`). This closes the loop: ICAROS controller → `orientation` → player rig → camera. The teardown runs on `pagehide`. The host origin resolves most-specific-first: `?host=https://<host>:5183` query param → the `VITE_ICAROS_HOST` env baked in by `bun start <ip>` (see scripts/start.ts + src/vite-env.d.ts) → `https://localhost:5183`. The `clientUrl` the host launches is this page's own HTTPS origin, so run `bun start <ip>` / `bun run dev` (both `vite --host`) to expose a headset-reachable LAN address. Each module is a factory/entry function returning an interface or teardown; they depend on each other only through exported types. Keep that boundary: modules talk via typed data structures, not shared globals.
 
 Intra-`src` imports use explicit `.ts` extensions (e.g. `import ... from "./renderer/index.ts"`), enabled by `allowImportingTsExtensions`. Follow that convention in new files.
 
