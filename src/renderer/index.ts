@@ -58,6 +58,11 @@ function createBuffer() {
 export type RenderBuffer = ReturnType<typeof createBuffer>;
 
 export interface Renderer {
+  /**
+   * The underlying three.js WebGPU renderer. Exposed for dev tooling / diagnostics
+   * (frame stats, GPU timing); app code should prefer the higher-level fields below.
+   */
+  readonly instance: THREE.WebGPURenderer;
   /** The WebGPU canvas, ready to mount into the DOM. */
   readonly canvas: HTMLCanvasElement;
   /** "Enter VR" overlay button; mount it anywhere in the DOM. */
@@ -167,5 +172,14 @@ export async function createRenderer(): Promise<Renderer> {
     renderer.dispose();
   }
 
-  return { canvas: renderer.domElement, vrButton, buffer, scene, camera, start, dispose };
+  return {
+    instance: renderer,
+    canvas: renderer.domElement,
+    vrButton,
+    buffer,
+    scene,
+    camera,
+    start,
+    dispose,
+  };
 }

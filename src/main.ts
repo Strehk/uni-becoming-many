@@ -1,3 +1,4 @@
+import { createDevConsole } from "./dev-console/index.ts";
 import { type ControlOrientation, connectHost } from "./icaros/index.ts";
 import { createPlayer } from "./player/index.ts";
 import { createKeyboardControls } from "./player/keyboard-controls.ts";
@@ -20,6 +21,11 @@ const player = createPlayer(renderer.camera, { speed: 6 });
 renderer.scene.add(player.rig);
 
 createSenses(renderer.canvas);
+
+// Dev console: press "C" for a live FPS / render-stats overlay (frame-time graph, draw calls,
+// GPU resources, timing). Purely diagnostic; wraps the renderer's `render` for GPU timing.
+const devConsole = createDevConsole(renderer.instance, { label: "becoming-many" });
+window.addEventListener("pagehide", () => devConsole.dispose());
 
 // Debug controls: WASD / arrows to steer, Shift for 2× speed, Space to hold position.
 // Overrides the ICAROS stream while any steering key is held (see the frame loop below).
