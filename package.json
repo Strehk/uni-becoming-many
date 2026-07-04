@@ -15,6 +15,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@theatre/studio": "^0.7.2",
     "@types/three": "^0.185.0",
     "typescript": "^5.7.3",
     "vite": "^6.0.7",
@@ -22,6 +23,7 @@
   },
   "trustedDependencies": ["@biomejs/biome"],
   "dependencies": {
+    "@theatre/core": "^0.7.2",
     "three": "^0.185.0"
   }
 }

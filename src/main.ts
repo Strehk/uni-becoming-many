@@ -1,11 +1,17 @@
 import { time } from "three/tsl";
+import { SoundBus, SoundDirector } from "./audio/index.ts";
+import { createBeacon } from "./behaviour/index.ts";
 import { createDevConsole } from "./dev-console/index.ts";
 import { type ControlOrientation, connectHost } from "./icaros/index.ts";
 import { createPlayer } from "./player/index.ts";
 import { createKeyboardControls } from "./player/keyboard-controls.ts";
 import { createRenderer } from "./renderer/index.ts";
 import { createSenses } from "./senses/index.ts";
+import { bus, signals } from "./signals/index.ts";
 import { createTerrainWorld } from "./terrain/index.ts";
+import { initTheatre, pumpAuthored } from "./theatre/index.ts";
+import { Clock } from "./time/clock.ts";
+import { createTransport } from "./time/transport.ts";
 import "./style.css";
 
 const app = document.querySelector<HTMLDivElement>("#app");
@@ -18,45 +24,67 @@ const renderer = await createRenderer();
 app.append(renderer.canvas);
 document.body.append(renderer.vrButton); // "Enter VR" overlay
 
+// ── The time spine ──────────────────────────────────────────────────────────
+// The single authority on time. The frame loop feeds it real dt; everything animated (authored or
+// emergent) advances through it, so pause/seek/timeScale govern the whole world. See docs §2.
+const clock = new Clock();
+// Keyboard transport for authoring/debugging: K pause, J/L seek, ,/. timeScale, 0 reset.
+const transport = createTransport(clock);
+window.addEventListener("pagehide", () => transport.dispose());
+
 // Player: carries the renderer's camera and flies forward at a constant speed.
 const player = createPlayer(renderer.camera, { speed: 6 });
 renderer.scene.add(player.rig);
 
-// Perception layer (pointer over the canvas). Passed to the terrain so the sense
-// look (view bubble + edge glow) tracks attention live.
-const senses = createSenses(renderer.canvas);
+// Streaming terrain: a chunked, worker-generated world that loads around the player.
+const { world } = createTerrainWorld({ scene: renderer.scene, uTime: time });
 
-// Streaming terrain: a chunked, worker-generated world that loads around the
-// player. `world.group` is added to the scene internally; we drive it each frame
-// with the rig's world XZ (see the loop below). The default `worldgen` provider
-// runs the two-WFC-pass pipeline (biomes + landforms) + hydrology in a worker.
-const { world } = createTerrainWorld({ scene: renderer.scene, uTime: time, senses });
+// ── The sense state machine ─────────────────────────────────────────────────
+// Keys 1–7 / [ ] write `signals.activeSense`; the manager eases the view uniforms toward it and
+// publishes `signals.senseProgress`. Bind `senses.uniforms` into the terrain material to make the
+// transitions drive shading (follow-up wiring).
+const senses = createSenses({ start: "normal" });
+window.addEventListener("pagehide", () => senses.dispose());
 
-// Dev console: press "C" for a live FPS / render-stats overlay (frame-time graph, draw calls,
-// GPU resources, timing). Purely diagnostic; wraps the renderer's `render` for GPU timing.
+// ── Theatre.js: authored envelopes, slaved to the clock ─────────────────────
+// Dev loads @theatre/studio (dynamic import ⇒ out of the prod bundle); prod loads state.json.
+const theatre = await initTheatre();
+window.addEventListener("pagehide", () => theatre.dispose());
+
+// ── Audio director on the bus ───────────────────────────────────────────────
+// Cues decouple *what* plays from *why*: an `event` cue plays whenever anyone emits `cue:<id>`
+// (the beacon below emits `cue:chirp`); a `time` cue is scheduled on the clock and obeys
+// pause/seek/timeScale. Asset URLs are placeholders until the sound pipeline lands — a missing
+// file warns once and is otherwise inert.
+const soundBus = new SoundBus();
+const director = new SoundDirector(soundBus, clock, bus);
+director.cue({ id: "chirp", src: "/audio/chirp.ogg", gain: 0.7, trigger: { kind: "event" } });
+window.addEventListener("pagehide", () => director.dispose());
+
+// ── An emergent object instance (the modular payoff) ────────────────────────
+// Reads signals, follows the active sense, and emits its own `cue:chirp` when the player nears it
+// in echo sense — zero central wiring. Placed a short flight ahead of the spawn point.
+const beacon = createBeacon(renderer.scene, {
+  position: { x: 0, y: 1.6, z: -60 },
+  activeSense: "echo",
+});
+window.addEventListener("pagehide", () => beacon.dispose());
+
+// Dev console: press "C" for a live FPS / render-stats overlay.
 const devConsole = createDevConsole(renderer.instance, { label: "becoming-many" });
 window.addEventListener("pagehide", () => devConsole.dispose());
 
 // Debug controls: WASD / arrows to steer, Shift for 2× speed, Space to hold position.
-// Overrides the ICAROS stream while any steering key is held (see the frame loop below).
 const keyboard = createKeyboardControls();
 window.addEventListener("pagehide", () => keyboard.dispose());
 
 // --- ICAROS host connection -------------------------------------------------
-// Host origin resolution, most-specific first: `?host=https://<host>:5183` query param →
-// the `VITE_ICAROS_HOST` env baked in at dev-server start (`bun start <ip>`, see
-// scripts/start.ts) → localhost. This lets the headset open the plain dev URL while still
-// allowing a per-load override. `clientUrl` is this page's own HTTPS origin — the address
-// the host redirects to on launch, so it must be reachable by the headset (serve dev with
-// `bun run dev` / `bun start <ip>`, both `vite --host`, to expose the LAN IP over HTTPS).
 const hostOrigin =
   new URLSearchParams(window.location.search).get("host") ??
   import.meta.env.VITE_ICAROS_HOST ??
   "https://localhost:5183";
 
-// Latest validated controller orientation; steers the player each frame (see the loop
-// below). Updated in place by `applyOrientation`, so it stays at neutral until the host
-// streams data — the player then flies straight and level.
+// Latest validated controller orientation; steers the player each frame.
 const orientation: { pitch: number; roll: number; quality: number } = {
   pitch: 0,
   roll: 0,
@@ -67,6 +95,8 @@ const applyOrientation = (next: ControlOrientation): void => {
   orientation.pitch = next.pitch;
   orientation.roll = next.roll;
   orientation.quality = next.quality;
+  // Publish control quality onto the substrate so anything can react (e.g. a "signal lost" cue).
+  signals.controlQuality.value = next.quality;
 };
 
 const disconnectHost = connectHost({
@@ -79,17 +109,22 @@ const disconnectHost = connectHost({
   onRegistered: () => console.info(`[icaros] registered with host ${hostOrigin}`),
   onRejected: (reason) => console.warn(`[icaros] host rejected client: ${reason}`),
 });
-
-// Cleanup: stop the heartbeat and close both sockets when the page goes away.
 window.addEventListener("pagehide", disconnectHost);
 
-// Fly: each frame the keyboard's `turn` (A/D) drives the player's heading so the course curves
-// and persists — you can come about — while its `pitch` (W/S) is a spring-centered look that
-// tilts travel up/down and re-levels on release. Both feed in only while a debug key is held
-// (ICAROS steers otherwise). Throttle (Shift) and hold (Space) always come from the keyboard.
-// Its `update` advances the springs; read its state right after.
+// Live handle to the mutated-in-place pose signal — the player writes into it each frame.
+const pose = signals.playerPose.peek();
+
+// ── Frame loop — the §5 ordering: PRODUCE → REACT → CONSUME ─────────────────
 renderer.start((dtSeconds) => {
-  keyboard.update(dtSeconds);
+  // ── PRODUCE ──
+  clock.advance(dtSeconds); // 1. spine advances; time-cues fire
+  signals.time.value = clock.now; // publish time onto the substrate (the one clock→signals bridge)
+  if (clock.running) {
+    theatre.setPosition(clock.now); // 2. slave Theatre's playhead to the spine (Studio owns it when paused)
+  }
+  pumpAuthored(theatre.arc); // 3. authored Theatre values → authored signals (the one-writer bridge)
+
+  keyboard.update(dtSeconds); // 4. input → player → emergent signals
   const { locomotion } = keyboard;
   player.look(locomotion.pitch);
   player.update(dtSeconds, {
@@ -98,8 +133,19 @@ renderer.start((dtSeconds) => {
     throttle: locomotion.throttle,
     paused: locomotion.paused,
   });
-  // Stream chunks around the player's world position (rig XZ).
-  world.update(player.rig.position.x, player.rig.position.z);
+  // Publish the player's world position (mutated in place — hot-path peek elsewhere).
+  pose.x = player.rig.position.x;
+  pose.y = player.rig.position.y;
+  pose.z = player.rig.position.z;
+
+  senses.update(dtSeconds); // writes senseProgress; eases the view uniforms
+
+  // ── REACT ──
+  bus.tick(); // 5. evaluate `when` crossings (proximity / sense / threshold) → emit
+  beacon.update(dtSeconds); // emergent object reads signals + bus, decides locally, may emit cues
+
+  // ── CONSUME ──
+  world.update(pose.x, pose.z); // 6. stream chunks around the player
 });
 
 // Release worker + GPU resources when the page goes away.
