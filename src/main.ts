@@ -1,5 +1,6 @@
 import { type ControlOrientation, connectHost } from "./icaros/index.ts";
 import { createPlayer } from "./player/index.ts";
+import { createKeyboardControls } from "./player/keyboard-controls.ts";
 import { createRenderer } from "./renderer/index.ts";
 import { createSenses } from "./senses/index.ts";
 import "./style.css";
@@ -19,6 +20,11 @@ const player = createPlayer(renderer.camera, { speed: 6 });
 renderer.scene.add(player.rig);
 
 createSenses(renderer.canvas);
+
+// Debug controls: WASD / arrows to steer, Shift for 2× speed, Space to hold position.
+// Overrides the ICAROS stream while any steering key is held (see the frame loop below).
+const keyboard = createKeyboardControls();
+window.addEventListener("pagehide", () => keyboard.dispose());
 
 // --- ICAROS host connection -------------------------------------------------
 // Host origin resolution, most-specific first: `?host=https://<host>:5183` query param →
@@ -61,6 +67,19 @@ const disconnectHost = connectHost({
 // Cleanup: stop the heartbeat and close both sockets when the page goes away.
 window.addEventListener("pagehide", disconnectHost);
 
-// Fly: each frame, steer the player by the latest controller orientation, then let it
-// advance forward at its constant speed.
-renderer.start((dtSeconds) => player.update(dtSeconds, orientation));
+// Fly: each frame the keyboard's `turn` (A/D) drives the player's heading so the course curves
+// and persists — you can come about — while its `pitch` (W/S) is a spring-centered look that
+// tilts travel up/down and re-levels on release. Both feed in only while a debug key is held
+// (ICAROS steers otherwise). Throttle (Shift) and hold (Space) always come from the keyboard.
+// Its `update` advances the springs; read its state right after.
+renderer.start((dtSeconds) => {
+  keyboard.update(dtSeconds);
+  const { locomotion } = keyboard;
+  player.look(locomotion.pitch);
+  player.update(dtSeconds, {
+    pitch: keyboard.steering ? 0 : orientation.pitch,
+    roll: keyboard.steering ? locomotion.turn : orientation.roll,
+    throttle: locomotion.throttle,
+    paused: locomotion.paused,
+  });
+});
