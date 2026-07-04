@@ -1,9 +1,11 @@
+import { time } from "three/tsl";
 import { createDevConsole } from "./dev-console/index.ts";
 import { type ControlOrientation, connectHost } from "./icaros/index.ts";
 import { createPlayer } from "./player/index.ts";
 import { createKeyboardControls } from "./player/keyboard-controls.ts";
 import { createRenderer } from "./renderer/index.ts";
 import { createSenses } from "./senses/index.ts";
+import { createTerrainWorld } from "./terrain/index.ts";
 import "./style.css";
 
 const app = document.querySelector<HTMLDivElement>("#app");
@@ -20,7 +22,15 @@ document.body.append(renderer.vrButton); // "Enter VR" overlay
 const player = createPlayer(renderer.camera, { speed: 6 });
 renderer.scene.add(player.rig);
 
-createSenses(renderer.canvas);
+// Perception layer (pointer over the canvas). Passed to the terrain so the sense
+// look (view bubble + edge glow) tracks attention live.
+const senses = createSenses(renderer.canvas);
+
+// Streaming terrain: a chunked, worker-generated world that loads around the
+// player. `world.group` is added to the scene internally; we drive it each frame
+// with the rig's world XZ (see the loop below). The default `worldgen` provider
+// runs the two-WFC-pass pipeline (biomes + landforms) + hydrology in a worker.
+const { world } = createTerrainWorld({ scene: renderer.scene, uTime: time, senses });
 
 // Dev console: press "C" for a live FPS / render-stats overlay (frame-time graph, draw calls,
 // GPU resources, timing). Purely diagnostic; wraps the renderer's `render` for GPU timing.
@@ -88,4 +98,9 @@ renderer.start((dtSeconds) => {
     throttle: locomotion.throttle,
     paused: locomotion.paused,
   });
+  // Stream chunks around the player's world position (rig XZ).
+  world.update(player.rig.position.x, player.rig.position.z);
 });
+
+// Release worker + GPU resources when the page goes away.
+window.addEventListener("pagehide", () => world.dispose());
