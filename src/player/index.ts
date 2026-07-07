@@ -48,6 +48,15 @@ export type PlayerOptions = Readonly<{
   yawRate?: number;
   /** Pitch-look angle at full deflection, radians. Bounds how far `look` tilts travel. */
   lookAngle?: number;
+  /**
+   * Optional ground-floor query. Given the rig's world XZ, returns the terrain
+   * height beneath it, or `null` when unknown (no chunk streamed in there yet) — in
+   * which case no clamp is applied. When it returns a height, the rig is held at
+   * least `clearance` above it, so the player can never sink into the terrain.
+   */
+  floor?: (x: number, z: number) => number | null;
+  /** Metres to keep between the rig and the terrain floor. Defaults to 3. */
+  clearance?: number;
 }>;
 
 export interface Player {
@@ -76,6 +85,8 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
   const pitchRate = options.pitchRate ?? 0.8;
   const yawRate = options.yawRate ?? 0.8;
   const lookAngle = options.lookAngle ?? 0.7; // ~40° at full deflection
+  const floor = options.floor;
+  const clearance = options.clearance ?? 3;
 
   const rig = new THREE.Group();
   rig.name = "player-rig";
@@ -99,14 +110,26 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
     rig.rotateX(input.pitch * pitchRate * dtSeconds);
     rig.rotateY(-input.roll * yawRate * dtSeconds); // roll > 0 turns right
 
-    if (input.paused) {
-      return;
+    if (!input.paused) {
+      // Fly along where we're actually looking = rig heading * gimbal pitch. (The rig's parent is
+      // the scene, assumed unrotated, so the rig's local quaternion is its world one.)
+      worldQuat.copy(rig.quaternion).multiply(gimbal.quaternion);
+      forward.set(0, 0, -1).applyQuaternion(worldQuat);
+      rig.position.addScaledVector(forward, speed * (input.throttle ?? 1) * dtSeconds);
     }
-    // Fly along where we're actually looking = rig heading * gimbal pitch. (The rig's parent is
-    // the scene, assumed unrotated, so the rig's local quaternion is its world one.)
-    worldQuat.copy(rig.quaternion).multiply(gimbal.quaternion);
-    forward.set(0, 0, -1).applyQuaternion(worldQuat);
-    rig.position.addScaledVector(forward, speed * (input.throttle ?? 1) * dtSeconds);
+
+    // Terrain floor: never let the rig sink into (or below a small margin above) the
+    // ground. Runs even when paused so a chunk streaming in underfoot still lifts us.
+    // A null floor means "no surface known here yet" — leave altitude untouched.
+    applyFloor();
+  }
+
+  function applyFloor(): void {
+    if (!floor) return;
+    const ground = floor(rig.position.x, rig.position.z);
+    if (ground === null) return;
+    const min = ground + clearance;
+    if (rig.position.y < min) rig.position.y = min;
   }
 
   function look(pitch: number): void {

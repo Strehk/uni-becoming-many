@@ -32,12 +32,18 @@ const clock = new Clock();
 const transport = createTransport(clock);
 window.addEventListener("pagehide", () => transport.dispose());
 
-// Player: carries the renderer's camera and flies forward at a constant speed.
-const player = createPlayer(renderer.camera, { speed: 6 });
-renderer.scene.add(player.rig);
-
 // Streaming terrain: a chunked, worker-generated world that loads around the player.
 const { world } = createTerrainWorld({ scene: renderer.scene, uTime: time });
+
+// Player: carries the renderer's camera and flies forward at a constant speed. The
+// `floor` callback keeps the rig a little above the streamed ground so it can never
+// dive through the terrain; it returns null over not-yet-loaded chunks (no clamp).
+const player = createPlayer(renderer.camera, {
+  speed: 6,
+  clearance: 4,
+  floor: (x, z) => world.groundHeightAt(x, z),
+});
+renderer.scene.add(player.rig);
 
 // ── The sense state machine ─────────────────────────────────────────────────
 // Keys 1–7 / [ ] write `signals.activeSense`; the manager eases the view uniforms toward it and

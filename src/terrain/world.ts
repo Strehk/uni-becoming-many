@@ -147,6 +147,14 @@ export class TerrainWorld {
     return this.provider.height ? this.provider.height(x, z, this.cfg) : 0;
   }
 
+  /** Ground height at (x,z), or `null` when no surface is known there yet — the
+   *  owning chunk hasn't streamed in (chunk providers) or the provider is
+   *  height-less. The flight floor uses this to avoid clamping over the void. */
+  groundHeightAt(x: number, z: number): number | null {
+    if (this.provider.kind === "chunk") return this.heightCache.sampleOrNull(x, z);
+    return this.provider.height ? this.provider.height(x, z, this.cfg) : null;
+  }
+
   /** Swap the terrain algorithm live; rebuilds every chunk. Keeps the current
    *  config (shared shape) unless `config` overrides fields. */
   setProvider(id: string, config?: Partial<TerrainConfig>): void {

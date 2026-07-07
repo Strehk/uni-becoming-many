@@ -95,9 +95,15 @@ export class ChunkHeightCache {
 
   /** World ground height at (x,z), or `fallback` if the owning chunk isn't loaded. */
   sample(x: number, z: number, fallback = 0): number {
+    return this.sampleOrNull(x, z) ?? fallback;
+  }
+
+  /** World ground height at (x,z), or `null` if the owning chunk isn't loaded — so
+   *  callers (e.g. the flight floor) can tell "no data" apart from "ground is 0". */
+  sampleOrNull(x: number, z: number): number | null {
     const gx = worldToCell(x, this.chunkSize);
     const gz = worldToCell(z, this.chunkSize);
     const e = this.entries.get(chunkKey(gx, gz));
-    return e ? sampleEntry(e, x, z) : fallback;
+    return e ? sampleEntry(e, x, z) : null;
   }
 }
