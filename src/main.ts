@@ -4,6 +4,7 @@ import { createDevConsole } from "./dev-console/index.ts";
 import { type ControlOrientation, connectHost } from "./icaros/index.ts";
 import { createPlayer } from "./player/index.ts";
 import { createKeyboardControls } from "./player/keyboard-controls.ts";
+import { createMinimap } from "./minimap/index.ts";
 import { createRenderer } from "./renderer/index.ts";
 import { createSenses } from "./senses/index.ts";
 import { bus, signals } from "./signals/index.ts";
@@ -108,6 +109,20 @@ window.addEventListener("pagehide", disconnectHost);
 
 // Live handle to the mutated-in-place pose signal — the player writes into it each frame.
 const pose = signals.playerPose.peek();
+
+// Biome minimap: a top-down chunk/biome debug overlay hosted inside the C console.
+// Heading = camera forward on XZ, read from the camera's world matrix (forward = −Z
+// column = (−m8, −m9, −m10)) so no extra three import is needed here.
+const minimap = createMinimap(world.biomeSource, () => {
+  const m = renderer.camera.matrixWorld.elements;
+  return { x: pose.x, z: pose.z, heading: Math.atan2(-(m[8] ?? 0), m[10] ?? 1) };
+});
+devConsole.addSection(minimap.element);
+const detachMinimap = devConsole.onOpenChange((open) => minimap.setActive(open));
+window.addEventListener("pagehide", () => {
+  detachMinimap();
+  minimap.dispose();
+});
 
 // ── Frame loop — the §5 ordering: PRODUCE → REACT → CONSUME ─────────────────
 renderer.start((dtSeconds) => {

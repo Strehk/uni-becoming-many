@@ -47,6 +47,23 @@ export interface SenseSource {
   readonly pointer: { x: number; y: number };
 }
 
+/** One active chunk, as read by debug overlays. TerrainChunk satisfies this
+ *  structurally, so no class import leaks to the consumer. */
+export interface BiomeChunkView {
+  readonly gridX: number;
+  readonly gridZ: number;
+  /** Per-vertex biome id, (segments+1)² row-major; absent for pointwise providers. */
+  readonly biome?: Uint8Array;
+}
+
+/** Read-only view of the streamed world for debug overlays (e.g. the biome
+ *  minimap). Structural on purpose so consumers never import TerrainWorld. */
+export interface BiomeChunkSource {
+  readonly chunkSize: number;
+  readonly segments: number;
+  chunks(): Iterable<BiomeChunkView>;
+}
+
 export interface TerrainWorldOptions {
   scene: THREE.Scene;
   /** Live sense uniforms (shared with the rest of the experience). */
@@ -171,6 +188,17 @@ export class TerrainWorld {
 
   get providerId(): string {
     return this.provider.id;
+  }
+
+  /** Read-only view of active chunks + tiling for debug overlays (e.g. the biome
+   *  minimap). `chunks()` returns the live active-set iterator, so it reflects
+   *  streaming with zero allocation. */
+  get biomeSource(): BiomeChunkSource {
+    return {
+      chunkSize: this.chunkSize,
+      segments: this.segments,
+      chunks: () => this.scheduler.chunks(),
+    };
   }
 
   dispose(): void {

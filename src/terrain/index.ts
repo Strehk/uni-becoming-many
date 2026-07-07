@@ -52,6 +52,7 @@ export function createTerrainWorld(opts: CreateTerrainWorldOptions): CreateTerra
 }
 
 export { TerrainWorld, type SenseSource } from "./world.ts";
+export type { BiomeChunkSource, BiomeChunkView } from "./world.ts";
 export type { TerrainConfig, TerrainProvider } from "./provider.ts";
 export type { StreamingConfig } from "./scheduler.ts";
 export { createSenseUniforms, type KitUniforms } from "./render/uniforms.ts";

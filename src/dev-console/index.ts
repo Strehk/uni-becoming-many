@@ -26,6 +26,14 @@ export type DevConsoleOptions = Readonly<{
 export interface DevConsole {
   /** Show/hide the drawer. */
   setOpen(open: boolean): void;
+  /** Current open state. */
+  readonly open: boolean;
+  /** Mount an external section into the drawer (inserted above the footer). Lets
+   *  other debug modules — e.g. the biome minimap — live inside the C console. */
+  addSection(node: HTMLElement): void;
+  /** Subscribe to open/close. Fires once immediately with the current state.
+   *  Returns an unsubscribe. */
+  onOpenChange(cb: (open: boolean) => void): () => void;
   /** Remove listeners, stop sampling, restore the wrapped `render`, and detach the DOM. */
   dispose(): void;
 }
@@ -93,10 +101,14 @@ export function createDevConsole(
   const heapRow = node("heapRow");
   const graph = drawer.querySelector<HTMLCanvasElement>("[data-devc-graph]");
 
+  const openListeners = new Set<(open: boolean) => void>();
   const setOpen = (next: boolean): void => {
     open = next;
     drawer.classList.toggle("open", open);
     tab.style.display = open ? "none" : "";
+    for (const cb of openListeners) {
+      cb(open);
+    }
   };
   setOpen(open);
 
@@ -261,12 +273,33 @@ export function createDevConsole(
   window.addEventListener("keydown", onKeydown);
   raf = requestAnimationFrame(sample);
 
+  const footer = drawer.querySelector(".devc-foot");
+
   return {
     setOpen,
+    get open(): boolean {
+      return open;
+    },
+    addSection(node: HTMLElement): void {
+      // Above the footer if present, else appended to the drawer.
+      if (footer) {
+        footer.before(node);
+      } else {
+        drawer.append(node);
+      }
+    },
+    onOpenChange(cb: (open: boolean) => void): () => void {
+      openListeners.add(cb);
+      cb(open); // sync the host to the current state on subscribe
+      return () => {
+        openListeners.delete(cb);
+      };
+    },
     dispose(): void {
       window.removeEventListener("keydown", onKeydown);
       cancelAnimationFrame(raf);
       renderer.render = originalRender;
+      openListeners.clear();
       tab.remove();
       drawer.remove();
     },
