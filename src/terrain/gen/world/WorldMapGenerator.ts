@@ -13,7 +13,7 @@
 //
 // PURE CPU — no three, no DOM.
 
-import { classifyChunkFromMacro } from "../BiomeGenerator.ts";
+import { classifyChunk } from "../BiomeGenerator.ts";
 import { baseMoisture01, fineHeight01, temperature01 } from "../fields.ts";
 import { computeSlope } from "../hydrology/SlopeMapGenerator.ts";
 import { computeWaterDistanceAndDerived } from "../hydrology/WaterDistanceMapGenerator.ts";
@@ -181,7 +181,12 @@ export class WorldMapGenerator {
     // Derived CPU passes on the padded buffer.
     pad.slopeMap = computeSlope(pad.heightMap, W);
     computeWaterDistanceAndDerived(pad, params);
-    classifyChunkFromMacro(pad, params, pOx, pOy);
+    // Land biomes are classified per-pixel from the continuous fields (soft,
+    // terrain-following boundaries) rather than stamped from the coarse macro WFC
+    // cells (which read as 32 m squares). The macro plan still drives landform
+    // (Pass B) + hydrology; `classifyChunkFromMacro` remains for the block-style
+    // variant. The stamped `pad.macroMap` is retained for debug/overlays.
+    classifyChunk(pad, params, pOx, pOy);
 
     // Water surface + mask (after carving so rivers are present): ocean at sea
     // level, lakes flat at their surface, rivers following the carved channel.
