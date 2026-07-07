@@ -1,6 +1,5 @@
 import { time } from "three/tsl";
 import { SoundBus, SoundDirector } from "./audio/index.ts";
-import { createBeacon } from "./behaviour/index.ts";
 import { createDevConsole } from "./dev-console/index.ts";
 import { type ControlOrientation, connectHost } from "./icaros/index.ts";
 import { createPlayer } from "./player/index.ts";
@@ -58,23 +57,13 @@ const theatre = await initTheatre();
 window.addEventListener("pagehide", () => theatre.dispose());
 
 // ── Audio director on the bus ───────────────────────────────────────────────
-// Cues decouple *what* plays from *why*: an `event` cue plays whenever anyone emits `cue:<id>`
-// (the beacon below emits `cue:chirp`); a `time` cue is scheduled on the clock and obeys
-// pause/seek/timeScale. Asset URLs are placeholders until the sound pipeline lands — a missing
-// file warns once and is otherwise inert.
+// Cues decouple *what* plays from *why*: an `event` cue plays whenever anyone emits `cue:<id>`;
+// a `time` cue is scheduled on the clock and obeys pause/seek/timeScale. Asset URLs are
+// placeholders until the sound pipeline lands — a missing file warns once and is otherwise inert.
 const soundBus = new SoundBus();
 const director = new SoundDirector(soundBus, clock, bus);
 director.cue({ id: "chirp", src: "/audio/chirp.ogg", gain: 0.7, trigger: { kind: "event" } });
 window.addEventListener("pagehide", () => director.dispose());
-
-// ── An emergent object instance (the modular payoff) ────────────────────────
-// Reads signals, follows the active sense, and emits its own `cue:chirp` when the player nears it
-// in echo sense — zero central wiring. Placed a short flight ahead of the spawn point.
-const beacon = createBeacon(renderer.scene, {
-  position: { x: 0, y: 1.6, z: -60 },
-  activeSense: "echo",
-});
-window.addEventListener("pagehide", () => beacon.dispose());
 
 // Dev console: press "C" for a live FPS / render-stats overlay.
 const devConsole = createDevConsole(renderer.instance, { label: "becoming-many" });
@@ -148,7 +137,6 @@ renderer.start((dtSeconds) => {
 
   // ── REACT ──
   bus.tick(); // 5. evaluate `when` crossings (proximity / sense / threshold) → emit
-  beacon.update(dtSeconds); // emergent object reads signals + bus, decides locally, may emit cues
 
   // ── CONSUME ──
   world.update(pose.x, pose.z); // 6. stream chunks around the player
