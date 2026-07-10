@@ -33,7 +33,9 @@ export function buildWaterArrays(
   const colors: number[] = [];
 
   buildStillWater(sampler, detail, params, segments, positions, colors);
-  buildRivers(sampler, detail, params, segments, positions, colors);
+  if (params.riverWaterVisible > 0) {
+    buildRivers(sampler, detail, params, segments, positions, colors);
+  }
 
   if (positions.length === 0) return null;
   return {

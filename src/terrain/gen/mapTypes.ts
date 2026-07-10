@@ -111,6 +111,12 @@ export interface GenParams {
   cliffStrength: number; // extra shaping on steep slopes / rocky biomes
   riverValleyStrength: number; // how strongly rivers carve a visible 3D valley
   riverWaterOffset: number; // world units the river surface sits above its bed
+  /**
+   * 0 hides the river water ribbons; >0 draws them. Hydrology is unaffected either
+   * way — rivers still carve their valleys (`riverValleyStrength`), feed the flow
+   * and water-distance maps, and drive lake spill. Only the drawn surface goes away.
+   */
+  riverWaterVisible: number;
   lakeWaterOffset: number; // world units the lake surface is nudged by
   shoreSmoothing: number; // how strongly detail flattens toward water
   snowHeight: number; // normalised height where snow begins
@@ -174,6 +180,7 @@ export const DEFAULT_PARAMS: GenParams = {
   cliffStrength: 1.0,
   riverValleyStrength: 1.0,
   riverWaterOffset: 0.8,
+  riverWaterVisible: 0, // rivers omitted for now — the ribbons don't read well
   lakeWaterOffset: 0.0,
   shoreSmoothing: 1.0,
   snowHeight: 0.8,
