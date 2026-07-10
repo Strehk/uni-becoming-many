@@ -57,7 +57,6 @@ export async function createRenderer(): Promise<Renderer> {
   const renderer = new THREE.WebGPURenderer({
     antialias: true,
     trackTimestamp: true,
-    forceWebGL: true,
   });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
