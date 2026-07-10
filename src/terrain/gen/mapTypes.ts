@@ -78,6 +78,13 @@ export interface GenParams {
   lakeFrequency: number;
   lakeSpillTolerance: number;
   lakeMaxHeight: number; // normalised height above which basins are not made lakes
+  /**
+   * Normalised height the lake surface sits BELOW its spill level. On very low
+   * slopes the waterline is extremely sensitive to the surface height, so a
+   * spill-exact sheet crept far out over near-flat ground. Constant per basin, so
+   * the surface stays perfectly flat.
+   */
+  lakeLevelDrop: number;
 
   // surface
   shoreWidth: number;
@@ -144,6 +151,7 @@ export const DEFAULT_PARAMS: GenParams = {
   lakeFrequency: 0.4,
   lakeSpillTolerance: 0.02,
   lakeMaxHeight: 0.74,
+  lakeLevelDrop: 0.004, // ≈0.4 m at typical lake elevations
 
   shoreWidth: 0.5,
   vegetationDensity: 1.0,

@@ -156,14 +156,25 @@ export class TerrainDetailGenerator {
 
     let heightNorm = macroH + detail;
 
-    // Lake basin: clamp the bed below the flat lake surface so lakes are real
-    // basins with no terrain spikes poking through the water.
-    if (lake > 0.08) {
-      const surf = s.sampleWaterSurface(u, v);
-      const basinDepth = 0.01 + lake * 0.025;
-      const targetBed = surf - basinDepth;
-      const k = Math.min(1, lake * 1.3);
-      heightNorm = heightNorm + (Math.min(heightNorm, targetBed) - heightNorm) * k;
+    // Lake basin: shape a bowl UNDER the flat lake surface.
+    //
+    // Driven by the NATURAL water depth (surf − bed), never by `lake`. Two reasons:
+    //   - `waterSurfaceMap` is 0 outside the lake footprint, and `lakeMap` is the same
+    //     macro field amplified ×8 (WorldMapGenerator), so `lake` is nonzero over a wide
+    //     band where `surf` is still 0. Clamping toward `surf` there drove the bed to the
+    //     0 floor — a ~21 m trench ringing every lake, with the terrain climbing back out
+    //     of it. Hence the `surf > 0` guard.
+    //   - natDepth vanishes exactly at the waterline, so the bed rises continuously to
+    //     meet the flat sheet at the shore instead of stopping short of it.
+    const surf = s.sampleWaterSurface(u, v);
+    if (surf > 0) {
+      const natDepth = surf - heightNorm; // > 0 only where genuinely submerged
+      if (natDepth > 0) {
+        // Deepen toward the basin interior; 0 at the shore. `basinDepth` is the dial.
+        const basinDepth = 0.05;
+        const deepen = basinDepth * smoothstep(0, 0.05, natDepth);
+        heightNorm = Math.min(heightNorm, surf - deepen);
+      }
     }
 
     // Lower-clamp only. Upper bound intentionally loose (NOT 1.0) so ridge detail
