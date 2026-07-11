@@ -22,8 +22,13 @@ import {
 import { TAU, chunkSeed, composeMatrix, mulberry32 } from "./matrix.ts";
 import type { SpeciesDef } from "./species.ts";
 
-/** How many candidates we test per available slot before giving up on a chunk. */
-const ATTEMPTS_PER_SLOT = 4;
+/**
+ * How many candidates we test per slot before giving up. The loop breaks the moment
+ * the cap is filled, so a favourable biome pays little of this; the headroom only
+ * matters in mixed chunks, where more tries let a species actually reach its cap
+ * instead of thinning out because half the candidates fell on the wrong biome.
+ */
+const ATTEMPTS_PER_SLOT = 8;
 /** Maximum lean off vertical, radians. Enough to look grown, not enough to look broken. */
 const MAX_TILT = 0.05;
 
