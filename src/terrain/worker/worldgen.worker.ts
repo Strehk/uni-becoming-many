@@ -12,6 +12,7 @@
 
 /// <reference lib="webworker" />
 
+import { downsampleFields } from "../gen/fields.downsample.ts";
 import { TerrainDetailGenerator } from "../gen/height/TerrainDetailGenerator.ts";
 import { TerrainSampler } from "../gen/height/TerrainSampler.ts";
 import { buildChunkArrays } from "../gen/height/mesh.ts";
@@ -65,6 +66,9 @@ async function build(msg: WorldgenBuildRequest): Promise<void> {
       msg.segments,
     );
     const water = buildWaterArrays(sampler, detail, params, msg.segments);
+    // Placement layers for scatter consumers (src/life/). Cheap enough to ship every
+    // build once coarsened; the raw per-pixel maps stay in the worker.
+    const fields = downsampleFields(chunk);
     const result: WorldgenBuildResult = {
       type: "built",
       id: msg.id,
@@ -75,6 +79,7 @@ async function build(msg: WorldgenBuildRequest): Promise<void> {
       biome,
       colors,
       heightGrid,
+      fields,
       ...(water ? { waterPositions: water.positions, waterColors: water.colors } : {}),
     };
     const transfer: Transferable[] = [
@@ -83,6 +88,10 @@ async function build(msg: WorldgenBuildRequest): Promise<void> {
       biome.buffer,
       colors.buffer,
       heightGrid.buffer,
+      fields.biome.buffer,
+      fields.vegetation.buffer,
+      fields.slope.buffer,
+      fields.water.buffer,
     ];
     if (water) transfer.push(water.positions.buffer, water.colors.buffer);
     post(result, transfer);

@@ -25,9 +25,9 @@ import {
   vec3,
 } from "three/tsl";
 import { DoubleSide, MeshBasicNodeMaterial } from "three/webgpu";
+import { viewReveal } from "../../render/tsl-kit.ts";
+import type { KitUniforms } from "../../render/uniforms.ts";
 import type { TimeNode } from "./terrain-material.ts";
-import { viewReveal } from "./tsl-kit.ts";
-import type { KitUniforms } from "./uniforms.ts";
 
 /** Build the shared water material. `uTime` drives ripples; `u` the sense fade. */
 export function createWaterMaterial(u: KitUniforms, uTime: TimeNode): MeshBasicNodeMaterial {

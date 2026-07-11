@@ -2,6 +2,7 @@ import { time } from "three/tsl";
 import { SoundBus, SoundDirector } from "./audio/index.ts";
 import { createDevConsole } from "./dev-console/index.ts";
 import { type ControlOrientation, connectHost } from "./icaros/index.ts";
+import { createLife } from "./life/index.ts";
 import { createMinimap } from "./minimap/index.ts";
 import { createPlayer } from "./player/index.ts";
 import { createKeyboardControls } from "./player/keyboard-controls.ts";
@@ -32,8 +33,28 @@ const clock = new Clock();
 const transport = createTransport(clock);
 window.addEventListener("pagehide", () => transport.dispose());
 
+// ── The sense state machine ─────────────────────────────────────────────────
+// Keys 1–7 / [ ] write `signals.activeSense`; the manager eases the view uniforms toward it and
+// publishes `signals.senseProgress`. Created BEFORE the world so its live uniforms can be handed to
+// every material that should belong to the current sense (terrain, water, flora).
+const senses = createSenses({ start: "normal" });
+window.addEventListener("pagehide", () => senses.dispose());
+
+// Life: instanced flora that streams with the terrain. Async — the species GLBs must
+// land before a chunk can be populated. It shares the sense uniforms with the world.
+const life = await createLife({ scene: renderer.scene, uniforms: senses.uniforms });
+window.addEventListener("pagehide", () => life.dispose());
+
 // Streaming terrain: a chunked, worker-generated world that loads around the player.
-const { world } = createTerrainWorld({ scene: renderer.scene, uTime: time });
+// Sharing `senses.uniforms` is what makes a sense switch restyle terrain and flora
+// together; the chunk hooks are what let life grow on it and be freed with it.
+const { world } = createTerrainWorld({
+  scene: renderer.scene,
+  uTime: time,
+  uniforms: senses.uniforms,
+  onChunkBuilt: (info) => life.onChunkBuilt(info),
+  onChunkDisposed: (cell) => life.onChunkDisposed(cell),
+});
 
 // Player: carries the renderer's camera and flies forward at a constant speed. The
 // `floor` callback keeps the rig a little above the streamed ground so it can never
@@ -44,13 +65,6 @@ const player = createPlayer(renderer.camera, {
   floor: (x, z) => world.groundHeightAt(x, z),
 });
 renderer.scene.add(player.rig);
-
-// ── The sense state machine ─────────────────────────────────────────────────
-// Keys 1–7 / [ ] write `signals.activeSense`; the manager eases the view uniforms toward it and
-// publishes `signals.senseProgress`. Bind `senses.uniforms` into the terrain material to make the
-// transitions drive shading (follow-up wiring).
-const senses = createSenses({ start: "normal" });
-window.addEventListener("pagehide", () => senses.dispose());
 
 // ── Theatre.js: authored envelopes, slaved to the clock ─────────────────────
 // Dev loads @theatre/studio (dynamic import ⇒ out of the prod bundle); prod loads state.json.
@@ -155,6 +169,7 @@ renderer.start((dtSeconds) => {
 
   // ── CONSUME ──
   world.update(pose.x, pose.z); // 6. stream chunks around the player
+  life.update(dtSeconds); // 7. pump time / unrest / intensity / sense into the flora uniforms
 });
 
 // Release worker + GPU resources when the page goes away.

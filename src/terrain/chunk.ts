@@ -17,6 +17,7 @@ import * as THREE from "three/webgpu";
 import type { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from "three/webgpu";
 import { cellToWorldCenter } from "./coords.ts";
 import type { ChunkLike } from "./scheduler.ts";
+import type { ChunkFields } from "./worker/worldgen-protocol.ts";
 
 export interface TerrainChunkParams {
   gridX: number;
@@ -33,6 +34,8 @@ export interface TerrainChunkParams {
   heightGrid?: Float32Array;
   /** Per-vertex biome id — reserved for biome-aware senses (not rendered yet). */
   biome?: Uint8Array;
+  /** Downsampled placement layers; chunk providers supply them, pointwise ones don't. */
+  fields?: ChunkFields;
   /** Per-vertex linear RGB albedo. Chunk providers supply it; pointwise providers
    *  omit it (a neutral default is filled so the material always has "color"). */
   colors?: Float32Array;
@@ -52,6 +55,8 @@ export class TerrainChunk implements ChunkLike {
   readonly heightGrid?: Float32Array;
   /** Reserved for biome-aware senses; unused this slice. */
   readonly biome?: Uint8Array;
+  /** Placement layers, forwarded to scatter consumers on build. */
+  readonly fields?: ChunkFields;
 
   private readonly geometry: THREE.BufferGeometry;
   private readonly waterMesh: THREE.Mesh | null = null;
@@ -61,6 +66,7 @@ export class TerrainChunk implements ChunkLike {
     this.gridZ = p.gridZ;
     if (p.heightGrid) this.heightGrid = p.heightGrid;
     if (p.biome) this.biome = p.biome;
+    if (p.fields) this.fields = p.fields;
 
     // Wrap the worker's arrays. The index is shared (same grid topology for every
     // chunk); each chunk gets its own BufferAttribute over it so dispose frees

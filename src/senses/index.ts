@@ -16,8 +16,8 @@
  * Concept-ported from neural-flight-template's `senses.ts`; profiles and easing preserved, wiring
  * re-expressed onto signals + TSL `uniform()` nodes.
  */
-import { uniform } from "three/tsl";
 import { Color } from "three/webgpu";
+import { type KitUniforms, createSenseUniforms } from "../render/uniforms.ts";
 import { signals } from "../signals/index.ts";
 
 export type SenseId = "luft" | "echo" | "infrarot" | "duft" | "netzwerk" | "depth" | "normal";
@@ -172,41 +172,19 @@ export const SENSE_PROFILES: Record<SenseId, SenseProfile> = {
 };
 
 /**
- * The live TSL uniforms a terrain/material graph reads. These are real `uniform()` nodes — bind
- * them into a `*NodeMaterial` graph (`.colorNode`, fog, fresnel) and the sense transitions drive
- * shading for free. `scalars` hold `{ value: number }`, `colors` hold `{ value: Color }`; the
- * manager mutates `.value` each frame.
+ * The live TSL uniforms a terrain/water/flora material graph reads. Canonically defined in
+ * `src/render/uniforms.ts` so `terrain`, `life`, and `senses` share ONE lerped set without importing
+ * each other — bind them into a `*NodeMaterial` graph (`.colorNode`, fog, fresnel) and the sense
+ * transitions drive shading for free. This module is their sole writer (see {@link SenseManager}).
+ *
+ * `SenseProfile` is structurally a `SenseUniformSeed` (it just carries `id`/`label` besides), so a
+ * profile can seed the uniforms directly.
  */
-export interface SenseUniforms {
-  viewRadius: { value: number };
-  revealSoftness: { value: number };
-  depthLevels: { value: number };
-  fogNear: { value: number };
-  fogFar: { value: number };
-  rimPower: { value: number };
-  rimStrength: { value: number };
-  colorNear: { value: Color };
-  colorFar: { value: Color };
-  fogColor: { value: Color };
-  rimColor: { value: Color };
-}
+export type SenseUniforms = KitUniforms;
 
 /** Build the live uniform nodes, seeded to `start`'s profile. */
-export function createSenseUniforms(start: SenseId): SenseUniforms {
-  const p = SENSE_PROFILES[start];
-  return {
-    viewRadius: uniform(p.viewRadius),
-    revealSoftness: uniform(p.revealSoftness),
-    depthLevels: uniform(p.depthLevels),
-    fogNear: uniform(p.fogNear),
-    fogFar: uniform(p.fogFar),
-    rimPower: uniform(p.rimPower),
-    rimStrength: uniform(p.rimStrength),
-    colorNear: uniform(new Color(p.colorNear)),
-    colorFar: uniform(new Color(p.colorFar)),
-    fogColor: uniform(new Color(p.fogColor)),
-    rimColor: uniform(new Color(p.rimColor)),
-  };
+export function createSenseUniformsFor(start: SenseId): SenseUniforms {
+  return createSenseUniforms(SENSE_PROFILES[start]);
 }
 
 interface ScalarSnapshot {
@@ -384,7 +362,7 @@ export function createSenses(options: SensesOptions = {}): Senses {
   // Seed the active-sense signal so the manager and any subscriber agree on the starting sense.
   signals.activeSense.value = start;
 
-  const uniforms = createSenseUniforms(start);
+  const uniforms = createSenseUniformsFor(start);
   const manager = new SenseManager(uniforms, start);
 
   // The manager follows the signal — this is the single place "active sense" becomes a transition.

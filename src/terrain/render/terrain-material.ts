@@ -12,8 +12,8 @@
 import { attribute, mix } from "three/tsl";
 import * as THREE from "three/webgpu";
 import { MeshStandardNodeMaterial, type Node } from "three/webgpu";
-import { distanceFog, fresnelEdge, viewReveal } from "./tsl-kit.ts";
-import type { KitUniforms } from "./uniforms.ts";
+import { distanceFog, fresnelEdge, viewReveal } from "../../render/tsl-kit.ts";
+import type { KitUniforms } from "../../render/uniforms.ts";
 
 /** Clock uniform node driving the rim "breath" — e.g. TSL `time`. */
 export type TimeNode = Node<"float">;
