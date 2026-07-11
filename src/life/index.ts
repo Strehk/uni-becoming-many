@@ -4,8 +4,8 @@
 // stream with the terrain and read the signal substrate.
 //
 // Wiring, in the shape the rest of the app already uses:
-//   - terrain calls `onChunkBuilt`  → claim a slot, scatter, upload, arm proximity
-//   - terrain calls `onChunkDisposed` → zero the block, release the slot, disarm
+//   - terrain calls `onChunkBuilt`  → scatter, append instances, arm proximity
+//   - terrain calls `onChunkDisposed` → remove the chunk's instances, disarm
 //   - main.ts calls `update(dt)`    → pump signals into the shared uniforms
 //
 // Life is a pure CONSUMER of signals: it reads `time`, `unrest`, `intensity`,
@@ -19,7 +19,6 @@ import type { SenseId } from "../senses/index.ts";
 import { signals } from "../signals/index.ts";
 import type { ChunkBuiltInfo, ChunkCell } from "../terrain/index.ts";
 import { makeHeightEntry } from "../terrain/index.ts";
-import { SlotAllocator } from "./allocator.ts";
 import { disposeFloraParts, loadFloraParts } from "./assets.ts";
 import { SpeciesInstances } from "./instancing.ts";
 import { watchChunkProximity } from "./proximity.ts";
@@ -28,11 +27,12 @@ import { SPECIES, SPECIES_IDS } from "./species.ts";
 import { BIOLUMINESCENCE_BY_SENSE, createLifeUniforms } from "./uniforms.ts";
 
 /**
- * Blocks a species keeps alive at once. Terrain builds within `buildRadius` (2) but
- * only disposes beyond `keepRadius` (3), so up to (2·3+1)² = 49 chunks can coexist
- * and a claim must never fail. Steady state is nearer 30 — and only those are drawn.
+ * Max chunks that can be live at once — the packed instance buffers are sized for
+ * this worst case. Terrain builds within `buildRadius` (2) but only disposes beyond
+ * `keepRadius` (3), so up to (2·3+1)² = 49 chunks coexist. Only the instances those
+ * chunks actually placed are drawn (packed), not the capacity.
  */
-const SLOT_COUNT = 49;
+const MAX_LIVE_CHUNKS = 49;
 
 /** Seconds for `bioluminescence` to reach a new sense's target. Matches SenseManager. */
 const BIOLUMINESCENCE_EASE = 4.5;
@@ -60,7 +60,6 @@ export interface Life {
 }
 
 interface LiveChunk {
-  slot: number;
   /** Tears down this chunk's `bus.when` crossing. */
   unwatch: () => void;
 }
@@ -82,12 +81,11 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
     const def = SPECIES[id];
     const partList = parts.get(id);
     if (!partList) throw new Error(`[life] no geometry loaded for species "${id}"`);
-    const instances = new SpeciesInstances(def, partList, SLOT_COUNT, opts.uniforms, life);
+    const instances = new SpeciesInstances(def, partList, MAX_LIVE_CHUNKS, opts.uniforms, life);
     for (const mesh of instances.meshes) group.add(mesh);
     return { def, instances, affinity: biomeAffinityTable(def) };
   });
 
-  const allocator = new SlotAllocator(SLOT_COUNT);
   const liveChunks = new Map<string, LiveChunk>();
 
   // ── Bioluminescence follows the active sense (event-rate → subscribe is right) ──
@@ -104,28 +102,22 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       const k = key(info.gridX, info.gridZ);
       if (liveChunks.has(k)) return; // already populated
 
-      const slot = allocator.claim();
-      if (slot === null) {
-        console.warn(`[life] no free instance slot for chunk ${k}; leaving it bare`);
-        return;
-      }
-
       // The exact grid the mesh was built from → flora stands on the rendered surface.
       const entry = makeHeightEntry(info.gridX, info.gridZ, info.chunkSize, info.heightGrid);
 
       for (const [index, s] of species.entries()) {
         const block = scatterChunk(info, entry, s.def, s.affinity, index);
-        s.instances.writeBlock(slot, block);
+        s.instances.addChunk(k, block);
       }
 
       const centreX = (info.gridX + 0.5) * info.chunkSize;
       const centreZ = (info.gridZ + 0.5) * info.chunkSize;
       const unwatch = watchChunkProximity(centreX, centreZ, info.chunkSize, () => {
         const at = signals.time.peek();
-        for (const s of species) s.instances.awakenBlock(slot, at);
+        for (const s of species) s.instances.awakenChunk(k, at);
       });
 
-      liveChunks.set(k, { slot, unwatch });
+      liveChunks.set(k, { unwatch });
     },
 
     onChunkDisposed(cell: ChunkCell): void {
@@ -134,8 +126,7 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       if (!live) return;
 
       live.unwatch();
-      for (const s of species) s.instances.clearBlock(live.slot);
-      allocator.release(live.slot);
+      for (const s of species) s.instances.removeChunk(k);
       liveChunks.delete(k);
     },
 
@@ -155,7 +146,6 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       unsubscribeSense();
       for (const live of liveChunks.values()) live.unwatch();
       liveChunks.clear();
-      allocator.releaseAll();
       for (const s of species) s.instances.dispose();
       disposeFloraParts(parts);
       group.removeFromParent();
