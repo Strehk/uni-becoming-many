@@ -11,6 +11,7 @@ export interface InterfaceModeOptions {
   devConsole: DevConsole;
   inspectorElement: HTMLElement;
   vrButton: HTMLElement;
+  debugEnabled?: boolean;
 }
 
 const STYLE_ID = "experience-interface-mode-styles";
@@ -51,9 +52,10 @@ export function createInterfaceModeController(options: InterfaceModeOptions): In
 
   const setMode = (mode: ExperienceInterfaceMode): void => {
     document.body.dataset["experienceMode"] = mode;
-    document.body.classList.toggle("bm-ui-hidden", mode !== "configure");
+    const showDebugUi = mode === "configure" && options.debugEnabled === true;
+    document.body.classList.toggle("bm-ui-hidden", !showDebugUi);
 
-    if (mode === "configure") {
+    if (showDebugUi) {
       setAuxiliaryVisible(true);
       options.devConsole.setOpen(true);
       return;

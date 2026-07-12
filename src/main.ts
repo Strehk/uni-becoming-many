@@ -34,7 +34,9 @@ const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
   throw new Error("#app mount point not found");
 }
-const useTheatreStudio = new URLSearchParams(window.location.search).get("studio") === "1";
+const searchParams = new URLSearchParams(window.location.search);
+const useTheatreStudio = searchParams.get("studio") === "1";
+const showDebugUi = searchParams.get("debug") === "1";
 
 // `createRenderer` is async — WebGPU must finish `init()` before the first frame.
 const renderer = await createRenderer();
@@ -172,6 +174,7 @@ const interfaceMode = createInterfaceModeController({
   devConsole,
   inspectorElement: renderer.inspectorElement,
   vrButton: renderer.vrButton,
+  debugEnabled: showDebugUi,
 });
 window.addEventListener("pagehide", () => interfaceMode.dispose());
 
