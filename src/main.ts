@@ -1,4 +1,5 @@
 import { time } from "three/tsl";
+import { createAtmosphere } from "./atmosphere/index.ts";
 import { SoundBus, SoundDirector } from "./audio/index.ts";
 import { createDevConsole } from "./dev-console/index.ts";
 import { type ControlOrientation, connectHost } from "./icaros/index.ts";
@@ -44,6 +45,12 @@ window.addEventListener("pagehide", () => senses.dispose());
 // land before a chunk can be populated. It shares the sense uniforms with the world.
 const life = await createLife({ scene: renderer.scene, uniforms: senses.uniforms });
 window.addEventListener("pagehide", () => life.dispose());
+
+// Atmosphere: a field of stationary dust motes hanging in the air. As the player flies
+// through, motion parallax makes self-motion pop. A pure signal consumer (reads
+// playerPose + time); shares the sense uniforms so it fades at the same view edge.
+const atmosphere = createAtmosphere({ scene: renderer.scene, uniforms: senses.uniforms });
+window.addEventListener("pagehide", () => atmosphere.dispose());
 
 // Streaming terrain: a chunked, worker-generated world that loads around the player.
 // Sharing `senses.uniforms` is what makes a sense switch restyle terrain and flora
@@ -170,6 +177,7 @@ renderer.start((dtSeconds) => {
   // ── CONSUME ──
   world.update(pose.x, pose.z); // 6. stream chunks around the player
   life.update(dtSeconds); // 7. pump time / unrest / intensity / sense into the flora uniforms
+  atmosphere.update(dtSeconds); // 8. pump player pose + virtual clock into the dust uniforms
 });
 
 // Release worker + GPU resources when the page goes away.
