@@ -22,7 +22,7 @@ export function createInterfaceModeController(options: InterfaceModeOptions): In
   let inspectorParent: Node | null = options.inspectorElement.parentNode;
   let inspectorNext: ChildNode | null = options.inspectorElement.nextSibling;
 
-  const setAuxiliaryVisible = (visible: boolean): void => {
+  const setInspectorVisible = (visible: boolean): void => {
     if (visible) {
       if (!options.inspectorElement.parentNode) {
         inspectorParent?.insertBefore(options.inspectorElement, inspectorNext);
@@ -40,6 +40,9 @@ export function createInterfaceModeController(options: InterfaceModeOptions): In
       options.inspectorElement.toggleAttribute("inert", true);
       options.inspectorElement.setAttribute("aria-hidden", "true");
     }
+  };
+
+  const setAppToolsVisible = (visible: boolean): void => {
     options.vrButton.style.display = visible ? "" : "none";
     for (const el of document.querySelectorAll<HTMLElement>(
       ".devc-tab, .devc-drawer, .synth-tab, .synth-drawer, #VRButton",
@@ -50,19 +53,45 @@ export function createInterfaceModeController(options: InterfaceModeOptions): In
     }
   };
 
+  const setDevTabLabel = (configureMode: boolean): void => {
+    const tab = document.querySelector<HTMLButtonElement>(".devc-tab");
+    if (!tab) {
+      return;
+    }
+    tab.textContent = configureMode ? "Einstellungen" : "C";
+    tab.title = configureMode ? "Einstellungen" : "Dev console (C)";
+  };
+
   const setMode = (mode: ExperienceInterfaceMode): void => {
     document.body.dataset["experienceMode"] = mode;
-    const showDebugUi = mode === "configure" && options.debugEnabled === true;
-    document.body.classList.toggle("bm-ui-hidden", !showDebugUi);
+    const configureMode = mode === "configure";
+    const showRenderDebug = configureMode && options.debugEnabled === true;
+    document.body.classList.toggle("bm-ui-hidden", !configureMode);
+    document.body.classList.toggle("bm-configure-mode", configureMode);
+    setDevTabLabel(configureMode);
 
-    if (showDebugUi) {
-      setAuxiliaryVisible(true);
-      options.devConsole.setOpen(true);
+    if (configureMode) {
+      setAppToolsVisible(true);
+      setInspectorVisible(showRenderDebug);
+      if (showRenderDebug) {
+        options.devConsole.setOpen(true);
+      } else {
+        options.devConsole.setOpen(false);
+      }
       return;
     }
 
     options.devConsole.setOpen(false);
-    setAuxiliaryVisible(false);
+    setAppToolsVisible(false);
+    setInspectorVisible(false);
+  };
+
+  const restoreAll = (): void => {
+    setAppToolsVisible(true);
+    setInspectorVisible(true);
+    if (options.debugEnabled === true) {
+      options.devConsole.setOpen(true);
+    }
   };
 
   setMode("menu");
@@ -71,8 +100,10 @@ export function createInterfaceModeController(options: InterfaceModeOptions): In
     setMode,
     dispose() {
       document.body.classList.remove("bm-ui-hidden");
+      document.body.classList.remove("bm-configure-mode");
       delete document.body.dataset["experienceMode"];
-      setAuxiliaryVisible(true);
+      setDevTabLabel(false);
+      restoreAll();
     },
   };
 }
@@ -90,6 +121,12 @@ function injectStyles(): void {
     .bm-ui-hidden .synth-drawer,
     .bm-ui-hidden #VRButton {
       display: none !important;
+    }
+
+    .bm-configure-mode .devc-tab {
+      width: 104px;
+      padding: 0 10px;
+      text-align: center;
     }
   `;
   document.head.append(style);
