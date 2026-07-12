@@ -24,6 +24,7 @@
   "trustedDependencies": ["@biomejs/biome"],
   "dependencies": {
     "@theatre/core": "^0.7.2",
-    "three": "^0.185.0"
+    "three": "^0.185.0",
+    "tone": "14.8.49"
   }
 }

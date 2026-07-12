@@ -1,0 +1,336 @@
+// ── Becoming Many — Synth integration (host side) ──────────────
+//
+// The Tone.js synthesizer (SynthModulHandy) lives UNCHANGED — UI, UX, patch
+// cables, sound recipes — as a vendored app under `src/synth/vendor/`, served on
+// its own page (`/synth.html`). That page runs standalone on a phone, or inside
+// the experience as the fullscreen iframe overlay this module hosts (key **M**).
+//
+// The iframe is same-origin, so the bridge talks to it directly:
+//
+//   - every frame it pushes a `__bmFrame` object into the synth window: player
+//     pose (for the spatial listener), the six flight values (0..1), the nine
+//     sense intensities + unrest/intensity/quality, and the four `ort_*` anchor
+//     positions (swarm centroid + mushrooms). The vendored "Signale" rack card
+//     exposes them as patchable sources — the demo flight world it replaces is gone.
+//   - the synth app preloads its default sense layers after audio unlock. Each
+//     frame this bridge mirrors visual sense intensities onto every matching
+//     synth layer of the same kind, so duplicate synth layers follow the same
+//     signal contract automatically.
+//
+// Audio unlock stays the synth's own veil (a tap inside the iframe) — iOS-safe.
+
+import { SENSE_ORDER, SENSE_SYNTH_MAP } from "../senses/ids.ts";
+import { signals } from "../signals/index.ts";
+
+const STYLE_ID = "synth-overlay-styles";
+
+export interface SynthAnchorSource {
+  /** Swarm centroid provider (ort_a). */
+  readonly birds: readonly { position: { x: number; y: number; z: number } }[];
+  /** Mushroom positions (ort_b..d take every eighth). */
+  readonly mushrooms: readonly { x: number; y: number; z: number }[];
+}
+
+export interface SynthOverlayOptions {
+  /** Ground height under (x,z) — for the altitude/proximity params. */
+  ground(x: number, z: number): number | null;
+  /** Camera world matrix elements provider (yaw/pitch extraction). */
+  cameraMatrix(): ArrayLike<number>;
+  anchors: SynthAnchorSource;
+}
+
+export interface SynthOverlay {
+  /** Push the per-frame signal packet + run the sense→layer coupling. */
+  update(dt: number): void;
+  toggle(): void;
+  dispose(): void;
+}
+
+interface SynthLayerInfo {
+  layer: { sense: { id: string } };
+}
+interface SynthApp {
+  layers: SynthLayerInfo[];
+  addLayer(id: string): void;
+  ensureBecomingManyDefaults?: () => void;
+  syncSenseLayers?: (id: string, value: number) => void;
+}
+interface SynthWindow {
+  __bmFrame?: Record<string, unknown>;
+  bmApp?: SynthApp;
+  bmStartAudio?: () => void;
+}
+
+/** Narrow an iframe's contentWindow to the synth window shape (same-origin). */
+function isSynthWindow(w: unknown): w is SynthWindow {
+  return typeof w === "object" && w !== null && "document" in w;
+}
+function synthWindow(iframe: HTMLIFrameElement | null): SynthWindow | null {
+  const w: unknown = iframe?.contentWindow;
+  return isSynthWindow(w) ? w : null;
+}
+
+function isSynthApp(value: unknown): value is SynthApp {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "addLayer" in value &&
+    typeof value.addLayer === "function" &&
+    "layers" in value &&
+    Array.isArray(value.layers)
+  );
+}
+
+const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
+
+export function createSynthOverlay(options: SynthOverlayOptions): SynthOverlay {
+  injectStyles();
+
+  // ── overlay DOM (iframe created lazily on first open) ──
+  const tab = document.createElement("button");
+  tab.className = "synth-tab";
+  tab.title = "Synthesizer (M)";
+  tab.textContent = "♪";
+
+  const drawer = document.createElement("div");
+  drawer.className = "synth-drawer";
+  const head = document.createElement("div");
+  head.className = "synth-head";
+  head.innerHTML = "<span>SYNTH · drone organ</span>";
+  const close = document.createElement("button");
+  close.textContent = "✕";
+  close.title = "Schließen (M)";
+  head.append(close);
+  const frameWrap = document.createElement("div");
+  frameWrap.className = "synth-frame";
+  drawer.append(head, frameWrap);
+  document.body.append(tab, drawer);
+
+  let iframe: HTMLIFrameElement | null = null;
+  let open = false;
+
+  const ensureIframe = (): void => {
+    if (!iframe) {
+      iframe = document.createElement("iframe");
+      iframe.src = "/synth.html";
+      iframe.allow = "autoplay";
+      frameWrap.append(iframe);
+    }
+  };
+
+  const setOpen = (next: boolean): void => {
+    open = next;
+    drawer.classList.toggle("open", open);
+    tab.style.display = open ? "none" : "";
+    ensureIframe();
+    if (open) {
+      synthWindow(iframe)?.bmStartAudio?.();
+    }
+  };
+  ensureIframe();
+
+  tab.addEventListener("click", () => setOpen(true));
+  close.addEventListener("click", () => setOpen(false));
+
+  const isTyping = (): boolean => {
+    const el = document.activeElement;
+    return (
+      el instanceof HTMLInputElement ||
+      el instanceof HTMLTextAreaElement ||
+      (el instanceof HTMLElement && el.isContentEditable)
+    );
+  };
+  const onKeyDown = (event: KeyboardEvent): void => {
+    if (event.key !== "m" && event.key !== "M") {
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey || isTyping()) {
+      return;
+    }
+    event.preventDefault();
+    setOpen(!open);
+  };
+  window.addEventListener("keydown", onKeyDown);
+
+  // ── per-frame signal packet ──
+  const pose = signals.playerPose.peek();
+  let prevX = pose.x;
+  let prevZ = pose.z;
+  let prevYaw = 0;
+  let smoothedTempo = 0.5;
+  let smoothedKurve = 0.5;
+
+  let defaultsRequested = false;
+
+  interface SenseFrame {
+    unrest: number;
+    intensity: number;
+    quality: number;
+    [key: string]: number;
+  }
+  const senseFrame: SenseFrame = { unrest: 0, intensity: 0, quality: 0 };
+  const params = {
+    hoehe: 0.5,
+    tempo: 0.5,
+    kurve: 0.5,
+    neigung: 0.5,
+    naehe: 0,
+    richtung: 0,
+  };
+
+  const update = (dt: number): void => {
+    const win = synthWindow(iframe);
+    if (!win) {
+      return;
+    }
+
+    // Camera orientation: forward = −Z column of the world matrix.
+    const m = options.cameraMatrix();
+    const fx = -(m[8] ?? 0);
+    const fy = -(m[9] ?? 0);
+    const fz = -(m[10] ?? 1);
+    const yaw = Math.atan2(fx, fz);
+    const pitch = Math.asin(Math.min(1, Math.max(-1, fy)));
+
+    // Flight params 0..1 from the emergent state.
+    const ground = options.ground(pose.x, pose.z);
+    const altitude = ground === null ? 20 : pose.y - ground;
+    params.hoehe = clamp01(altitude / 60);
+    params.naehe = clamp01(1 - altitude / 30);
+    params.neigung = clamp01(0.5 + pitch / Math.PI);
+    params.richtung = (yaw / (Math.PI * 2) + 1) % 1;
+
+    if (dt > 0) {
+      const dx = pose.x - prevX;
+      const dz = pose.z - prevZ;
+      const speed = Math.sqrt(dx * dx + dz * dz) / dt;
+      smoothedTempo += (clamp01(speed / 14) - smoothedTempo) * Math.min(1, dt * 3);
+      let yawRate = (yaw - prevYaw) / dt;
+      if (yawRate > Math.PI) yawRate -= Math.PI * 2;
+      if (yawRate < -Math.PI) yawRate += Math.PI * 2;
+      smoothedKurve += (clamp01(0.5 + yawRate / 2) - smoothedKurve) * Math.min(1, dt * 3);
+    }
+    params.tempo = smoothedTempo;
+    params.kurve = smoothedKurve;
+    prevX = pose.x;
+    prevZ = pose.z;
+    prevYaw = yaw;
+
+    // Sense intensities + authored macros as patchable sources.
+    for (const id of SENSE_ORDER) {
+      senseFrame[`sinn_${id}`] = signals.sense[id].peek();
+    }
+    senseFrame.unrest = signals.unrest.peek();
+    senseFrame.intensity = signals.intensity.peek();
+    senseFrame.quality = signals.controlQuality.peek();
+
+    // Anchors: swarm centroid (ort_a) + three mushrooms (ort_b..d).
+    const anchors: { id: string; x: number; y: number; z: number }[] = [];
+    const birds = options.anchors.birds;
+    if (birds.length > 0) {
+      let cx = 0;
+      let cy = 0;
+      let cz = 0;
+      for (const b of birds) {
+        cx += b.position.x;
+        cy += b.position.y;
+        cz += b.position.z;
+      }
+      anchors.push({
+        id: "ort_a",
+        x: cx / birds.length,
+        y: cy / birds.length,
+        z: cz / birds.length,
+      });
+    }
+    const mushrooms = options.anchors.mushrooms;
+    ["ort_b", "ort_c", "ort_d"].forEach((id, i) => {
+      const mushroom = mushrooms[i * 8];
+      if (mushroom) {
+        anchors.push({ id, x: mushroom.x, y: mushroom.y, z: mushroom.z });
+      }
+    });
+
+    win.__bmFrame = {
+      t: signals.time.peek(),
+      pose: { x: pose.x, y: pose.y, z: pose.z, yaw, pitch },
+      params,
+      senses: senseFrame,
+      anchors,
+    };
+
+    // Sense → layer coupling: every synth layer of a mapped kind follows the visual
+    // sense signal. This also covers duplicate layers added later in the synth UI.
+    const app: unknown = win.bmApp;
+    if (isSynthApp(app)) {
+      if (!defaultsRequested) {
+        defaultsRequested = true;
+        app.ensureBecomingManyDefaults?.();
+      }
+      for (const id of SENSE_ORDER) {
+        const synthId = SENSE_SYNTH_MAP[id];
+        if (!synthId) {
+          continue;
+        }
+        const value = signals.sense[id].peek();
+        if (app.syncSenseLayers) {
+          app.syncSenseLayers(synthId, value);
+        } else if (value > 0 && !app.layers.some((info) => info.layer.sense.id === synthId)) {
+          app.addLayer(synthId);
+        }
+      }
+    }
+  };
+
+  return {
+    update,
+    toggle(): void {
+      setOpen(!open);
+    },
+    dispose(): void {
+      window.removeEventListener("keydown", onKeyDown);
+      tab.remove();
+      drawer.remove();
+    },
+  };
+}
+
+function injectStyles(): void {
+  if (document.getElementById(STYLE_ID)) {
+    return;
+  }
+  const style = document.createElement("style");
+  style.id = STYLE_ID;
+  style.textContent = CSS;
+  document.head.append(style);
+}
+
+const CSS = `
+.synth-tab {
+  position: fixed; bottom: 16px; right: 16px; z-index: 9998;
+  width: 44px; height: 44px; border-radius: 50%;
+  background: rgba(24,24,27,0.92); border: 1px solid rgba(255,255,255,0.16);
+  color: #7fd4e8; font-size: 18px; cursor: pointer; opacity: 0.7; transition: opacity 0.15s;
+}
+.synth-tab:hover { opacity: 1; }
+
+.synth-drawer {
+  position: fixed; inset: 0; z-index: 10000; display: none; flex-direction: column;
+  background: #07090d;
+}
+.synth-drawer.open { display: flex; }
+.synth-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; color: #7fd4e8; background: #0a0d12;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  letter-spacing: 0.08em;
+}
+.synth-head button {
+  background: none; border: 1px solid rgba(255,255,255,0.16); border-radius: 3px;
+  color: #a1a1aa; cursor: pointer; font-size: 13px; padding: 2px 8px;
+}
+.synth-head button:hover { color: #f87171; }
+.synth-frame { flex: 1; }
+.synth-frame iframe { width: 100%; height: 100%; border: 0; display: block; }
+`;

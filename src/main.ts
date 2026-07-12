@@ -1,13 +1,29 @@
 import { time } from "three/tsl";
 import { SoundBus, SoundDirector } from "./audio/index.ts";
+import { createCreatures } from "./creatures/index.ts";
 import { createDevConsole } from "./dev-console/index.ts";
+import { createSenseControls } from "./dev-console/sense-controls.ts";
+import { createWorldControls } from "./dev-console/world-controls.ts";
+import {
+  applyExperienceConfig,
+  loadExperienceConfig,
+  saveExperienceConfig,
+  type ExperienceConfig,
+} from "./experience/config.ts";
+import { createStartMenu } from "./experience/start-menu.ts";
 import { type ControlOrientation, connectHost } from "./icaros/index.ts";
+import { createMinimap } from "./minimap/index.ts";
 import { createPlayer } from "./player/index.ts";
 import { createKeyboardControls } from "./player/keyboard-controls.ts";
-import { createMinimap } from "./minimap/index.ts";
 import { createRenderer } from "./renderer/index.ts";
-import { createSenses } from "./senses/index.ts";
+import { createDuftSense } from "./senses/duft/index.ts";
+import { SENSE_ORDER, createSenses } from "./senses/index.ts";
+import { createMagnetfeldSense } from "./senses/magnetfeld/index.ts";
+import { createMotionSense } from "./senses/motion/index.ts";
+import { createNetzwerkSense } from "./senses/netzwerk/index.ts";
+import { createRundumSense } from "./senses/rundum/index.ts";
 import { bus, signals } from "./signals/index.ts";
+import { createSynthOverlay } from "./synth/index.ts";
 import { createTerrainWorld } from "./terrain/index.ts";
 import { initTheatre, pumpAuthored } from "./theatre/index.ts";
 import { Clock } from "./time/clock.ts";
@@ -18,22 +34,91 @@ const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
   throw new Error("#app mount point not found");
 }
+const useTheatreStudio = new URLSearchParams(window.location.search).get("studio") === "1";
 
 // `createRenderer` is async — WebGPU must finish `init()` before the first frame.
 const renderer = await createRenderer();
 app.append(renderer.canvas);
+// Same-origin synth iframe reads this for the FlightModule live preview.
+(window as Window & { __bmFlightCanvas?: HTMLCanvasElement }).__bmFlightCanvas = renderer.canvas;
 document.body.append(renderer.vrButton); // "Enter VR" overlay
 
 // ── The time spine ──────────────────────────────────────────────────────────
 // The single authority on time. The frame loop feeds it real dt; everything animated (authored or
 // emergent) advances through it, so pause/seek/timeScale govern the whole world. See docs §2.
 const clock = new Clock();
+let experienceConfig: ExperienceConfig = loadExperienceConfig();
+if (!useTheatreStudio) {
+  clock.pause();
+}
 // Keyboard transport for authoring/debugging: K pause, J/L seek, ,/. timeScale, 0 reset.
 const transport = createTransport(clock);
 window.addEventListener("pagehide", () => transport.dispose());
 
+// ── The sense layer system ──────────────────────────────────────────────────
+// Keys 1–9 toggle the nine sense layers (0 = all off) via bus commands; the SenseDirector
+// writes `signals.sense[id]`, and the atmosphere eases toward the dominant layer's profile.
+// The same signals are driven by Theatre (authority-gated) and the dev-console sense UI.
+const senses = createSenses(bus);
+window.addEventListener("pagehide", () => senses.dispose());
+
+// The void's backdrop follows the atmosphere: the empty sky is the very colour the
+// terrain dissolves into — pale white when no sense is active (so the base state reads
+// as one uniform white world), near-black under echo, violet under UV, etc. This is the
+// live `fogColor` the SenseManager lerps, so the background transitions with the senses.
+renderer.scene.background = senses.uniforms.fogColor.value;
+
 // Streaming terrain: a chunked, worker-generated world that loads around the player.
-const { world } = createTerrainWorld({ scene: renderer.scene, uTime: time });
+// It shares the senses' atmosphere uniforms (sense transitions restyle the world live)
+// and composites the four shader-sense colour layers over the biome albedo.
+const { world } = createTerrainWorld({
+  scene: renderer.scene,
+  uTime: time,
+  uniforms: senses.uniforms,
+  layers: senses.shader.compositor,
+});
+
+// Magnetfeld sense: the sky dome showing the geomagnetic field (9 blendable modes),
+// fading with `signals.sense.magnetfeld` and following the player.
+const magnetfeld = createMagnetfeldSense(renderer.scene, bus);
+window.addEventListener("pagehide", () => magnetfeld.dispose());
+
+// Duft sense: GPU scent particles anchored to the terrain around the player,
+// gated by `signals.sense.duft` (no compute while faded out).
+const duft = createDuftSense(renderer.scene, bus, renderer.instance, (x, z) =>
+  world.groundHeightAt(x, z),
+);
+window.addEventListener("pagehide", () => duft.dispose());
+
+// Creatures substrate: the boids bird swarm + mushroom spawn points that the
+// netzwerk / motion senses perceive. Plain world state, no sense logic.
+const creatures = createCreatures(renderer.scene, bus, (x, z) => world.groundHeightAt(x, z));
+window.addEventListener("pagehide", () => creatures.dispose());
+
+// Netzwerk sense: swarm communication web between the birds + pulsing mycelium
+// between the mushrooms, gated by `signals.sense.netzwerk`.
+const netzwerk = createNetzwerkSense(renderer.scene, bus, creatures);
+window.addEventListener("pagehide", () => netzwerk.dispose());
+
+// Motion sense: particle trails from the birds' animated vertices; the meshes
+// hide while `signals.sense.motion` is up (module recommendation, host applies).
+const motion = createMotionSense(renderer.scene, bus, creatures);
+window.addEventListener("pagehide", () => motion.dispose());
+
+// Rundum sense: the little-planet 360° projection replaces the render pass while
+// `signals.sense.rundum` is up (skipped in XR — the headset owns projection).
+const rundum = createRundumSense(renderer, bus);
+window.addEventListener("pagehide", () => rundum.dispose());
+
+// Synth overlay (key M): the vendored Tone.js drone organ in a same-origin iframe.
+// The bridge pushes pose/flight/sense signals each frame and auto-adds the mapped
+// synth layer when a sense first switches on (see src/synth/index.ts).
+const synth = createSynthOverlay({
+  ground: (x, z) => world.groundHeightAt(x, z),
+  cameraMatrix: () => renderer.camera.matrixWorld.elements,
+  anchors: creatures,
+});
+window.addEventListener("pagehide", () => synth.dispose());
 
 // Player: carries the renderer's camera and flies forward at a constant speed. The
 // `floor` callback keeps the rig a little above the streamed ground so it can never
@@ -44,13 +129,6 @@ const player = createPlayer(renderer.camera, {
   floor: (x, z) => world.groundHeightAt(x, z),
 });
 renderer.scene.add(player.rig);
-
-// ── The sense state machine ─────────────────────────────────────────────────
-// Keys 1–7 / [ ] write `signals.activeSense`; the manager eases the view uniforms toward it and
-// publishes `signals.senseProgress`. Bind `senses.uniforms` into the terrain material to make the
-// transitions drive shading (follow-up wiring).
-const senses = createSenses({ start: "normal" });
-window.addEventListener("pagehide", () => senses.dispose());
 
 // ── Theatre.js: authored envelopes, slaved to the clock ─────────────────────
 // Dev loads @theatre/studio (dynamic import ⇒ out of the prod bundle); prod loads state.json.
@@ -64,11 +142,71 @@ window.addEventListener("pagehide", () => theatre.dispose());
 const soundBus = new SoundBus();
 const director = new SoundDirector(soundBus, clock, bus);
 director.cue({ id: "chirp", src: "/audio/chirp.ogg", gain: 0.7, trigger: { kind: "event" } });
+// One unlock cue per sense: `bus.when` fires on the rising edge of each sense signal
+// (Theatre or manual alike) and emits `cue:sense:<id>` — the director plays the clip
+// once real audio assets land (missing files warn once and stay inert).
+for (const senseId of SENSE_ORDER) {
+  director.cue({
+    id: `sense:${senseId}`,
+    src: `/audio/sense-${senseId}.ogg`,
+    gain: 0.8,
+    trigger: { kind: "event" },
+  });
+  bus.when(
+    signals.sense[senseId],
+    (v) => v > 0,
+    () => bus.emit(`cue:sense:${senseId}`),
+  );
+}
 window.addEventListener("pagehide", () => director.dispose());
 
 // Dev console: press "C" for a live FPS / render-stats overlay.
 const devConsole = createDevConsole(renderer.instance, { label: "becoming-many" });
 window.addEventListener("pagehide", () => devConsole.dispose());
+
+// Start/config menu: normal runs use the saved config as a signal-authoring source.
+// Theatre Studio remains available via ?studio=1 for advanced timeline editing.
+if (!useTheatreStudio) {
+  const startMenu = createStartMenu({
+    config: experienceConfig,
+    onConfigChange(next) {
+      experienceConfig = next;
+      saveExperienceConfig(next);
+      applyExperienceConfig(experienceConfig, clock.now);
+    },
+    onStart(next) {
+      experienceConfig = next;
+      saveExperienceConfig(next);
+      signals.senseAuthority.value = "config";
+      clock.reset();
+      theatre.setPosition(0);
+      signals.time.value = 0;
+      applyExperienceConfig(experienceConfig, 0);
+      clock.resume();
+    },
+  });
+  window.addEventListener("pagehide", () => startMenu.dispose());
+}
+
+// Shared sense controls: one card per sense layer (toggle / solo / intensity +
+// module parameters from UI-agnostic descriptors). Everything runs over bus
+// commands — the same channel as keys 1–9 and the Theatre-driven signals.
+const senseControls = createSenseControls(bus, [
+  ...senses.shader.controls().map((d) => ({ ...d, movable: true })),
+  magnetfeld.controls,
+  duft.controls,
+  netzwerk.controls,
+  motion.controls,
+  rundum.controls,
+]);
+devConsole.addSection(senseControls.element);
+window.addEventListener("pagehide", () => senseControls.dispose());
+
+// World controls: live terrain-generator sliders (provider + all GenParams) inside
+// the C console. Edits rebuild the streamed world in place.
+const worldControls = createWorldControls(world);
+devConsole.addSection(worldControls.element);
+window.addEventListener("pagehide", () => worldControls.dispose());
 
 // Debug controls: WASD / arrows to steer, Shift for 2× speed, Space to hold position.
 const keyboard = createKeyboardControls();
@@ -133,6 +271,7 @@ renderer.start((dtSeconds) => {
     theatre.setPosition(clock.now); // 2. slave Theatre's playhead to the spine (Studio owns it when paused)
   }
   pumpAuthored(theatre.arc); // 3. authored Theatre values → authored signals (the one-writer bridge)
+  applyExperienceConfig(experienceConfig, clock.now); // 3b. saved config → signals while authority is "config"
 
   keyboard.update(dtSeconds); // 4. input → player → emergent signals
   const { locomotion } = keyboard;
@@ -149,6 +288,19 @@ renderer.start((dtSeconds) => {
   pose.z = player.rig.position.z;
 
   senses.update(dtSeconds); // writes senseProgress; eases the view uniforms
+  magnetfeld.update(dtSeconds); // sky dome fade + follow player + spine time
+  duft.update(clock.delta); // scent field: fade, re-anchor, GPU sim (spine-scaled dt)
+  creatures.update(clock.delta); // boids swarm + mushroom anchors (obey pause/timeScale)
+  // Creatures are perception-dependent: hidden in the white void (no sense active),
+  // revealed once any sense is on — except while `motion` is up, which replaces the
+  // bird meshes with their motion trails. The boids keep flying while hidden, so the
+  // netzwerk web and motion trails still read live positions/animation.
+  creatures.setBirdsVisible(
+    signals.activeSense.peek() !== "none" && signals.sense.motion.peek() <= 0,
+  );
+  netzwerk.update(clock.delta); // swarm web + mycelium (fade, rebuild, pulse)
+  motion.update(clock.delta); // vertex-motion trails (spawn/fade ring buffer)
+  synth.update(dtSeconds); // push the signal packet into the synth iframe
 
   // ── REACT ──
   bus.tick(); // 5. evaluate `when` crossings (proximity / sense / threshold) → emit

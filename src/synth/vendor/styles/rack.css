@@ -1,0 +1,143 @@
+/* becoming many · rack.css
+   Desktop-Rack: Module (Sinne, Flug, Master) liegen in einem Grid
+   nebeneinander. Spaltenzahl einstellbar (auto/1..4), mobil immer
+   einspaltig. Karten sind oben ausgerichtet wie Module in einem Rack. */
+
+#rack { max-width: 1680px; margin: 0 auto; position: relative; }
+
+#layers {
+  display: grid; gap: 14px; padding: 4px 14px; align-items: stretch;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); /* "auto" */
+}
+#layers[data-cols="1"] { grid-template-columns: minmax(0, 560px); justify-content: center; }
+#layers[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#layers[data-cols="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#layers[data-cols="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.empty-hint { grid-column: 1 / -1; }
+
+/* Alle Module in einer Reihe gleich hoch (wie in einem echten Rack):
+   die Karten strecken sich, und das XY-Pad schluckt die Resthöhe. */
+#layers .card { display: flex; flex-direction: column; }
+.card .pad-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.card .xypad { flex: 1; height: auto; min-height: 170px; }
+.pad-labels { flex: none; }
+
+/* Kompakt-Modus: flachere Pads, engere Karten */
+#layers.compact .card .xypad { min-height: 120px; }
+#layers.compact .knob-row { padding: 6px 8px 10px; }
+#layers.compact .card-head { padding: 8px 10px 4px 12px; }
+
+/* Mobil bleibt alles einspaltig, egal welche Einstellung */
+@media (max-width: 640px) {
+  #layers, #layers[data-cols] { grid-template-columns: 1fr; justify-content: stretch; }
+}
+
+/* ---------- Flug-Modul (Karte im Rack) ---------- */
+.flight-card .fl-stage {
+  flex: 1; min-height: 200px; margin: 4px 12px 0 14px; border-radius: 10px;
+}
+#layers.compact .flight-card:not(.fullscreen) .fl-stage { min-height: 150px; }
+
+/* Vollbild: dieselbe Karte spannt sich über den Schirm (CSS statt
+   Fullscreen-API — funktioniert auch auf iOS) */
+.flight-card.fullscreen {
+  position: fixed; inset: 0; z-index: 46; border-radius: 0; border: none;
+  display: flex; flex-direction: column; background: #070b12;
+}
+.flight-card.fullscreen .fl-stage {
+  flex: 1; min-height: 0; margin: 0; border-radius: 0;
+}
+body.flight-fs { overflow: hidden; }
+
+/* ---------- Erweiterter Modus: Desktop-Layout ---------- */
+.ext-wrap { max-width: 1160px; margin: 0 auto; }
+.ext-body { display: grid; grid-template-columns: 1fr; }
+/* mobil: Herangehensweise zuerst (wie bisher), dann Pad */
+.ext-col.side { order: -1; }
+
+@media (min-width: 900px) {
+  .ext-body {
+    grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
+    gap: 0 40px; align-items: start;
+  }
+  .ext-col.side { order: 0; }
+  #extended .xypad-big { height: min(46vh, 430px) !important; }
+  #extended .knob-row.wrap { justify-content: flex-start; gap: 12px 10px; }
+}
+
+/* ---------- Drift-Modul (∿) ---------- */
+.lfo-lane { margin: 8px 12px 0 14px; padding: 8px 10px 10px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+  border-left: 3px solid var(--c); }
+.lfo-lane-top { display: flex; align-items: center; gap: 10px; }
+.lfo-name { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--dim); flex: 1; }
+.lfo-lane-top select { background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px;
+  font-family: var(--mono); font-size: 11px; appearance: none; }
+.lfo-lane-top .knob { width: 52px; }
+.lfo-lane-top .knob-face { width: 40px; height: 40px; }
+.lfo-lane-top .knob-face::after { transform-origin: 50% 14px; top: 6px; height: 9px; }
+.lfo-viz { display: block; width: 100%; height: 34px; margin-top: 6px; }
+.lfo-card .port-row { margin-top: auto; }
+#lfo-btn {
+  flex: none; width: 52px; height: 52px; border-radius: 26px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  font-size: 20px;
+}
+#lfo-btn:active { transform: scale(0.95); }
+#lfo-btn.on { color: var(--accent); border-color: var(--accent); }
+
+/* ---------- Master-Modul ---------- */
+/* Akzentfarbe themed: hell im Night-, dunkel im Day-Modus */
+.master-card, .master-card .port-wrap { --c: #cad5df; --pc: #cad5df; }
+body.day .master-card, body.day .master-card .port-wrap { --c: #54677a; --pc: #54677a; }
+
+.ext-section.in-card { margin: 10px 12px 4px 14px; }
+.chord-chips.in-card { padding: 8px 12px 14px 14px; }
+/* Restraum sammelt sich vor dem Hall-Block — Buchsen bleiben unten */
+.master-card .ext-section.in-card:last-of-type { margin-top: auto; }
+
+/* ---------- Fußleisten-Knöpfe (≣ / ⚙) ---------- */
+#settings-btn, #master-btn {
+  flex: none; width: 52px; height: 52px; border-radius: 26px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  font-size: 20px;
+}
+#settings-btn:active, #master-btn:active { transform: scale(0.95); }
+#master-btn.on { color: var(--accent); border-color: var(--accent); }
+
+/* Schmale Schirme: vier Knöpfe + Slider müssen in eine Zeile passen */
+@media (max-width: 480px) {
+  footer.bar { gap: 6px; padding-left: 10px; padding-right: 10px; }
+  #fly-btn, #settings-btn, #master-btn, #lfo-btn {
+    width: 44px; height: 44px; border-radius: 22px; font-size: 17px;
+  }
+  #add-btn { height: 44px; padding: 0 14px; border-radius: 22px; font-size: 13px; }
+  #master { min-width: 56px; }
+}
+
+#settings-pop {
+  position: fixed; right: 14px; bottom: calc(84px + env(safe-area-inset-bottom));
+  z-index: 42; width: 240px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 12px; box-shadow: 0 12px 34px -12px rgba(0,0,0,0.8);
+}
+#settings-pop .sheet-title { padding: 0 2px 10px; }
+#settings-pop .world { padding: 0 0 10px; }
+#settings-pop .toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--mono); font-size: 11px; color: var(--dim);
+  letter-spacing: 0.14em; text-transform: uppercase;
+}
+.toggle {
+  width: 44px; height: 26px; border-radius: 13px; border: 1px solid var(--line);
+  background: var(--panel-2); position: relative; flex: none;
+}
+.toggle::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+  border-radius: 50%; background: var(--dim); transition: left 0.15s, background 0.15s;
+}
+.toggle.on { border-color: var(--accent); }
+.toggle.on::after { left: 21px; background: var(--accent); }

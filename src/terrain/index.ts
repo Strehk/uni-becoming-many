@@ -9,6 +9,7 @@ import type * as THREE from "three/webgpu";
 import type { Node } from "three/webgpu";
 import type { TerrainConfig } from "./provider.ts";
 import { DEFAULT_PROVIDER_ID, getTerrainProvider } from "./providers/index.ts";
+import type { TerrainLayerCompositor } from "./render/terrain-material.ts";
 import { type KitUniforms, createSenseUniforms } from "./render/uniforms.ts";
 import type { StreamingConfig } from "./scheduler.ts";
 import { type SenseSource, TerrainWorld } from "./world.ts";
@@ -27,6 +28,8 @@ export interface CreateTerrainWorldOptions {
   uniforms?: KitUniforms;
   /** Optional perception input; when present the world modulates the sense look. */
   senses?: SenseSource;
+  /** Optional sense-layer compositor (ShaderSinne port) layered over the biome albedo. */
+  layers?: TerrainLayerCompositor;
 }
 
 export interface CreateTerrainWorldResult {
@@ -47,6 +50,7 @@ export function createTerrainWorld(opts: CreateTerrainWorldOptions): CreateTerra
     ...(opts.config ? { config: opts.config } : {}),
     ...(opts.streaming ? { streaming: opts.streaming } : {}),
     ...(opts.senses ? { senses: opts.senses } : {}),
+    ...(opts.layers ? { layers: opts.layers } : {}),
   });
   return { world, uniforms };
 }
@@ -56,4 +60,5 @@ export type { BiomeChunkSource, BiomeChunkView } from "./world.ts";
 export type { TerrainConfig, TerrainProvider } from "./provider.ts";
 export type { StreamingConfig } from "./scheduler.ts";
 export { createSenseUniforms, type KitUniforms } from "./render/uniforms.ts";
+export type { TerrainLayerCompositor, TerrainSurfaceNodes } from "./render/terrain-material.ts";
 export { DEFAULT_PROVIDER_ID } from "./providers/index.ts";

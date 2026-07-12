@@ -1,40 +1,42 @@
 /**
- * Senses — the perception layer as a sense-switch state machine (docs §6, P2).
+ * Senses — the perception layer of Becoming Many (docs/MASTERPLAN.md §4).
  *
- * The 7 perceptual senses are *view modes* over the same world: each is a target set of shading
- * uniforms, and switching **lerps** the live uniforms from wherever they are toward the new
- * sense's profile over a ~4.5 s eased transition. This module is renderer-adjacent only in that it
- * owns TSL `uniform()` nodes (the values a terrain/material graph reads) — it holds no meshes and
- * no scene.
+ * Since the module integration, senses are **layers**, not exclusive modes: each of the
+ * nine {@link SenseId}s has an intensity signal `signals.sense[id]` (0..1) and any
+ * combination may be active at once. This module owns three things:
  *
- * Signal-driven (the substrate is the backbone, not this module): input writes
- * `signals.activeSense`; the manager *subscribes* to it and begins a transition; each frame it
- * lerps the uniforms and publishes `signals.senseProgress` (0..1). So "which sense" lives in the
- * shared registry where anything can react to it (a creature's mood, an audio cue), and this
- * module is just the one writer of `senseProgress` and the owner of the visual uniforms.
+ *   - the {@link createSenseDirector} wiring (bus commands → sense signals, dominant
+ *     sense, `sense:changed` mirror) — see `director.ts`;
+ *   - the **atmosphere** state machine below: fog / view-reveal / rim uniforms that the
+ *     terrain + water materials read. The atmosphere can't blend nine ways at once, so it
+ *     eases toward the profile of the *dominant* sense (`signals.activeSense`, written by
+ *     the director), falling back to the white-out "none" profile when all layers are off;
+ *   - the manual key bindings: **1** clears to Luft, **2–9** toggle the keyed sense
+ *     layers (SENSE_KEY_ORDER), **0** also clears
+ *     all. Keys emit bus commands (`sense:toggle` / `sense:clear`), never write signals —
+ *     the same path the dev UI uses, and the same signals Theatre drives.
  *
- * Concept-ported from neural-flight-template's `senses.ts`; profiles and easing preserved, wiring
- * re-expressed onto signals + TSL `uniform()` nodes.
+ * The per-sense *color* layers (ShaderSinneModul port) live in `senses/shader/` and are
+ * composited inside the terrain material; this module only steers the shared atmosphere.
  */
 import { uniform } from "three/tsl";
 import { Color } from "three/webgpu";
+import type { Bus } from "../signals/index.ts";
 import { signals } from "../signals/index.ts";
+import { createSenseDirector } from "./director.ts";
+import { SENSE_KEY_ORDER, SENSE_LABELS, type SenseId } from "./ids.ts";
+import { type ShaderSenses, createShaderSenses } from "./shader/index.ts";
 
-export type SenseId = "luft" | "echo" | "infrarot" | "duft" | "netzwerk" | "depth" | "normal";
+export { SENSE_KEY_ORDER, SENSE_LABELS, SENSE_ORDER, SENSE_SYNTH_MAP, isSenseId } from "./ids.ts";
+export type { SenseId } from "./ids.ts";
+export { createSenseDirector } from "./director.ts";
+export type { SenseDirector } from "./director.ts";
 
-/** Linear cycle order — keys 1–7 map to these indices. */
-export const SENSE_ORDER: readonly SenseId[] = [
-  "luft",
-  "echo",
-  "infrarot",
-  "duft",
-  "netzwerk",
-  "depth",
-  "normal",
-];
+/** The atmosphere target the dominant sense eases toward. */
+export type AtmosphereId = SenseId | "none";
 
 export interface SenseProfile {
-  id: SenseId;
+  id: AtmosphereId;
   label: string;
   /** How far you can see, in metres (the view-radius cutoff). */
   viewRadius: number;
@@ -56,16 +58,17 @@ export interface SenseProfile {
   rimColor: number;
 }
 
-export const SENSE_PROFILES: Record<SenseId, SenseProfile> = {
-  // 1 — sensory void / white-out: world culled, only fog remains.
-  luft: {
-    id: "luft",
-    label: "Luft",
-    viewRadius: 4,
-    revealSoftness: 4,
+export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
+  // No sense active — sensory void / white-out: the world is culled, only pale fog remains.
+  // (The ShaderSinne compositor mirrors this: all layers off ⇒ the white base colour.)
+  none: {
+    id: "none",
+    label: "Leere (kein Sinn)",
+    viewRadius: 60,
+    revealSoftness: 40,
     depthLevels: 2,
-    fogNear: 2,
-    fogFar: 30,
+    fogNear: 4,
+    fogFar: 90,
     rimPower: 1,
     rimStrength: 0,
     colorNear: 0xf0f4ff,
@@ -73,90 +76,10 @@ export const SENSE_PROFILES: Record<SenseId, SenseProfile> = {
     fogColor: 0xf0f4ff,
     rimColor: 0xf0f4ff,
   },
-  // 2 — bat sonar: tight dark bubble, strong papercut bands, wire glow.
-  echo: {
-    id: "echo",
-    label: "Echo Location",
-    viewRadius: 120,
-    revealSoftness: 30,
-    depthLevels: 7,
-    fogNear: 12,
-    fogFar: 150,
-    rimPower: 3.0,
-    rimStrength: 0.9,
-    colorNear: 0x0a141f,
-    colorFar: 0x4f86b0,
-    fogColor: 0x05070d,
-    rimColor: 0x6fb0ff,
-  },
-  // 3 — thermal: wide field, heat tint, warm edges (placeholder).
-  infrarot: {
-    id: "infrarot",
-    label: "Infrarot",
-    viewRadius: 620,
-    revealSoftness: 80,
-    depthLevels: 12,
-    fogNear: 80,
-    fogFar: 600,
-    rimPower: 2.2,
-    rimStrength: 0.6,
-    colorNear: 0xffb14e,
-    colorFar: 0x3a0d52,
-    fogColor: 0x180a14,
-    rimColor: 0xff7a3c,
-  },
-  // 4 — smell / chemosense: wide field, green gradient (placeholder).
-  duft: {
-    id: "duft",
-    label: "Duft",
-    viewRadius: 600,
-    revealSoftness: 80,
-    depthLevels: 18,
-    fogNear: 70,
-    fogFar: 560,
-    rimPower: 2.0,
-    rimStrength: 0.35,
-    colorNear: 0xbfe08a,
-    colorFar: 0x2f5a4a,
-    fogColor: 0x0c1612,
-    rimColor: 0x9ff06a,
-  },
-  // 5 — collective / network: wide field, red accent (placeholder).
-  netzwerk: {
-    id: "netzwerk",
-    label: "Netzwerk",
-    viewRadius: 680,
-    revealSoftness: 90,
-    depthLevels: 14,
-    fogNear: 90,
-    fogFar: 640,
-    rimPower: 2.6,
-    rimStrength: 0.7,
-    colorNear: 0xff5a6a,
-    colorFar: 0x1a1030,
-    fogColor: 0x0a0814,
-    rimColor: 0xff5a6a,
-  },
-  // 6 — dev diagnostic: quantized greyscale depth bands (placeholder).
-  depth: {
-    id: "depth",
-    label: "Depth Debug",
-    viewRadius: 460,
-    revealSoftness: 50,
-    depthLevels: 8,
-    fogNear: 40,
-    fogFar: 440,
-    rimPower: 1.5,
-    rimStrength: 0.2,
-    colorNear: 0x111418,
-    colorFar: 0xe8eef5,
-    fogColor: 0x0a0a0e,
-    rimColor: 0xffffff,
-  },
-  // 7 — daylight human vision: full-colour, near-continuous shading.
-  normal: {
-    id: "normal",
-    label: "Normal",
+  // 1 — daylight colour vision: full-colour, near-continuous shading.
+  farben: {
+    id: "farben",
+    label: SENSE_LABELS.farben,
     viewRadius: 500,
     revealSoftness: 60,
     depthLevels: 48,
@@ -169,30 +92,145 @@ export const SENSE_PROFILES: Record<SenseId, SenseProfile> = {
     fogColor: 0x0a0a14,
     rimColor: 0x9fc0ff,
   },
+  // 2 — bat sonar: pure luminance depth. No coloured atmosphere/rim: echolocation
+  // should read as a black/white/greyscale depth map.
+  echo: {
+    id: "echo",
+    label: SENSE_LABELS.echo,
+    viewRadius: 120,
+    revealSoftness: 30,
+    depthLevels: 7,
+    fogNear: 12,
+    fogFar: 150,
+    rimPower: 3.0,
+    rimStrength: 0,
+    colorNear: 0x000000,
+    colorFar: 0xffffff,
+    fogColor: 0x000000,
+    rimColor: 0xffffff,
+  },
+  // 3 — thermal: wide field, heat tint, warm edges.
+  infrarot: {
+    id: "infrarot",
+    label: SENSE_LABELS.infrarot,
+    viewRadius: 620,
+    revealSoftness: 80,
+    depthLevels: 12,
+    fogNear: 80,
+    fogFar: 600,
+    rimPower: 2.2,
+    rimStrength: 0.6,
+    colorNear: 0xffb14e,
+    colorFar: 0x3a0d52,
+    fogColor: 0x180a14,
+    rimColor: 0xff7a3c,
+  },
+  // 4 — ultraviolet: violet dusk, revealed signals glow against it.
+  uv: {
+    id: "uv",
+    label: SENSE_LABELS.uv,
+    viewRadius: 520,
+    revealSoftness: 70,
+    depthLevels: 20,
+    fogNear: 60,
+    fogFar: 500,
+    rimPower: 2.4,
+    rimStrength: 0.5,
+    colorNear: 0x3c2b5e,
+    colorFar: 0x120a24,
+    fogColor: 0x0a0614,
+    rimColor: 0xb26bff,
+  },
+  // 5 — smell / chemosense: wide field, green gradient; scent plumes carry the colour.
+  duft: {
+    id: "duft",
+    label: SENSE_LABELS.duft,
+    viewRadius: 600,
+    revealSoftness: 80,
+    depthLevels: 18,
+    fogNear: 70,
+    fogFar: 560,
+    rimPower: 2.0,
+    rimStrength: 0.35,
+    colorNear: 0xbfe08a,
+    colorFar: 0x2f5a4a,
+    fogColor: 0x0c1612,
+    rimColor: 0x9ff06a,
+  },
+  // 6 — collective / network: wide field, red accent over near-dark ground.
+  netzwerk: {
+    id: "netzwerk",
+    label: SENSE_LABELS.netzwerk,
+    viewRadius: 680,
+    revealSoftness: 90,
+    depthLevels: 14,
+    fogNear: 90,
+    fogFar: 640,
+    rimPower: 2.6,
+    rimStrength: 0.7,
+    colorNear: 0xff5a6a,
+    colorFar: 0x1a1030,
+    fogColor: 0x0a0814,
+    rimColor: 0xff5a6a,
+  },
+  // 7 — motion vision: the still world sinks into darkness, only movement glows.
+  motion: {
+    id: "motion",
+    label: SENSE_LABELS.motion,
+    viewRadius: 420,
+    revealSoftness: 60,
+    depthLevels: 10,
+    fogNear: 30,
+    fogFar: 380,
+    rimPower: 2.0,
+    rimStrength: 0.35,
+    colorNear: 0x1a222c,
+    colorFar: 0x05070a,
+    fogColor: 0x04050a,
+    rimColor: 0x7f9fbf,
+  },
+  // 8 — magnetoreception: cool auroral dusk, the sky carries the field.
+  magnetfeld: {
+    id: "magnetfeld",
+    label: SENSE_LABELS.magnetfeld,
+    viewRadius: 680,
+    revealSoftness: 90,
+    depthLevels: 16,
+    fogNear: 90,
+    fogFar: 640,
+    rimPower: 2.2,
+    rimStrength: 0.45,
+    colorNear: 0x274038,
+    colorFar: 0x101c2e,
+    fogColor: 0x060a12,
+    rimColor: 0x5cf0c8,
+  },
+  // 9 — 360° vision: warm, wide, near-continuous — the projection does the work.
+  rundum: {
+    id: "rundum",
+    label: SENSE_LABELS.rundum,
+    viewRadius: 560,
+    revealSoftness: 70,
+    depthLevels: 32,
+    fogNear: 80,
+    fogFar: 520,
+    rimPower: 1.5,
+    rimStrength: 0.3,
+    colorNear: 0x9aa06a,
+    colorFar: 0x6a7a88,
+    fogColor: 0x0c0a12,
+    rimColor: 0xffd9a0,
+  },
 };
 
 /**
- * The live TSL uniforms a terrain/material graph reads. These are real `uniform()` nodes — bind
- * them into a `*NodeMaterial` graph (`.colorNode`, fog, fresnel) and the sense transitions drive
- * shading for free. `scalars` hold `{ value: number }`, `colors` hold `{ value: Color }`; the
- * manager mutates `.value` each frame.
+ * Build the live TSL atmosphere uniforms, seeded to `start`'s profile. These are real
+ * `uniform()` nodes — bind them into a `*NodeMaterial` graph (`.colorNode`, fog, fresnel)
+ * and the sense transitions drive shading for free. The return type is inferred so the
+ * node math methods survive (same pattern as the terrain kit) — the terrain accepts this
+ * object directly as its `KitUniforms`.
  */
-export interface SenseUniforms {
-  viewRadius: { value: number };
-  revealSoftness: { value: number };
-  depthLevels: { value: number };
-  fogNear: { value: number };
-  fogFar: { value: number };
-  rimPower: { value: number };
-  rimStrength: { value: number };
-  colorNear: { value: Color };
-  colorFar: { value: Color };
-  fogColor: { value: Color };
-  rimColor: { value: Color };
-}
-
-/** Build the live uniform nodes, seeded to `start`'s profile. */
-export function createSenseUniforms(start: SenseId): SenseUniforms {
+export function createSenseUniforms(start: AtmosphereId) {
   const p = SENSE_PROFILES[start];
   return {
     viewRadius: uniform(p.viewRadius),
@@ -206,8 +244,14 @@ export function createSenseUniforms(start: SenseId): SenseUniforms {
     colorFar: uniform(new Color(p.colorFar)),
     fogColor: uniform(new Color(p.fogColor)),
     rimColor: uniform(new Color(p.rimColor)),
+    /** Master world visibility 0..1 — 0 while no sense is active (the pale void),
+     *  eased to 1 as senses reveal the world. The terrain + water gate on this. */
+    worldReveal: uniform(start === "none" ? 0 : 1),
   };
 }
+
+/** The live atmosphere uniform set (inferred — keeps the TSL node methods). */
+export type SenseUniforms = ReturnType<typeof createSenseUniforms>;
 
 interface ScalarSnapshot {
   viewRadius: number;
@@ -217,6 +261,12 @@ interface ScalarSnapshot {
   fogFar: number;
   rimPower: number;
   rimStrength: number;
+  worldReveal: number;
+}
+
+/** Master world visibility a profile eases toward: 0 for the void, 1 for any sense. */
+function revealTarget(id: AtmosphereId): number {
+  return id === "none" ? 0 : 1;
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -229,13 +279,12 @@ function easeInOutCubic(t: number): number {
 }
 
 /**
- * The transition engine. Lerps `uniforms` toward the active sense's profile; publishes
- * `signals.senseProgress`. Driven by whatever writes `signals.activeSense` (see {@link createSenses}).
+ * The atmosphere transition engine. Lerps `uniforms` toward the target profile; publishes
+ * `signals.senseProgress`. Driven by `signals.activeSense` (see {@link createSenses}).
  */
 export class SenseManager {
   private readonly u: SenseUniforms;
-  private index: number;
-  /** Seconds a full sense transition takes. */
+  /** Seconds a full atmosphere transition takes. */
   duration = 4.5;
 
   private elapsed: number;
@@ -244,9 +293,8 @@ export class SenseManager {
   private to: SenseProfile;
   private readonly toColors: { near: Color; far: Color; fog: Color; rim: Color };
 
-  constructor(uniforms: SenseUniforms, start: SenseId) {
+  constructor(uniforms: SenseUniforms, start: AtmosphereId) {
     this.u = uniforms;
-    this.index = SENSE_ORDER.indexOf(start);
     this.to = SENSE_PROFILES[start];
     this.from = this.snapshotScalars();
     this.fromColors = { near: new Color(), far: new Color(), fog: new Color(), rim: new Color() };
@@ -261,19 +309,15 @@ export class SenseManager {
     this.applyProfile(this.to);
   }
 
-  get currentIndex(): number {
-    return this.index;
-  }
   get current(): SenseProfile {
     return this.to;
   }
 
   /** Begin easing toward `id` (idempotent if already heading there). */
-  switchTo(id: SenseId): void {
+  switchTo(id: AtmosphereId): void {
     if (id === this.to.id) {
       return;
     }
-    this.index = SENSE_ORDER.indexOf(id);
     this.beginTransition(SENSE_PROFILES[id]);
   }
 
@@ -300,6 +344,9 @@ export class SenseManager {
     this.u.fogFar.value = lerp(this.from.fogFar, this.to.fogFar, st);
     this.u.rimPower.value = lerp(this.from.rimPower, this.to.rimPower, st);
     this.u.rimStrength.value = lerp(this.from.rimStrength, this.to.rimStrength, st);
+    // Master reveal leads the styling (rt, the radius curve) so the world fades in from
+    // the void slightly behind the atmosphere settling — and out ahead of it.
+    this.u.worldReveal.value = lerp(this.from.worldReveal, revealTarget(this.to.id), st);
 
     this.u.colorNear.value.copy(this.fromColors.near).lerp(this.toColors.near, st);
     this.u.colorFar.value.copy(this.fromColors.far).lerp(this.toColors.far, st);
@@ -335,6 +382,7 @@ export class SenseManager {
       fogFar: this.u.fogFar.value,
       rimPower: this.u.rimPower.value,
       rimStrength: this.u.rimStrength.value,
+      worldReveal: this.u.worldReveal.value,
     };
   }
 
@@ -346,6 +394,7 @@ export class SenseManager {
     this.u.fogFar.value = p.fogFar;
     this.u.rimPower.value = p.rimPower;
     this.u.rimStrength.value = p.rimStrength;
+    this.u.worldReveal.value = revealTarget(p.id);
     this.u.colorNear.value.set(p.colorNear);
     this.u.colorFar.value.set(p.colorFar);
     this.u.fogColor.value.set(p.fogColor);
@@ -354,40 +403,51 @@ export class SenseManager {
 }
 
 export interface Senses {
-  /** Live TSL uniforms to bind into a terrain/material node graph. */
+  /** Live TSL atmosphere uniforms to bind into a terrain/material node graph. */
   readonly uniforms: SenseUniforms;
-  /** The transition engine (for `current`, `currentIndex`, direct `switchTo`). */
+  /** The atmosphere transition engine. */
   readonly manager: SenseManager;
-  /** Advance the sense transition one frame. Call once per frame. */
+  /** The four terrain-composited colour senses (ShaderSinneModul port): compositor for
+   *  the terrain material, control descriptors for the UI, signal-eased activation. */
+  readonly shader: ShaderSenses;
+  /** Advance the atmosphere transition + layer easing one frame. Call once per frame. */
   update(dt: number): void;
   dispose(): void;
 }
 
 export interface SensesOptions {
-  /** Sense to start settled on. Defaults to "normal". */
-  start?: SenseId;
+  /** Sense layers to start with (intensity 1). Defaults to `[]` — the piece opens in the
+   *  white sensory void (all senses off ⇒ white world); the player / Theatre timeline
+   *  reveal the perceptions from there. Press 1–9 to layer them in. */
+  start?: readonly SenseId[];
   /** Where to attach the switch-key listener. Defaults to `window`. */
   target?: Window | HTMLElement;
 }
 
 /**
- * Wire the sense state machine to input and the signal substrate.
+ * Wire the sense layer system to input and the signal substrate.
  *
- * Keys **1–7** select a sense (writes `signals.activeSense`); **[** / **]** cycle prev/next. The
- * manager subscribes to `signals.activeSense`, so switching is fully decoupled from *how* it was
- * triggered — a controller, a timeline cue, or a zone trigger can write the same signal.
+ * Key **1** switches to Luft (all layers off), **2–9** toggle the keyed sense layers,
+ * and **0** also switches everything off. Keys emit bus commands — the same channel the dev UI and any future controller use — and the
+ * {@link createSenseDirector} turns commands into signal writes. The atmosphere manager
+ * follows `signals.activeSense` (the dominant layer), so switching is fully decoupled from
+ * *how* it was triggered.
  */
-export function createSenses(options: SensesOptions = {}): Senses {
-  const start = options.start ?? "normal";
+export function createSenses(bus: Bus, options: SensesOptions = {}): Senses {
   const target = options.target ?? window;
 
-  // Seed the active-sense signal so the manager and any subscriber agree on the starting sense.
-  signals.activeSense.value = start;
+  const director = createSenseDirector(bus);
 
-  const uniforms = createSenseUniforms(start);
-  const manager = new SenseManager(uniforms, start);
+  // Seed the starting layers (default: none — the white void).
+  for (const id of options.start ?? []) {
+    bus.emit("sense:set", { id, value: 1 });
+  }
 
-  // The manager follows the signal — this is the single place "active sense" becomes a transition.
+  const uniforms = createSenseUniforms(signals.activeSense.peek());
+  const manager = new SenseManager(uniforms, signals.activeSense.peek());
+  const shader = createShaderSenses(bus);
+
+  // The manager follows the dominant sense — the one place atmosphere becomes a transition.
   const unsubscribe = signals.activeSense.subscribe((id) => manager.switchTo(id));
 
   const isTyping = (): boolean => {
@@ -399,45 +459,51 @@ export function createSenses(options: SensesOptions = {}): Senses {
     );
   };
 
-  const onKeyDown = (event: KeyboardEvent): void => {
+  const onKeyDown = (event: Event): void => {
+    if (!(event instanceof KeyboardEvent)) {
+      return;
+    }
     if (event.metaKey || event.ctrlKey || event.altKey || isTyping()) {
       return;
     }
-    // Digit1..Digit7 → SENSE_ORDER[0..6].
-    const digit = /^Digit([1-7])$/.exec(event.code);
+    // Digit1 → Luft / all off. Digit2..Digit9 → toggle SENSE_KEY_ORDER[1..8].
+    const digit = /^Digit([1-9])$/.exec(event.code);
     if (digit) {
       const idx = Number(digit[1]) - 1;
-      const id = SENSE_ORDER[idx];
+      const id = SENSE_KEY_ORDER[idx];
+      if (id === null) {
+        bus.emit("sense:clear");
+        event.preventDefault();
+        return;
+      }
       if (id) {
-        signals.activeSense.value = id;
+        bus.emit("sense:toggle", { id });
         event.preventDefault();
       }
       return;
     }
-    if (event.code === "BracketLeft" || event.code === "BracketRight") {
-      const dir = event.code === "BracketRight" ? 1 : -1;
-      const len = SENSE_ORDER.length;
-      const nextIndex = (((manager.currentIndex + dir) % len) + len) % len;
-      const id = SENSE_ORDER[nextIndex];
-      if (id) {
-        signals.activeSense.value = id;
-        event.preventDefault();
-      }
+    if (event.code === "Digit0") {
+      bus.emit("sense:clear");
+      event.preventDefault();
     }
   };
 
-  const listener = target as EventTarget;
-  listener.addEventListener("keydown", onKeyDown as EventListener);
+  const listener: EventTarget = target;
+  listener.addEventListener("keydown", onKeyDown);
 
   return {
     uniforms,
     manager,
+    shader,
     update(dt: number): void {
       manager.update(dt);
+      shader.update(dt);
     },
     dispose(): void {
       unsubscribe();
-      listener.removeEventListener("keydown", onKeyDown as EventListener);
+      shader.dispose();
+      director.dispose();
+      listener.removeEventListener("keydown", onKeyDown);
     },
   };
 }

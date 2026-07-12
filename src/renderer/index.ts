@@ -40,6 +40,13 @@ export interface Renderer {
    * @param onFrame optional callback given the seconds elapsed since the previous frame.
    */
   start(onFrame?: (dtSeconds: number) => void): void;
+  /**
+   * Replace the default `render(scene, camera)` pass with a custom one (e.g. the
+   * 360° little-planet projection). The override receives a `defaultRender` thunk so
+   * it can fall back. Pass `null` to restore the default pass. Ignored while an XR
+   * session presents (the headset owns the projection).
+   */
+  setRenderOverride(override: ((defaultRender: () => void) => void) | null): void;
   /** Stop the loop, drop listeners, and release GPU resources. */
   dispose(): void;
 }
@@ -90,14 +97,23 @@ export async function createRenderer(): Promise<Renderer> {
     camera.updateProjectionMatrix();
   };
 
+  let renderOverride: ((defaultRender: () => void) => void) | null = null;
+
   function start(onFrame?: (dtSeconds: number) => void): void {
     window.addEventListener("resize", onResize);
     let lastMs = 0;
+    const defaultRender = (): void => {
+      renderer.render(scene, camera);
+    };
     renderer.setAnimationLoop((nowMs: number) => {
       const dtSeconds = lastMs === 0 ? 0 : (nowMs - lastMs) / 1000;
       lastMs = nowMs;
       onFrame?.(dtSeconds);
-      renderer.render(scene, camera);
+      if (renderOverride && !renderer.xr.isPresenting) {
+        renderOverride(defaultRender);
+      } else {
+        defaultRender();
+      }
     });
   }
 
@@ -114,6 +130,9 @@ export async function createRenderer(): Promise<Renderer> {
     scene,
     camera,
     start,
+    setRenderOverride(override): void {
+      renderOverride = override;
+    },
     dispose,
   };
 }

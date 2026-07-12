@@ -14,7 +14,7 @@
 // IMPORTANT — see AGENT.md "WebGPU rendering": classes from `three/webgpu`.
 
 import * as THREE from "three/webgpu";
-import type { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from "three/webgpu";
+import type { MeshBasicNodeMaterial } from "three/webgpu";
 import { cellToWorldCenter } from "./coords.ts";
 import type { ChunkLike } from "./scheduler.ts";
 
@@ -28,7 +28,7 @@ export interface TerrainChunkParams {
   normals: Float32Array;
   /** Shared grid index (same topology for every chunk). */
   index: Uint16Array | Uint32Array;
-  material: MeshStandardNodeMaterial;
+  material: MeshBasicNodeMaterial;
   /** World-Y per vertex — chunk providers supply it for the flight-floor cache. */
   heightGrid?: Float32Array;
   /** Per-vertex biome id — reserved for biome-aware senses (not rendered yet). */

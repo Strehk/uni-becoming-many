@@ -1,1 +1,271 @@
-{}
+{
+  "sheetsById": {
+    "Timeline": {
+      "staticOverrides": {
+        "byObject": {
+          "arc": {}
+        }
+      },
+      "sequence": {
+        "subUnitsPerUnit": 30,
+        "length": 300,
+        "type": "PositionalSequence",
+        "tracksByObject": {
+          "arc": {
+            "trackIdByPropPath": {
+              "[\"unrest\"]": "track:unrest",
+              "[\"intensity\"]": "track:intensity",
+              "[\"senses\",\"farben\"]": "track:senses.farben",
+              "[\"senses\",\"echo\"]": "track:senses.echo",
+              "[\"senses\",\"infrarot\"]": "track:senses.infrarot",
+              "[\"senses\",\"uv\"]": "track:senses.uv",
+              "[\"senses\",\"duft\"]": "track:senses.duft",
+              "[\"senses\",\"netzwerk\"]": "track:senses.netzwerk",
+              "[\"senses\",\"motion\"]": "track:senses.motion",
+              "[\"senses\",\"magnetfeld\"]": "track:senses.magnetfeld",
+              "[\"senses\",\"rundum\"]": "track:senses.rundum"
+            },
+            "trackData": {
+              "track:unrest": {
+                "type": "BasicKeyframedTrack",
+                "__debugName": "unrest",
+                "keyframes": [
+                  {
+                    "id": "kf-unrest-1",
+                    "position": 0,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "bezier",
+                    "value": 0
+                  },
+                  {
+                    "id": "kf-unrest-2",
+                    "position": 300,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "bezier",
+                    "value": 1
+                  }
+                ]
+              },
+              "track:intensity": {
+                "type": "BasicKeyframedTrack",
+                "__debugName": "intensity",
+                "keyframes": [
+                  {
+                    "id": "kf-intensity-3",
+                    "position": 0,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "bezier",
+                    "value": 0
+                  },
+                  {
+                    "id": "kf-intensity-4",
+                    "position": 300,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "bezier",
+                    "value": 1
+                  }
+                ]
+              },
+              "track:senses.farben": {
+                "type": "BasicKeyframedTrack",
+                "__debugName": "senses.farben",
+                "keyframes": [
+                  {
+                    "id": "kf-farben-5",
+                    "position": 0,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 0
+                  },
+                  {
+                    "id": "kf-farben-6",
+                    "position": 166.666667,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 1
+                  }
+                ]
+              },
+              "track:senses.echo": {
+                "type": "BasicKeyframedTrack",
+                "__debugName": "senses.echo",
+                "keyframes": [
+                  {
+                    "id": "kf-echo-7",
+                    "position": 0,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 0
+                  },
+                  {
+                    "id": "kf-echo-8",
+                    "position": 33.333333,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 1
+                  }
+                ]
+              },
+              "track:senses.infrarot": {
+                "type": "BasicKeyframedTrack",
+                "__debugName": "senses.infrarot",
+                "keyframes": [
+                  {
+                    "id": "kf-infrarot-9",
+                    "position": 0,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 0
+                  },
+                  {
+                    "id": "kf-infrarot-10",
+                    "position": 100,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 1
+                  }
+                ]
+              },
+              "track:senses.uv": {
+                "type": "BasicKeyframedTrack",
+                "__debugName": "senses.uv",
+                "keyframes": [
+                  {
+                    "id": "kf-uv-11",
+                    "position": 0,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 0
+                  },
+                  {
+                    "id": "kf-uv-12",
+                    "position": 133.333333,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 1
+                  }
+                ]
+              },
+              "track:senses.duft": {
+                "type": "BasicKeyframedTrack",
+                "__debugName": "senses.duft",
+                "keyframes": [
+                  {
+                    "id": "kf-duft-13",
+                    "position": 0,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 0
+                  }
+                ]
+              },
+              "track:senses.netzwerk": {
+                "type": "BasicKeyframedTrack",
+                "__debugName": "senses.netzwerk",
+                "keyframes": [
+                  {
+                    "id": "kf-netzwerk-14",
+                    "position": 0,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 0
+                  },
+                  {
+                    "id": "kf-netzwerk-15",
+                    "position": 233.333333,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 1
+                  }
+                ]
+              },
+              "track:senses.motion": {
+                "type": "BasicKeyframedTrack",
+                "__debugName": "senses.motion",
+                "keyframes": [
+                  {
+                    "id": "kf-motion-16",
+                    "position": 0,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 0
+                  },
+                  {
+                    "id": "kf-motion-17",
+                    "position": 66.666667,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 1
+                  }
+                ]
+              },
+              "track:senses.magnetfeld": {
+                "type": "BasicKeyframedTrack",
+                "__debugName": "senses.magnetfeld",
+                "keyframes": [
+                  {
+                    "id": "kf-magnetfeld-18",
+                    "position": 0,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 0
+                  },
+                  {
+                    "id": "kf-magnetfeld-19",
+                    "position": 200,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 1
+                  }
+                ]
+              },
+              "track:senses.rundum": {
+                "type": "BasicKeyframedTrack",
+                "__debugName": "senses.rundum",
+                "keyframes": [
+                  {
+                    "id": "kf-rundum-20",
+                    "position": 0,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 0
+                  },
+                  {
+                    "id": "kf-rundum-21",
+                    "position": 266.666667,
+                    "connectedRight": false,
+                    "handles": [0.5, 0, 0.5, 1],
+                    "type": "hold",
+                    "value": 1
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitionVersion": "0.4.0",
+  "revisionHistory": []
+}

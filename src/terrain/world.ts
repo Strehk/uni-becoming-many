@@ -17,14 +17,14 @@
 // IMPORTANT — see AGENT.md "WebGPU rendering": classes from `three/webgpu`.
 
 import * as THREE from "three/webgpu";
-import type { MeshBasicNodeMaterial, MeshStandardNodeMaterial, Node } from "three/webgpu";
+import type { MeshBasicNodeMaterial, Node } from "three/webgpu";
 import { TerrainChunk } from "./chunk.ts";
 import { ChunkHeightCache } from "./height-cache.ts";
 import type { TerrainConfig, TerrainProvider } from "./provider.ts";
 import { getTerrainProvider } from "./providers/index.ts";
-import { createTerrainMaterial } from "./render/terrain-material.ts";
+import { type TerrainLayerCompositor, createTerrainMaterial } from "./render/terrain-material.ts";
 import type { KitUniforms } from "./render/uniforms.ts";
-import { createWaterMaterial } from "./render/water-material.ts";
+import { type WaterMaterialHandle, createWaterMaterial } from "./render/water-material.ts";
 import { ChunkScheduler, type StreamingConfig } from "./scheduler.ts";
 import { TerrainWorkerPool } from "./worker/pool.ts";
 import { WorldgenClient } from "./worker/worldgen-client.ts";
@@ -78,13 +78,15 @@ export interface TerrainWorldOptions {
   streaming?: Partial<StreamingConfig>;
   /** Optional perception input; when present, `update` modulates the sense look. */
   senses?: SenseSource;
+  /** Optional sense-layer compositor (ShaderSinne port) layered over the biome albedo. */
+  layers?: TerrainLayerCompositor;
 }
 
 export class TerrainWorld {
   /** Parent of all chunk meshes; added to the scene in the constructor. */
   readonly group: THREE.Group;
 
-  private readonly material: MeshStandardNodeMaterial;
+  private readonly material: MeshBasicNodeMaterial;
   /** Shared water material (ocean + lakes + rivers); used by chunk providers. */
   private readonly waterMaterial: MeshBasicNodeMaterial;
   /** Live sense uniforms — modulated per frame when a SenseSource is wired. */
@@ -102,24 +104,40 @@ export class TerrainWorld {
   private pool?: TerrainWorkerPool;
   private worldgen?: WorldgenClient;
 
+  /** Unsubscribe from the sense-layer compositor's structural events. */
+  private readonly detachLayers?: () => void;
+
   private provider: TerrainProvider;
   private cfg: TerrainConfig;
+  /** Live GenParams overlay from the dev GUI — merged on top of configToParams
+   *  inside the worldgen worker. Only touched keys are pinned; empty by default. */
+  private paramsOverride: Record<string, number> = {};
 
   constructor(opts: TerrainWorldOptions) {
     this.group = new THREE.Group();
     opts.scene.add(this.group);
 
-    // Scene lighting for the PBR terrain material. The app scene ships no lights,
-    // so the world provides its own (parented to the group → disposed with it): a
-    // hemisphere fill (sky/ground ambient) plus a low directional "sun" for form.
-    // Provisional — a later phase can lift this to app level alongside the senses.
-    const hemi = new THREE.HemisphereLight(0xbfd4ff, 0x2a2620, 1.1);
-    const sun = new THREE.DirectionalLight(0xffffff, 1.4);
-    sun.position.set(-0.6, 1, 0.4);
-    this.group.add(hemi, sun);
+    // No scene lights: the terrain + water materials are UNLIT (the world is invisible
+    // until a sense reveals it, so form must not leak through PBR shading). Lighting
+    // flows through the senses instead — a lambert term folded into the `farben` layer
+    // (see terrain-material.ts).
 
-    this.material = createTerrainMaterial(opts.uniforms, opts.uTime);
-    this.waterMaterial = createWaterMaterial(opts.uniforms, opts.uTime);
+    // The shared material composes the sense layers (when provided); structural
+    // sense changes (blend mode / order) rebuild its colorNode in place.
+    const terrainMaterial = createTerrainMaterial(opts.uniforms, opts.uTime, opts.layers);
+    this.material = terrainMaterial.material;
+    const waterMaterial: WaterMaterialHandle = createWaterMaterial(
+      opts.uniforms,
+      opts.uTime,
+      opts.layers,
+    );
+    this.waterMaterial = waterMaterial.material;
+    if (opts.layers) {
+      this.detachLayers = opts.layers.onStructureChange(() => {
+        terrainMaterial.rewire();
+        waterMaterial.rewire();
+      });
+    }
     this.uniforms = opts.uniforms;
     if (opts.senses) this.senses = opts.senses;
     this.provider = opts.provider;
@@ -186,6 +204,31 @@ export class TerrainWorld {
     this.rebuild();
   }
 
+  /** Overlay live GenParams onto the worldgen generator (dev GUI). Only the keys
+   *  in `patch` are pinned; untouched params keep their configToParams defaults.
+   *  Affects the "chunk" (worldgen) provider only — pointwise providers ignore it. */
+  setParams(patch: Record<string, number>): void {
+    this.paramsOverride = { ...this.paramsOverride, ...patch };
+    this.rebuild();
+  }
+
+  /** Clear the live GenParams overlay; the world reverts to configToParams. */
+  resetParams(): void {
+    if (Object.keys(this.paramsOverride).length === 0) return;
+    this.paramsOverride = {};
+    this.rebuild();
+  }
+
+  /** Snapshot of the active flat config (seed/amplitude/frequency/octaves). */
+  get config(): TerrainConfig {
+    return { ...this.cfg };
+  }
+
+  /** The live GenParams overlay (touched keys only). */
+  get paramOverrides(): Readonly<Record<string, number>> {
+    return this.paramsOverride;
+  }
+
   get providerId(): string {
     return this.provider.id;
   }
@@ -202,6 +245,7 @@ export class TerrainWorld {
   }
 
   dispose(): void {
+    this.detachLayers?.();
     this.scheduler.clearAll();
     this.pool?.dispose();
     this.worldgen?.dispose();
@@ -232,12 +276,15 @@ export class TerrainWorld {
     // "chunk" providers (worldgen) own their whole per-region/per-chunk pipeline
     // and bake per-vertex height/normal/biome + a height grid for the flight floor.
     if (this.provider.kind === "chunk") {
+      const override =
+        Object.keys(this.paramsOverride).length > 0 ? this.paramsOverride : undefined;
       const r = await this.ensureWorldgen().build(
         this.cfg,
         gridX,
         gridZ,
         this.chunkSize,
         this.segments,
+        override,
       );
       return new TerrainChunk({
         gridX: r.gridX,

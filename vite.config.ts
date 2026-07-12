@@ -11,5 +11,13 @@ export default defineConfig({
   // (used in src/main.ts to await the async WebGPU init) survives the build.
   build: {
     target: "esnext",
+    rollupOptions: {
+      input: {
+        // The experience itself + the vendored synth (loaded as an iframe overlay
+        // in-app, or opened directly on a phone — see docs/MASTERPLAN.md §3G).
+        main: "index.html",
+        synth: "synth.html",
+      },
+    },
   },
 });

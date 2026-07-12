@@ -24,6 +24,8 @@ export function createSenseUniforms() {
     colorFar: uniform(new THREE.Color(0x6a7a88)),
     fogColor: uniform(new THREE.Color(0x0a0a14)),
     rimColor: uniform(new THREE.Color(0x9fc0ff)),
+    /** Master world visibility 0..1 (0 = pale void, no sense active). */
+    worldReveal: uniform(0),
   };
 }
 
