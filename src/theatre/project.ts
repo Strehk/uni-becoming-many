@@ -22,9 +22,9 @@
  * `three/webgpu`, no React). We reconstruct its useful part in `bindings.ts`.
  *
  * Dev vs prod: in dev, `@theatre/studio` is dynamically imported (so it tree-shakes out of the
- * production bundle). The committed `state.json` is passed as the base state in both modes once
- * it holds authored content (Studio's localStorage still wins while authoring; export via
- * `studio.createContentOfSaveFile("Becoming Many")` and overwrite `state.json` to publish).
+ * production bundle). The committed `state.json` is passed as the base state in both modes.
+ * In Studio mode we disable Theatre's browser-persistent draft cache so the editor opens on
+ * the committed disk state instead of an old localStorage snapshot.
  */
 import { getProject, types } from "@theatre/core";
 import type { ISheet, ISheetObject } from "@theatre/core";
@@ -85,7 +85,8 @@ export async function initTheatre(): Promise<Theatre> {
   if (import.meta.env.DEV && new URLSearchParams(window.location.search).get("studio") === "1") {
     // Dynamic import ⇒ @theatre/studio is excluded from the production bundle.
     const studio = (await import("@theatre/studio")).default;
-    studio.initialize();
+    studio.initialize({ usePersistentStorage: false });
+    studio.setSelection([timeline, arc]);
     // Tip: `studio.createContentOfSaveFile("Becoming Many")` returns the state object to write
     // into src/theatre/state.json — the production save file — without the Studio export button.
   }
