@@ -5,7 +5,6 @@ import { createDevConsole } from "./dev-console/index.ts";
 import { createSenseControls } from "./dev-console/sense-controls.ts";
 import { createWorldControls } from "./dev-console/world-controls.ts";
 import {
-  applyExperienceConfig,
   loadExperienceConfig,
   saveExperienceConfig,
   type ExperienceConfig,
@@ -136,6 +135,10 @@ renderer.scene.add(player.rig);
 const theatre = await initTheatre();
 window.addEventListener("pagehide", () => theatre.dispose());
 
+if (import.meta.env.DEV) {
+  (window as Window & { __bmDebug?: unknown }).__bmDebug = { clock, signals, theatre };
+}
+
 // ── Audio director on the bus ───────────────────────────────────────────────
 // Cues decouple *what* plays from *why*: an `event` cue plays whenever anyone emits `cue:<id>`;
 // a `time` cue is scheduled on the clock and obeys pause/seek/timeScale. Asset URLs are
@@ -172,7 +175,8 @@ const interfaceMode = createInterfaceModeController({
 });
 window.addEventListener("pagehide", () => interfaceMode.dispose());
 
-// Start/config menu: normal runs use the saved timeline config as a signal-authoring source.
+// Start/config menu: normal runs play the Theatre timeline. The config UI is an editor shell;
+// the actual authored sense timeline remains Theatre's `arc.senses.*` tracks.
 // Theatre Studio remains available via ?studio=1 for advanced timeline editing.
 if (!useTheatreStudio) {
   const startMenu = createStartMenu({
@@ -180,42 +184,41 @@ if (!useTheatreStudio) {
     onConfigure(next) {
       experienceConfig = next;
       saveExperienceConfig(next);
-      signals.senseAuthority.value = "config";
+      signals.senseAuthority.value = "theatre";
       clock.pause();
       clock.reset();
+      theatre.setPosition(0);
       signals.time.value = 0;
-      applyExperienceConfig(experienceConfig, 0);
       interfaceMode.setMode("configure");
     },
     onConfigChange(next) {
       experienceConfig = next;
       saveExperienceConfig(next);
-      applyExperienceConfig(experienceConfig, clock.now);
     },
     onTest(next) {
       experienceConfig = next;
       saveExperienceConfig(next);
-      signals.senseAuthority.value = "config";
+      signals.senseAuthority.value = "theatre";
       clock.reset();
+      theatre.setPosition(0);
       signals.time.value = 0;
-      applyExperienceConfig(experienceConfig, 0);
       clock.resume();
       interfaceMode.setMode("configure");
     },
     onStart(next) {
       experienceConfig = next;
       saveExperienceConfig(next);
-      signals.senseAuthority.value = "config";
+      signals.senseAuthority.value = "theatre";
       clock.reset();
       theatre.setPosition(0);
       signals.time.value = 0;
-      applyExperienceConfig(experienceConfig, 0);
       clock.resume();
       interfaceMode.setMode("playback");
     },
   });
   window.addEventListener("pagehide", () => startMenu.dispose());
 } else {
+  signals.senseAuthority.value = "theatre";
   interfaceMode.setMode("configure");
 }
 
@@ -302,7 +305,6 @@ renderer.start((dtSeconds) => {
     theatre.setPosition(clock.now); // 2. slave Theatre's playhead to the spine (Studio owns it when paused)
   }
   pumpAuthored(theatre.arc); // 3. authored Theatre values → authored signals (the one-writer bridge)
-  applyExperienceConfig(experienceConfig, clock.now); // 3b. saved config → signals while authority is "config"
 
   keyboard.update(dtSeconds); // 4. input → player → emergent signals
   const { locomotion } = keyboard;

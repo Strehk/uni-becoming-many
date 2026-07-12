@@ -8,9 +8,8 @@
  *   - the macro envelopes (`unrest`, `intensity`) are unconditionally Theatre-owned;
  *   - the per-sense layer envelopes write `signals.sense[id]` ONLY while
  *     `signals.senseAuthority` is "theatre". Manual testing (bus commands → the
- *     SenseDirector) flips the authority to "manual", and the start menu's saved
- *     experience config flips it to "config". Those writers share the same cells
- *     without writing in the same frame — the one-writer law, gated.
+ *     SenseDirector) flips the authority to "manual". Those writers share the same
+ *     cells without writing in the same frame — the one-writer law, gated.
  *
  * Called once per frame, after the sequence playhead has been positioned.
  */

@@ -90,6 +90,12 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
 
     const configButton = button("Experience konfigurieren", "secondary");
     configButton.addEventListener("click", () => {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("studio") !== "1") {
+        url.searchParams.set("studio", "1");
+        window.location.href = url.toString();
+        return;
+      }
       options.onConfigure(cloneConfig(config));
       renderConfig();
     });
@@ -109,7 +115,7 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     title.textContent = "Experience konfigurieren";
     const subtitle = document.createElement("p");
     subtitle.className = "exp-menu__lede";
-    subtitle.textContent = "Gespeichert wird lokal als Ablauf-Config. Die Experience nutzt diese Werte ueber Signals.";
+    subtitle.textContent = "Die Sinn-Timeline wird in Theatre.js bearbeitet. Diese Ansicht speichert nur Ablauf-Vorlagen.";
     titleWrap.append(title, subtitle);
 
     const backButton = button("Zurueck", "ghost");
@@ -155,6 +161,14 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
       setConfig(next);
       saveExperienceConfig(next);
       startExperience();
+    });
+
+    const theatreButton = button("Theatre Timeline öffnen", "secondary");
+    theatreButton.type = "button";
+    theatreButton.addEventListener("click", () => {
+      const url = new URL(window.location.href);
+      url.searchParams.set("studio", "1");
+      window.location.href = url.toString();
     });
 
     const testButton = button("Test ansehen", "secondary");
@@ -206,7 +220,15 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     });
     importLabel.append(importInput);
 
-    actions.append(saveButton, testButton, saveStartButton, resetButton, exportButton, importLabel);
+    actions.append(
+      theatreButton,
+      saveButton,
+      testButton,
+      saveStartButton,
+      resetButton,
+      exportButton,
+      importLabel,
+    );
     form.append(durationLabel, table, actions, status);
     form.addEventListener("submit", (event) => {
       event.preventDefault();

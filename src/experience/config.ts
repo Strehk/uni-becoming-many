@@ -1,5 +1,4 @@
 import { SENSE_KEY_ORDER, SENSE_LABELS, SENSE_ORDER, isSenseId, type SenseId } from "../senses/ids.ts";
-import { signals } from "../signals/index.ts";
 
 export interface SenseCueConfig {
   id: SenseId;
@@ -71,19 +70,6 @@ export function parseExperienceConfig(text: string): ExperienceConfig {
   return normalizeConfig(JSON.parse(text));
 }
 
-export function applyExperienceConfig(config: ExperienceConfig, timeSeconds: number): void {
-  if (signals.senseAuthority.peek() !== "config") {
-    return;
-  }
-
-  const cueById = new Map(config.cues.map((cue) => [cue.id, cue]));
-  for (const id of SENSE_ORDER) {
-    const cue = cueById.get(id);
-    signals.sense[id].value =
-      cue && cue.enabled && timeSeconds >= cue.start ? clamp01(cue.intensity) : 0;
-  }
-}
-
 export function formatSenseCueLabel(cue: SenseCueConfig): string {
   return SENSE_LABELS[cue.id];
 }
@@ -135,8 +121,4 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
     return fallback;
   }
   return Math.min(max, Math.max(min, n));
-}
-
-function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, value));
 }

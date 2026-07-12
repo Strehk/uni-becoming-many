@@ -85,9 +85,7 @@ export function createSenseControls(
   manualBtn.textContent = "Manuell";
   const theatreBtn = document.createElement("button");
   theatreBtn.textContent = "Theatre";
-  const configBtn = document.createElement("button");
-  configBtn.textContent = "Config";
-  authority.append(manualBtn, theatreBtn, configBtn);
+  authority.append(manualBtn, theatreBtn);
   const clearBtn = document.createElement("button");
   clearBtn.className = "sc-clear";
   clearBtn.textContent = "Alle aus";
@@ -97,7 +95,6 @@ export function createSenseControls(
   const reflectAuthority = (mode: string): void => {
     manualBtn.classList.toggle("on", mode === "manual");
     theatreBtn.classList.toggle("on", mode === "theatre");
-    configBtn.classList.toggle("on", mode === "config");
   };
   reflectAuthority(signals.senseAuthority.peek());
   unsubscribes.push(signals.senseAuthority.subscribe(reflectAuthority));
@@ -107,9 +104,6 @@ export function createSenseControls(
   });
   theatreBtn.addEventListener("click", () => {
     signals.senseAuthority.value = "theatre";
-  });
-  configBtn.addEventListener("click", () => {
-    signals.senseAuthority.value = "config";
   });
   clearBtn.addEventListener("click", () => bus.emit("sense:clear"));
 

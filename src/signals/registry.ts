@@ -21,7 +21,7 @@ export interface PlayerPose {
 }
 
 /** Who is allowed to write the per-sense intensities right now. */
-export type SenseAuthority = "manual" | "theatre" | "config";
+export type SenseAuthority = "manual" | "theatre";
 
 /** One intensity cell per sense, spelled out so no cast is needed (the `as`-free zone). */
 function createSenseCells(): Record<SenseId, Signal<number>> {
@@ -47,8 +47,8 @@ export const signals = {
   /**
    * Per-sense layer intensity 0..1 (0 = off). The senses are LAYERS — any combination may be
    * non-zero at once. WRITER: SenseDirector (manual bus commands) / Theatre bridge while
-   * `senseAuthority` is "theatre" / Experience config while `senseAuthority` is "config" —
-   * the sanctioned paths onto the same cells, gated so only one is live at a time.
+   * `senseAuthority` is "theatre" — the sanctioned paths onto the same cells, gated so
+   * only one is live at a time.
    */
   sense: createSenseCells(),
   /** Who currently drives the sense layers. WRITER: sense UI / SenseDirector / start menu. */
