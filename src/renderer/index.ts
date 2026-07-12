@@ -29,6 +29,8 @@ export interface Renderer {
   readonly instance: THREE.WebGPURenderer;
   /** The WebGPU canvas, ready to mount into the DOM. */
   readonly canvas: HTMLCanvasElement;
+  /** Three's WebGPU Inspector overlay root; hidden in audience playback mode. */
+  readonly inspectorElement: HTMLElement;
   /** "Enter VR" overlay button; mount it anywhere in the DOM. */
   readonly vrButton: HTMLElement;
   /** The scene graph — add world objects (e.g. a player rig) to it. */
@@ -71,7 +73,8 @@ export async function createRenderer(): Promise<Renderer> {
   // `init()` — the panel's DOM is mounted from inside the renderer's own init. It ships its
   // own toggle button and self-mounts next to the canvas (via a MutationObserver if the
   // canvas isn't in the DOM yet), so no manual DOM wiring is needed.
-  renderer.inspector = new Inspector();
+  const inspector = new Inspector();
+  renderer.inspector = inspector;
 
   await renderer.init();
 
@@ -126,6 +129,7 @@ export async function createRenderer(): Promise<Renderer> {
   return {
     instance: renderer,
     canvas: renderer.domElement,
+    inspectorElement: inspector.domElement,
     vrButton,
     scene,
     camera,

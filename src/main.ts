@@ -10,6 +10,7 @@ import {
   saveExperienceConfig,
   type ExperienceConfig,
 } from "./experience/config.ts";
+import { createInterfaceModeController } from "./experience/interface-mode.ts";
 import { createStartMenu } from "./experience/start-menu.ts";
 import { type ControlOrientation, connectHost } from "./icaros/index.ts";
 import { createMinimap } from "./minimap/index.ts";
@@ -164,15 +165,42 @@ window.addEventListener("pagehide", () => director.dispose());
 const devConsole = createDevConsole(renderer.instance, { label: "becoming-many" });
 window.addEventListener("pagehide", () => devConsole.dispose());
 
-// Start/config menu: normal runs use the saved config as a signal-authoring source.
+const interfaceMode = createInterfaceModeController({
+  devConsole,
+  inspectorElement: renderer.inspectorElement,
+  vrButton: renderer.vrButton,
+});
+window.addEventListener("pagehide", () => interfaceMode.dispose());
+
+// Start/config menu: normal runs use the saved timeline config as a signal-authoring source.
 // Theatre Studio remains available via ?studio=1 for advanced timeline editing.
 if (!useTheatreStudio) {
   const startMenu = createStartMenu({
     config: experienceConfig,
+    onConfigure(next) {
+      experienceConfig = next;
+      saveExperienceConfig(next);
+      signals.senseAuthority.value = "config";
+      clock.pause();
+      clock.reset();
+      signals.time.value = 0;
+      applyExperienceConfig(experienceConfig, 0);
+      interfaceMode.setMode("configure");
+    },
     onConfigChange(next) {
       experienceConfig = next;
       saveExperienceConfig(next);
       applyExperienceConfig(experienceConfig, clock.now);
+    },
+    onTest(next) {
+      experienceConfig = next;
+      saveExperienceConfig(next);
+      signals.senseAuthority.value = "config";
+      clock.reset();
+      signals.time.value = 0;
+      applyExperienceConfig(experienceConfig, 0);
+      clock.resume();
+      interfaceMode.setMode("configure");
     },
     onStart(next) {
       experienceConfig = next;
@@ -183,9 +211,12 @@ if (!useTheatreStudio) {
       signals.time.value = 0;
       applyExperienceConfig(experienceConfig, 0);
       clock.resume();
+      interfaceMode.setMode("playback");
     },
   });
   window.addEventListener("pagehide", () => startMenu.dispose());
+} else {
+  interfaceMode.setMode("configure");
 }
 
 // Shared sense controls: one card per sense layer (toggle / solo / intensity +

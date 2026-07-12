@@ -13,7 +13,9 @@ import { isSenseId } from "../senses/ids.ts";
 export interface StartMenuOptions {
   config: ExperienceConfig;
   onStart(config: ExperienceConfig): void;
+  onConfigure(config: ExperienceConfig): void;
   onConfigChange(config: ExperienceConfig): void;
+  onTest(config: ExperienceConfig): void;
 }
 
 export interface StartMenu {
@@ -34,6 +36,17 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
   const panel = document.createElement("section");
   panel.className = "exp-menu__panel";
   root.append(panel);
+
+  const returnButton = document.createElement("button");
+  returnButton.className = "exp-menu__return exp-menu__return--hidden";
+  returnButton.type = "button";
+  returnButton.textContent = "Konfiguration";
+  returnButton.addEventListener("click", () => {
+    root.classList.remove("exp-menu--hidden");
+    returnButton.classList.add("exp-menu__return--hidden");
+    renderConfig();
+  });
+  document.body.append(returnButton);
   document.body.append(root);
 
   const setConfig = (next: ExperienceConfig): void => {
@@ -76,7 +89,10 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     startButton.addEventListener("click", startExperience);
 
     const configButton = button("Experience konfigurieren", "secondary");
-    configButton.addEventListener("click", renderConfig);
+    configButton.addEventListener("click", () => {
+      options.onConfigure(cloneConfig(config));
+      renderConfig();
+    });
 
     actions.append(startButton, configButton);
     panel.append(title, subtitle, actions);
@@ -141,6 +157,17 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
       startExperience();
     });
 
+    const testButton = button("Test ansehen", "secondary");
+    testButton.type = "button";
+    testButton.addEventListener("click", () => {
+      const next = readConfig(form, duration);
+      setConfig(next);
+      saveExperienceConfig(next);
+      options.onTest(cloneConfig(next));
+      root.classList.add("exp-menu--hidden");
+      returnButton.classList.remove("exp-menu__return--hidden");
+    });
+
     const resetButton = button("Standard", "ghost");
     resetButton.type = "button";
     resetButton.addEventListener("click", () => {
@@ -179,7 +206,7 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     });
     importLabel.append(importInput);
 
-    actions.append(saveButton, saveStartButton, resetButton, exportButton, importLabel);
+    actions.append(saveButton, testButton, saveStartButton, resetButton, exportButton, importLabel);
     form.append(durationLabel, table, actions, status);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -198,6 +225,7 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     dispose() {
       window.clearTimeout(statusTimer);
       root.remove();
+      returnButton.remove();
     },
   };
 }
@@ -342,6 +370,25 @@ function injectStyles(): void {
     }
 
     .exp-menu--hidden {
+      display: none;
+    }
+
+    .exp-menu__return {
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      z-index: 59;
+      min-height: 36px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      padding: 0 12px;
+      background: rgba(18, 22, 28, 0.92);
+      color: #f4f6f8;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .exp-menu__return--hidden {
       display: none;
     }
 
