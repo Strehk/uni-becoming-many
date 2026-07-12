@@ -42,6 +42,8 @@ export interface SynthOverlayOptions {
 export interface SynthOverlay {
   /** Push the per-frame signal packet + run the sense→layer coupling. */
   update(dt: number): void;
+  setOpen(open: boolean): void;
+  onOpenChange(cb: (open: boolean) => void): () => void;
   toggle(): void;
   dispose(): void;
 }
@@ -108,6 +110,7 @@ export function createSynthOverlay(options: SynthOverlayOptions): SynthOverlay {
 
   let iframe: HTMLIFrameElement | null = null;
   let open = false;
+  const openListeners = new Set<(open: boolean) => void>();
 
   const ensureIframe = (): void => {
     if (!iframe) {
@@ -125,6 +128,9 @@ export function createSynthOverlay(options: SynthOverlayOptions): SynthOverlay {
     ensureIframe();
     if (open) {
       synthWindow(iframe)?.bmStartAudio?.();
+    }
+    for (const cb of openListeners) {
+      cb(open);
     }
   };
   ensureIframe();
@@ -284,11 +290,20 @@ export function createSynthOverlay(options: SynthOverlayOptions): SynthOverlay {
 
   return {
     update,
+    setOpen,
+    onOpenChange(cb: (open: boolean) => void): () => void {
+      openListeners.add(cb);
+      cb(open);
+      return () => {
+        openListeners.delete(cb);
+      };
+    },
     toggle(): void {
       setOpen(!open);
     },
     dispose(): void {
       window.removeEventListener("keydown", onKeyDown);
+      openListeners.clear();
       tab.remove();
       drawer.remove();
     },

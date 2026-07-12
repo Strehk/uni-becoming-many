@@ -175,6 +175,8 @@ const interfaceMode = createInterfaceModeController({
   inspectorElement: renderer.inspectorElement,
   vrButton: renderer.vrButton,
   debugEnabled: showDebugUi,
+  setSynthOpen: (open) => synth.setOpen(open),
+  onSynthOpenChange: (cb) => synth.onOpenChange(cb),
 });
 window.addEventListener("pagehide", () => interfaceMode.dispose());
 

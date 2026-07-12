@@ -12,6 +12,8 @@ export interface InterfaceModeOptions {
   inspectorElement: HTMLElement;
   vrButton: HTMLElement;
   debugEnabled?: boolean;
+  setSynthOpen?: (open: boolean) => void;
+  onSynthOpenChange?: (cb: (open: boolean) => void) => () => void;
 }
 
 const STYLE_ID = "experience-interface-mode-styles";
@@ -19,8 +21,63 @@ const STYLE_ID = "experience-interface-mode-styles";
 export function createInterfaceModeController(options: InterfaceModeOptions): InterfaceModeController {
   injectStyles();
 
+  let currentMode: ExperienceInterfaceMode = "menu";
+  let devPanelOpen = false;
+  let synthPanelOpen = false;
   let inspectorParent: Node | null = options.inspectorElement.parentNode;
   let inspectorNext: ChildNode | null = options.inspectorElement.nextSibling;
+
+  const shell = document.createElement("div");
+  shell.className = "bm-config-shell";
+  shell.hidden = true;
+  shell.setAttribute("aria-label", "Konfiguration");
+
+  const title = document.createElement("span");
+  title.className = "bm-config-shell__title";
+  title.textContent = "Konfiguration";
+
+  const timeline = shellButton("Timeline", () => showConfigPanel("timeline"));
+
+  const settings = shellButton("Sinne & Welt", () => showConfigPanel("settings"));
+
+  const synth = shellButton("Synth", () => showConfigPanel("synth"));
+
+  shell.append(title, timeline, settings, synth);
+
+  const debug = shellButton("Render Debug", () => {
+    setInspectorVisible(!options.inspectorElement.parentNode);
+  });
+  if (options.debugEnabled === true) {
+    shell.append(debug);
+  }
+
+  document.body.append(shell);
+
+  const updateActiveButton = (): void => {
+    timeline.classList.toggle("active", !devPanelOpen && !synthPanelOpen);
+    settings.classList.toggle("active", devPanelOpen);
+    synth.classList.toggle("active", synthPanelOpen);
+  };
+
+  function showConfigPanel(panel: "timeline" | "settings" | "synth"): void {
+    if (panel !== "settings") {
+      options.devConsole.setOpen(false);
+      setPanelAvailable(".devc-drawer", false);
+    }
+    if (panel !== "synth") {
+      options.setSynthOpen?.(false);
+      setPanelAvailable(".synth-drawer", false);
+    }
+    if (panel === "settings") {
+      setPanelAvailable(".devc-drawer", true);
+      options.devConsole.setOpen(true);
+    }
+    if (panel === "synth") {
+      setPanelAvailable(".synth-drawer", true);
+      options.setSynthOpen?.(true);
+    }
+    updateActiveButton();
+  }
 
   const setInspectorVisible = (visible: boolean): void => {
     if (visible) {
@@ -42,48 +99,72 @@ export function createInterfaceModeController(options: InterfaceModeOptions): In
     }
   };
 
+  const setElementHidden = (selector: string, hidden: boolean): void => {
+    for (const el of document.querySelectorAll<HTMLElement>(selector)) {
+      el.hidden = hidden;
+      el.toggleAttribute("inert", hidden);
+      el.setAttribute("aria-hidden", String(hidden));
+    }
+  };
+
+  const setPanelAvailable = (selector: string, available: boolean): void => {
+    for (const el of document.querySelectorAll<HTMLElement>(selector)) {
+      el.hidden = !available;
+      el.toggleAttribute("inert", !available);
+      el.setAttribute("aria-hidden", String(!available));
+    }
+  };
+
   const setAppToolsVisible = (visible: boolean): void => {
     options.vrButton.style.display = visible ? "" : "none";
-    for (const el of document.querySelectorAll<HTMLElement>(
-      ".devc-tab, .devc-drawer, .synth-tab, .synth-drawer, #VRButton",
-    )) {
+    for (const el of document.querySelectorAll<HTMLElement>("#VRButton")) {
       el.hidden = !visible;
       el.toggleAttribute("inert", !visible);
       el.setAttribute("aria-hidden", String(!visible));
     }
+    setElementHidden(".devc-tab, .synth-tab", !visible);
+    setPanelAvailable(".devc-drawer, .synth-drawer", visible);
   };
 
-  const setDevTabLabel = (configureMode: boolean): void => {
-    const tab = document.querySelector<HTMLButtonElement>(".devc-tab");
-    if (!tab) {
-      return;
+  const offDevOpen = options.devConsole.onOpenChange((open) => {
+    devPanelOpen = open;
+    if (currentMode === "configure" && !open) {
+      setPanelAvailable(".devc-drawer", false);
     }
-    tab.textContent = configureMode ? "Einstellungen" : "C";
-    tab.title = configureMode ? "Einstellungen" : "Dev console (C)";
-  };
+    updateActiveButton();
+  });
+
+  const offSynthOpen = options.onSynthOpenChange?.((open) => {
+    synthPanelOpen = open;
+    if (currentMode === "configure" && !open) {
+      setPanelAvailable(".synth-drawer", false);
+    }
+    updateActiveButton();
+  });
 
   const setMode = (mode: ExperienceInterfaceMode): void => {
+    currentMode = mode;
     document.body.dataset["experienceMode"] = mode;
     const configureMode = mode === "configure";
-    const showRenderDebug = configureMode && options.debugEnabled === true;
     document.body.classList.toggle("bm-ui-hidden", !configureMode);
     document.body.classList.toggle("bm-configure-mode", configureMode);
-    setDevTabLabel(configureMode);
+    shell.hidden = !configureMode;
 
     if (configureMode) {
-      setAppToolsVisible(true);
-      setInspectorVisible(showRenderDebug);
-      if (showRenderDebug) {
-        options.devConsole.setOpen(true);
-      } else {
-        options.devConsole.setOpen(false);
-      }
+      setElementHidden(".devc-tab, .synth-tab, #VRButton", true);
+      options.devConsole.setOpen(false);
+      options.setSynthOpen?.(false);
+      setPanelAvailable(".devc-drawer, .synth-drawer", false);
+      setInspectorVisible(false);
+      updateActiveButton();
       return;
     }
 
     options.devConsole.setOpen(false);
+    options.setSynthOpen?.(false);
     setAppToolsVisible(false);
     setInspectorVisible(false);
+    updateActiveButton();
   };
 
   const restoreAll = (): void => {
@@ -102,10 +183,21 @@ export function createInterfaceModeController(options: InterfaceModeOptions): In
       document.body.classList.remove("bm-ui-hidden");
       document.body.classList.remove("bm-configure-mode");
       delete document.body.dataset["experienceMode"];
-      setDevTabLabel(false);
+      shell.remove();
+      offDevOpen();
+      offSynthOpen?.();
       restoreAll();
     },
   };
+}
+
+function shellButton(label: string, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "bm-config-shell__button";
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  return button;
 }
 
 function injectStyles(): void {
@@ -124,9 +216,59 @@ function injectStyles(): void {
     }
 
     .bm-configure-mode .devc-tab {
-      width: 104px;
+      display: none !important;
+    }
+
+    .bm-configure-mode .synth-tab,
+    .bm-configure-mode #VRButton {
+      display: none !important;
+    }
+
+    .bm-config-shell {
+      position: fixed;
+      top: 12px;
+      right: 16px;
+      z-index: 10020;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 36px;
+      padding: 4px;
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 8px;
+      background: rgba(10, 13, 18, 0.9);
+      color: #e5e7eb;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      box-shadow: 0 12px 28px rgba(0,0,0,0.28);
+    }
+
+    .bm-config-shell[hidden] {
+      display: none !important;
+    }
+
+    .bm-config-shell__title {
+      padding: 0 8px;
+      color: #7fd4e8;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .bm-config-shell__button {
+      min-height: 28px;
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 6px;
+      background: rgba(255,255,255,0.06);
+      color: #e5e7eb;
       padding: 0 10px;
-      text-align: center;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .bm-config-shell__button:hover,
+    .bm-config-shell__button.active {
+      border-color: rgba(125, 211, 252, 0.75);
+      color: #7fd4e8;
     }
   `;
   document.head.append(style);
