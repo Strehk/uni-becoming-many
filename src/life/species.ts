@@ -12,28 +12,30 @@
 // asset loader (for `targetHeight`), the material factory (for `sway` + `senses`),
 // and the duft coupling (for `senses.scent`).
 //
-// Capacity budget. Cost is view-independent — the flora meshes never frustum-cull, and
-// every instanced draw covers the species' FULL capacity (49 blocks — `mesh.count` is
-// pinned, see instancing.ts). So the vertex load is a CONSTANT `49 × Σ(perChunkCap × tris)`
-// ≈ 17.5 M triangles across ~44 k live instances, forest or ocean alike, and
-// `perChunkCap` is the only lever on it. Slots no plant claimed hold the all-zero matrix:
-// they run the vertex shader but collapse to degenerate triangles with no fragment cost.
+// Capacity budget. The instance buffers are PACKED (see instancing.ts): `mesh.count`
+// tracks the real live total, so the vertex load is proportional to the plants that
+// actually grew — an ocean window costs near nothing, and `perChunkCap` is a WORST-CASE
+// bound (every live chunk fills its cap), not a constant price. `49 × perChunkCap`
+// only sizes the buffers (memory, ~0.5 MB per heavy species part).
 //
-// Measured on desktop WebGPU (previous 12.9 M-tri registry): GPU frame ~7 ms — the
-// nature-kit registry adds ~35% vertex load on that baseline. VR renders twice per
-// frame, so a Quest-class target would still want these roughly halved.
+// Worst case with these caps — 49 chunks of unbroken dense forest — is ~20-25 M
+// triangles (~11-14 ms GPU on the desktop that ran the old 12.9 M registry at ~7 ms);
+// typical mixed terrain sits far below. Desktop-only territory: a Quest-class VR
+// target renders twice per frame and would want the tree caps cut to roughly a third.
 //
-// A species you raise the cap on costs its full price in EVERY chunk, including biomes
-// its rules never let it grow in — so spend where fullness reads cheapest. Ground cover
-// (flowers/mushrooms, 80-420 tris) is most of the instances but little of the triangle
-// weight; trees (750-4400 tris) dominate — their caps are split across the variant
-// trio of each type, so a Tannenwald stays as dense as the old single-pine forest.
+// Density is bought twice over: caps up AND per-instance cost down — trunks ride the
+// coarsest LOD and heavy crowns are card-decimated in the converter (`leafKeep`).
+// Chunks are 256 m: a full Nadelwald chunk now holds ~290 conifers (one per ~15 m —
+// a closed stand), a Laubwald chunk ~140 oaks + ~160 birches. Ground cover
+// (flowers/mushrooms, 80-460 tris) is most of the instances but little of the
+// weight; oak trunks (oak_01/oak_03 have no coarser LOD) dominate per instance —
+// their caps stay the smallest lever.
 //
 // Source triangle counts (per instance, summed over parts — from convert-nature.ts):
-//   oak-2 4359 · common-tree 2943 · rock-huge 1875 · palm 1772 · birch-2 1654
-//   birch-3 1492 · pine-3 1440 · oak-3 1420 · pine 1131 · pine-2 1037 · dead-pine 897
-//   berry-bush 891 · birch 753 · bush 462 · dead-tree 453 · mushroom-cluster 422
-//   cactus 434 · wheat 408 · rock 318 · reeds 280 · branch-* 208 · rock-small 210
+//   oak-2 3192 · common-tree 2139 · rock-huge 1875 · palm 1772 · oak-3 1238
+//   birch-2 1082 · pine-3 1039 · birch-3 1002 · berry-bush 891 · pine 870 · pine-2 767
+//   birch 525 · bush 462 · dead-pine 447 · cactus 434 · mushroom-cluster 422
+//   wheat 408 · rock 318 · reeds 280 · dead-tree 225 · branch-* 208 · rock-small 210
 //   stump-birch 126 · shrub 120 · mushroom-* ~105 · stump 90 · flower-* 80 · moss-rock 70
 
 import { Biome } from "../terrain/index.ts";
@@ -166,7 +168,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   pine: {
     id: "pine",
     targetHeight: 9,
-    perChunkCap: 36,
+    perChunkCap: 120,
     biomes: {
       [Biome.Taiga]: 1.0,
       [Biome.Forest]: 0.85,
@@ -183,7 +185,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "pine-2": {
     id: "pine-2",
     targetHeight: 8.5,
-    perChunkCap: 28,
+    perChunkCap: 95,
     biomes: {
       [Biome.Taiga]: 1.0,
       [Biome.Forest]: 0.85,
@@ -200,7 +202,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "pine-3": {
     id: "pine-3",
     targetHeight: 10,
-    perChunkCap: 26,
+    perChunkCap: 75,
     biomes: { [Biome.Taiga]: 0.9, [Biome.Forest]: 0.8, [Biome.Hills]: 0.35 },
     maxSlope: 0.55,
     scale: [0.75, 1.3],
@@ -214,7 +216,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "common-tree": {
     id: "common-tree",
     targetHeight: 8,
-    perChunkCap: 18,
+    perChunkCap: 70,
     biomes: { [Biome.Forest]: 1.0, [Biome.Grassland]: 0.3, [Biome.Hills]: 0.45 },
     maxSlope: 0.5,
     scale: [0.8, 1.3],
@@ -226,7 +228,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "oak-2": {
     id: "oak-2",
     targetHeight: 9,
-    perChunkCap: 6,
+    perChunkCap: 12,
     biomes: { [Biome.Forest]: 0.9, [Biome.Grassland]: 0.2 },
     maxSlope: 0.5,
     scale: [0.85, 1.3],
@@ -238,7 +240,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "oak-3": {
     id: "oak-3",
     targetHeight: 7.5,
-    perChunkCap: 18,
+    perChunkCap: 60,
     biomes: { [Biome.Forest]: 1.0, [Biome.Grassland]: 0.25, [Biome.Hills]: 0.4 },
     maxSlope: 0.5,
     scale: [0.8, 1.25],
@@ -250,7 +252,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   birch: {
     id: "birch",
     targetHeight: 7.5,
-    perChunkCap: 16,
+    perChunkCap: 80,
     biomes: { [Biome.Forest]: 0.55, [Biome.Taiga]: 0.5, [Biome.Tundra]: 0.2, [Biome.Hills]: 0.3 },
     maxSlope: 0.5,
     scale: [0.85, 1.2],
@@ -261,7 +263,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "birch-2": {
     id: "birch-2",
     targetHeight: 8,
-    perChunkCap: 12,
+    perChunkCap: 40,
     biomes: { [Biome.Forest]: 0.5, [Biome.Taiga]: 0.45, [Biome.Hills]: 0.3 },
     maxSlope: 0.5,
     scale: [0.85, 1.2],
@@ -272,7 +274,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "birch-3": {
     id: "birch-3",
     targetHeight: 7,
-    perChunkCap: 12,
+    perChunkCap: 40,
     biomes: { [Biome.Forest]: 0.5, [Biome.Taiga]: 0.45, [Biome.Tundra]: 0.2 },
     maxSlope: 0.5,
     scale: [0.85, 1.2],
@@ -285,7 +287,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "dead-tree": {
     id: "dead-tree",
     targetHeight: 6.5,
-    perChunkCap: 5,
+    perChunkCap: 8,
     biomes: {
       [Biome.Tundra]: 0.5,
       [Biome.Wetland]: 0.4,
@@ -301,7 +303,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "dead-pine": {
     id: "dead-pine",
     targetHeight: 7,
-    perChunkCap: 3,
+    perChunkCap: 7,
     biomes: { [Biome.Taiga]: 0.25, [Biome.Forest]: 0.15, [Biome.Tundra]: 0.2 },
     maxSlope: 0.6,
     scale: [0.7, 1.15],
@@ -404,8 +406,13 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   bush: {
     id: "bush",
     targetHeight: 1.4,
-    perChunkCap: 20,
-    biomes: { [Biome.Forest]: 0.6, [Biome.Grassland]: 0.4, [Biome.Hills]: 0.4, [Biome.Taiga]: 0.3 },
+    perChunkCap: 70,
+    biomes: {
+      [Biome.Forest]: 0.85,
+      [Biome.Grassland]: 0.4,
+      [Biome.Hills]: 0.4,
+      [Biome.Taiga]: 0.5,
+    },
     maxSlope: 0.6,
     scale: [0.7, 1.4],
     tintJitter: 0.16,
@@ -416,8 +423,8 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "bush-2": {
     id: "bush-2",
     targetHeight: 1.2,
-    perChunkCap: 14,
-    biomes: { [Biome.Forest]: 0.5, [Biome.Grassland]: 0.35, [Biome.Hills]: 0.35 },
+    perChunkCap: 50,
+    biomes: { [Biome.Forest]: 0.75, [Biome.Grassland]: 0.35, [Biome.Hills]: 0.35 },
     maxSlope: 0.6,
     scale: [0.7, 1.4],
     tintJitter: 0.16,
@@ -428,8 +435,8 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "berry-bush": {
     id: "berry-bush",
     targetHeight: 1.3,
-    perChunkCap: 7,
-    biomes: { [Biome.Forest]: 0.5, [Biome.Wetland]: 0.3, [Biome.Taiga]: 0.3 },
+    perChunkCap: 14,
+    biomes: { [Biome.Forest]: 0.6, [Biome.Wetland]: 0.3, [Biome.Taiga]: 0.35 },
     maxSlope: 0.55,
     scale: [0.8, 1.25],
     tintJitter: 0.12,
@@ -440,7 +447,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   shrub: {
     id: "shrub",
     targetHeight: 1.0,
-    perChunkCap: 18,
+    perChunkCap: 36,
     biomes: { [Biome.Grassland]: 0.5, [Biome.Forest]: 0.2, [Biome.Hills]: 0.35 },
     maxSlope: 0.6,
     scale: [0.7, 1.4],
@@ -452,7 +459,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   flower: {
     id: "flower",
     targetHeight: 0.35,
-    perChunkCap: 48,
+    perChunkCap: 60,
     biomes: {
       [Biome.Grassland]: 0.8,
       [Biome.Hills]: 0.3,
@@ -469,7 +476,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "flower-2": {
     id: "flower-2",
     targetHeight: 0.4,
-    perChunkCap: 40,
+    perChunkCap: 50,
     biomes: { [Biome.Grassland]: 0.7, [Biome.Hills]: 0.3, [Biome.Forest]: 0.12 },
     maxSlope: 0.5,
     scale: [0.8, 1.3],
@@ -481,7 +488,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   reeds: {
     id: "reeds",
     targetHeight: 1.6,
-    perChunkCap: 20,
+    perChunkCap: 24,
     biomes: { [Biome.Wetland]: 0.9, [Biome.Beach]: 0.15, [Biome.Lake]: 0.2 },
     maxSlope: 0.35,
     scale: [0.8, 1.3],
@@ -503,8 +510,8 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "mushroom-brown": {
     id: "mushroom-brown",
     targetHeight: 0.25,
-    perChunkCap: 10,
-    biomes: { [Biome.Forest]: 0.5, [Biome.Taiga]: 0.45, [Biome.Wetland]: 0.2 },
+    perChunkCap: 45,
+    biomes: { [Biome.Forest]: 0.7, [Biome.Taiga]: 0.6, [Biome.Wetland]: 0.2 },
     maxSlope: 0.55,
     scale: [0.7, 1.5],
     tintJitter: 0.15,
@@ -515,8 +522,8 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "mushroom-red": {
     id: "mushroom-red",
     targetHeight: 0.28,
-    perChunkCap: 8,
-    biomes: { [Biome.Forest]: 0.4, [Biome.Taiga]: 0.25 },
+    perChunkCap: 36,
+    biomes: { [Biome.Forest]: 0.55, [Biome.Taiga]: 0.3 },
     maxSlope: 0.55,
     scale: [0.7, 1.5],
     tintJitter: 0.1,
@@ -531,8 +538,8 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "mushroom-white": {
     id: "mushroom-white",
     targetHeight: 0.22,
-    perChunkCap: 6,
-    biomes: { [Biome.Forest]: 0.3, [Biome.Wetland]: 0.25 },
+    perChunkCap: 28,
+    biomes: { [Biome.Forest]: 0.45, [Biome.Wetland]: 0.25 },
     maxSlope: 0.55,
     scale: [0.7, 1.5],
     tintJitter: 0.1,
@@ -543,8 +550,8 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "mushroom-cluster": {
     id: "mushroom-cluster",
     targetHeight: 0.3,
-    perChunkCap: 4,
-    biomes: { [Biome.Forest]: 0.35, [Biome.Taiga]: 0.3 },
+    perChunkCap: 18,
+    biomes: { [Biome.Forest]: 0.5, [Biome.Taiga]: 0.4 },
     maxSlope: 0.55,
     scale: [0.8, 1.4],
     tintJitter: 0.12,
@@ -557,7 +564,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   stump: {
     id: "stump",
     targetHeight: 0.6,
-    perChunkCap: 4,
+    perChunkCap: 14,
     biomes: { [Biome.Forest]: 0.4, [Biome.Taiga]: 0.3, [Biome.Wetland]: 0.2 },
     maxSlope: 0.6,
     scale: [0.8, 1.4],
@@ -569,7 +576,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "stump-birch": {
     id: "stump-birch",
     targetHeight: 0.6,
-    perChunkCap: 4,
+    perChunkCap: 14,
     biomes: { [Biome.Forest]: 0.4, [Biome.Taiga]: 0.2 },
     maxSlope: 0.6,
     scale: [0.8, 1.4],
@@ -581,7 +588,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "branch-pine": {
     id: "branch-pine",
     targetHeight: 0.35,
-    perChunkCap: 12,
+    perChunkCap: 36,
     biomes: { [Biome.Forest]: 0.5, [Biome.Taiga]: 0.4 },
     maxSlope: 0.7,
     scale: [0.7, 1.5],
@@ -593,7 +600,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "branch-birch": {
     id: "branch-birch",
     targetHeight: 0.35,
-    perChunkCap: 12,
+    perChunkCap: 36,
     biomes: { [Biome.Forest]: 0.5, [Biome.Taiga]: 0.3 },
     maxSlope: 0.7,
     scale: [0.7, 1.5],

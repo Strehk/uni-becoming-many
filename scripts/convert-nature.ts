@@ -58,21 +58,28 @@ interface Entry {
   readonly lod?: number;
   readonly leavesLod?: number;
   readonly tint?: string;
+  /** Fraction of foliage cards to KEEP (0..1, default 1). Cards are consecutive
+   *  triangle pairs; a deterministic hash drops whole quads, so heavy crowns
+   *  (oak: 2100 tris) trade fullness for per-instance cost — density is bought
+   *  with perChunkCap instead. */
+  readonly leafKeep?: number;
 }
 
 const MANIFEST: readonly Entry[] = [
   // ── Trees — trunk (palette) + crown (foliage cards) ───────────────────────
-  { id: "pine", fbx: "trees/mesh_tree_pine_01.fbx", lod: 2, tint: "#2f5c38" },
-  { id: "pine-2", fbx: "trees/mesh_tree_pine_02.fbx", lod: 2, tint: "#35663c" },
-  { id: "pine-3", fbx: "trees/mesh_tree_pine_03.fbx", lod: 2, tint: "#2b5433" },
-  { id: "common-tree", fbx: "trees/mesh_tree_oak_01.fbx", lod: 2, tint: "#4a8040" },
-  { id: "oak-2", fbx: "trees/mesh_tree_oak_02.fbx", lod: 2, tint: "#548a44" },
-  { id: "oak-3", fbx: "trees/mesh_tree_oak_04.fbx", lod: 2, tint: "#457a3d" },
-  { id: "birch", fbx: "trees/mesh_tree_birch_01.fbx", lod: 2, tint: "#6fa84e" },
-  { id: "birch-2", fbx: "trees/mesh_tree_birch_02.fbx", lod: 2, tint: "#7bb257" },
-  { id: "birch-3", fbx: "trees/mesh_tree_birch_03.fbx", lod: 2, tint: "#66a049" },
-  { id: "dead-tree", fbx: "trees/mesh_tree_birch_01_dead.fbx", lod: 2 },
-  { id: "dead-pine", fbx: "trees/mesh_tree_pine_01_dead.fbx", lod: 2 },
+  // Trunks ride the coarsest LOD: forests are read as crowns + silhouettes, and
+  // the saved triangles are spent on DENSITY (higher perChunkCaps in species.ts).
+  { id: "pine", fbx: "trees/mesh_tree_pine_01.fbx", lod: 3, tint: "#2f5c38" },
+  { id: "pine-2", fbx: "trees/mesh_tree_pine_02.fbx", lod: 3, tint: "#35663c" },
+  { id: "pine-3", fbx: "trees/mesh_tree_pine_03.fbx", lod: 3, tint: "#2b5433" },
+  { id: "common-tree", fbx: "trees/mesh_tree_oak_01.fbx", lod: 3, tint: "#4a8040", leafKeep: 0.6 },
+  { id: "oak-2", fbx: "trees/mesh_tree_oak_03.fbx", lod: 3, tint: "#548a44", leafKeep: 0.5 },
+  { id: "oak-3", fbx: "trees/mesh_tree_oak_04.fbx", lod: 3, tint: "#457a3d", leafKeep: 0.75 },
+  { id: "birch", fbx: "trees/mesh_tree_birch_01.fbx", lod: 3, tint: "#6fa84e" },
+  { id: "birch-2", fbx: "trees/mesh_tree_birch_02.fbx", lod: 3, tint: "#7bb257", leafKeep: 0.7 },
+  { id: "birch-3", fbx: "trees/mesh_tree_birch_03.fbx", lod: 3, tint: "#66a049", leafKeep: 0.7 },
+  { id: "dead-tree", fbx: "trees/mesh_tree_birch_01_dead.fbx", lod: 3 },
+  { id: "dead-pine", fbx: "trees/mesh_tree_pine_01_dead.fbx", lod: 3 },
 
   // ── Ground cover — pure foliage cards ─────────────────────────────────────
   { id: "bush", fbx: "bushes/mesh_bush_01.fbx", tint: "#3f7d3c" },
@@ -210,11 +217,22 @@ function convertEntry(
     const ranges =
       geo.groups.length > 0 ? geo.groups : [{ start: 0, count: pos.count, materialIndex: 0 }];
 
+    const leafKeep = entry.leafKeep ?? 1;
+    let foliageTri = 0; // running foliage-triangle index → quad = pair
+
     for (const range of ranges) {
       const matName = mats[range.materialIndex ?? 0]?.name ?? "";
       const foliage = /foliage/.test(matName);
 
       for (let i = range.start; i < range.start + (range.count ?? 0); i += 3) {
+        if (foliage && leafKeep < 1) {
+          // One card = two consecutive triangles; decide per PAIR so no half-quads.
+          const quad = foliageTri >> 1;
+          foliageTri++;
+          let h = (quad * 2654435761) | 0;
+          h = Math.imul(h ^ (h >>> 13), 1274126177);
+          if (((h >>> 16) & 0xffff) / 0x10000 >= leafKeep) continue;
+        }
         let bucket: Bucket;
         if (foliage) {
           const key = "foliage";
