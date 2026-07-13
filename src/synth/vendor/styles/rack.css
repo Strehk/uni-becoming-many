@@ -20,7 +20,13 @@
    die Karten strecken sich, und das XY-Pad schluckt die Resthöhe. */
 #layers .card { display: flex; flex-direction: column; }
 .card .pad-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.card .xypad { flex: 1; height: auto; min-height: 170px; }
+/* height:0 (nicht auto) ist WICHTIG: die Zeichenschleife schreibt jeden Frame
+   cv.height = clientHeight * devicePixelRatio in das Canvas-ATTRIBUT. Bei
+   height:auto wird dieses Attribut zur intrinsischen CSS-Höhe des Canvas und
+   fließt (auf Retina, dpr≥2) in die Flex-/Grid-Inhaltsgröße zurück → die Karte
+   wächst bei jedem Umbruch weiter und schrumpft nie zurück. Eine feste Höhe (0)
+   kappt diese Rückkopplung; flex + min-height bestimmen die echte Höhe. */
+.card .xypad { flex: 1 1 0; height: 0; min-height: 170px; }
 .pad-labels { flex: none; }
 
 /* Kompakt-Modus: flachere Pads, engere Karten */
