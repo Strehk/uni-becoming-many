@@ -7,6 +7,10 @@
 //
 // The GLBs carry POSITION + NORMAL only (no UVs, no textures) and their albedo
 // lives in the material's baseColorFactor, straight from the original MTL's `Kd`.
+// EXCEPTION: primitives whose material is named "foliage" (nature-kit tree crowns,
+// bushes, flowers — see scripts/convert-nature.ts) keep TEXCOORD_0: they are 1-2 m
+// cutout cards whose shape lives in a shared greyscale+alpha atlas
+// (`/life/foliage-atlas.png`, loaded once here), sampled by the flora material.
 //
 // `three/addons/*` resolves to `three/examples/jsm/*`, which imports from the
 // classic `three` entry. That is safe here: `three.module.js` and `three.webgpu.js`
@@ -19,12 +23,14 @@ import { SPECIES, SPECIES_IDS, type SpeciesId } from "./species.ts";
 
 /** One instanced draw's worth of a species: a distinct material on the source mesh. */
 export interface FloraPart {
-  /** The source material's name — "Wood", "Green", "DarkGreen", "Rock", … */
+  /** The source material's name — "Wood", "Green", "c_927054", "foliage", … */
   readonly name: string;
   /** Normalized geometry: base at y=0, centred on XZ, scaled to `targetHeight`. */
   readonly geometry: THREE.BufferGeometry;
   /** Linear-space albedo baked from the asset's baseColorFactor. */
   readonly baseColor: THREE.Color;
+  /** Atlas-cutout card geometry: UVs kept, rendered by the foliage material. */
+  readonly foliage: boolean;
 }
 
 const BASE_URL = "/life";
@@ -45,7 +51,12 @@ export async function loadFloraParts(): Promise<Map<SpeciesId, FloraPart[]>> {
   );
 
   for (const { id, gltf } of loaded) {
-    const raw: { name: string; geometry: THREE.BufferGeometry; baseColor: THREE.Color }[] = [];
+    const raw: {
+      name: string;
+      geometry: THREE.BufferGeometry;
+      baseColor: THREE.Color;
+      foliage: boolean;
+    }[] = [];
 
     gltf.scene.updateMatrixWorld(true);
     gltf.scene.traverse((node) => {
@@ -54,9 +65,11 @@ export async function loadFloraParts(): Promise<Map<SpeciesId, FloraPart[]>> {
       const material = Array.isArray(node.material) ? node.material[0] : node.material;
       if (!material) return;
 
+      // Foliage cards need their UVs — their shape lives in the cutout atlas.
+      const foliage = material.name === "foliage";
       const geometry = node.geometry.clone();
       geometry.applyMatrix4(node.matrixWorld); // bake the node transform; instances are world-space
-      geometry.deleteAttribute("uv");
+      if (!foliage) geometry.deleteAttribute("uv");
       geometry.deleteAttribute("uv1");
       // Normals are authored and correct, and the transform below is a uniform scale
       // plus a translation — both normal-preserving. Recomputing them here would
@@ -66,7 +79,7 @@ export async function loadFloraParts(): Promise<Map<SpeciesId, FloraPart[]>> {
       if ("color" in material && material.color instanceof THREE.Color) {
         baseColor.copy(material.color);
       }
-      raw.push({ name: material.name || "solid", geometry, baseColor });
+      raw.push({ name: material.name || "solid", geometry, baseColor, foliage });
     });
 
     if (raw.length === 0) throw new Error(`[life] ${id}.glb contained no meshes`);
@@ -117,6 +130,18 @@ function disposeGltfMaterials(root: THREE.Object3D): void {
     const materials = Array.isArray(node.material) ? node.material : [node.material];
     for (const m of materials) m?.dispose();
   });
+}
+
+/**
+ * Load the shared foliage cutout atlas (greyscale shading in RGB, card shape in
+ * alpha). `flipY = false`: the GLB UVs are already in glTF convention (obj2gltf
+ * flipped the OBJ vt), so the texture must be sampled top-down, un-flipped.
+ */
+export async function loadFoliageAtlas(): Promise<THREE.Texture> {
+  const texture = await new THREE.TextureLoader().loadAsync(`${BASE_URL}/foliage-atlas.png`);
+  texture.flipY = false;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
 }
 
 /** Release every geometry handed out by {@link loadFloraParts}. */

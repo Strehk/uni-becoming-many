@@ -21,6 +21,7 @@ import { createPlayer } from "./player/index.ts";
 import { createKeyboardControls } from "./player/keyboard-controls.ts";
 import { createRenderer } from "./renderer/index.ts";
 import { createDuftSense } from "./senses/duft/index.ts";
+import { SCENT_TYPES } from "./senses/duft/params.ts";
 import { SENSE_ORDER, createSenses } from "./senses/index.ts";
 import { createMagnetfeldSense } from "./senses/magnetfeld/index.ts";
 import { createMotionSense } from "./senses/motion/index.ts";
@@ -139,9 +140,27 @@ const magnetfeld = createMagnetfeldSense(renderer.scene, bus);
 window.addEventListener("pagehide", () => magnetfeld.dispose());
 
 // Duft sense: GPU scent particles anchored to the terrain around the player,
-// gated by `signals.sense.duft` (no compute while faded out).
-const duft = createDuftSense(renderer.scene, bus, renderer.instance, (x, z) =>
-  world.groundHeightAt(x, z),
+// gated by `signals.sense.duft` (no compute while faded out). Zones come from the
+// ACTUAL placed flora (life keeps each chunk's scent-emitting instances): world
+// spots → anchor-local zones, species scent keys → SCENT_TYPES indices. Falls
+// back to the procedural guesser while flora is still streaming in.
+const scentTypeIndex = new Map(SCENT_TYPES.map((t, i) => [t.key, i]));
+const duft = createDuftSense(
+  renderer.scene,
+  bus,
+  renderer.instance,
+  (x, z) => world.groundHeightAt(x, z),
+  (ax, ay, az, radius) =>
+    life
+      .scentSpotsAround(ax, az, radius)
+      .filter((s) => scentTypeIndex.has(s.type))
+      .map((s) => ({
+        x: s.x - ax,
+        y: s.y - ay,
+        z: s.z - az,
+        radius: s.radius,
+        type: scentTypeIndex.get(s.type) ?? 0,
+      })),
 );
 window.addEventListener("pagehide", () => duft.dispose());
 

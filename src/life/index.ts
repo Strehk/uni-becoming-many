@@ -19,11 +19,11 @@ import type { SenseId } from "../senses/index.ts";
 import { signals } from "../signals/index.ts";
 import type { ChunkBuiltInfo, ChunkCell } from "../terrain/index.ts";
 import { makeHeightEntry } from "../terrain/index.ts";
-import { disposeFloraParts, loadFloraParts } from "./assets.ts";
+import { disposeFloraParts, loadFloraParts, loadFoliageAtlas } from "./assets.ts";
 import { SpeciesInstances } from "./instancing.ts";
 import type { FloraLayerCompositor } from "./material.ts";
 import { biomeAffinityTable, scatterChunk } from "./scatter.ts";
-import { SPECIES, SPECIES_IDS } from "./species.ts";
+import { SPECIES, SPECIES_IDS, type ScentKey } from "./species.ts";
 import { BIOLUMINESCENCE_BY_SENSE, createLifeUniforms } from "./uniforms.ts";
 
 /**
@@ -50,6 +50,20 @@ export interface CreateLifeOptions {
   layers?: FloraLayerCompositor;
 }
 
+/** One placed plant's scent emission, in WORLD coordinates. What the duft sense
+ *  turns into a `ScentZone` (which is anchor-local and indexed) at wiring time. */
+export interface ScentSpot {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly radius: number;
+  readonly type: ScentKey;
+}
+
+/** Cap on how many spots one query returns — matches the scent field's zone
+ *  buffer scale; nearest spots win so the plume field stays centred on the player. */
+const MAX_SCENT_SPOTS = 160;
+
 export interface Life {
   /** Parent of every species mesh; added to the scene on creation. */
   readonly group: THREE.Group;
@@ -59,6 +73,9 @@ export interface Life {
   onChunkDisposed(cell: ChunkCell): void;
   /** Advance the uniforms one frame. Call after `world.update(...)`. */
   update(dt: number): void;
+  /** The scent emissions of actually-placed flora within `radius` of (x, z) —
+   *  nearest first, capped. World coordinates; the duft coupling localizes them. */
+  scentSpotsAround(x: number, z: number, radius: number): ScentSpot[];
   dispose(): void;
 }
 
@@ -71,7 +88,7 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
   opts.scene.add(group);
 
   const life = createLifeUniforms();
-  const parts = await loadFloraParts();
+  const [parts, foliageAtlas] = await Promise.all([loadFloraParts(), loadFoliageAtlas()]);
 
   // One instancer + one affinity table per species, in the registry's stable order
   // (the order is also the PRNG salt, so it must not be re-derived elsewhere).
@@ -86,12 +103,16 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       opts.uniforms,
       life,
       opts.layers,
+      foliageAtlas,
     );
     for (const mesh of instances.meshes) group.add(mesh);
     return { def, instances, affinity: biomeAffinityTable(def) };
   });
 
   const liveChunks = new Set<string>();
+  // Scent emissions of placed flora, per chunk — fed to the duft sense via
+  // `scentSpotsAround`, so plumes rise from actual trees/mushrooms, not guesses.
+  const scentSpots = new Map<string, ScentSpot[]>();
 
   // ── Bioluminescence follows the active sense (event-rate → subscribe is right) ──
   let glowTarget = BIOLUMINESCENCE_BY_SENSE[signals.activeSense.peek()] ?? 0;
@@ -116,10 +137,27 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       // The exact grid the mesh was built from → flora stands on the rendered surface.
       const entry = makeHeightEntry(info.gridX, info.gridZ, info.chunkSize, info.heightGrid);
 
+      const spots: ScentSpot[] = [];
       for (const [index, s] of species.entries()) {
         const block = scatterChunk(info, entry, s.def, s.affinity, index);
         s.instances.addChunk(k, block);
+
+        // Record the placed instances' scent emissions (matrix column 3 is the
+        // instance translation — the plant's foot on the ground).
+        const scent = s.def.senses?.scent;
+        if (scent) {
+          for (let i = 0; i < block.count; i++) {
+            spots.push({
+              x: block.matrices[i * 16 + 12] ?? 0,
+              y: (block.matrices[i * 16 + 13] ?? 0) + scent.heightOffset,
+              z: block.matrices[i * 16 + 14] ?? 0,
+              radius: scent.radius,
+              type: scent.type,
+            });
+          }
+        }
       }
+      if (spots.length > 0) scentSpots.set(k, spots);
 
       liveChunks.add(k);
     },
@@ -129,7 +167,23 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       if (!liveChunks.has(k)) return;
 
       for (const s of species) s.instances.removeChunk(k);
+      scentSpots.delete(k);
       liveChunks.delete(k);
+    },
+
+    scentSpotsAround(x: number, z: number, radius: number): ScentSpot[] {
+      const r2 = radius * radius;
+      const hits: { spot: ScentSpot; d2: number }[] = [];
+      for (const spots of scentSpots.values()) {
+        for (const spot of spots) {
+          const dx = spot.x - x;
+          const dz = spot.z - z;
+          const d2 = dx * dx + dz * dz;
+          if (d2 <= r2) hits.push({ spot, d2 });
+        }
+      }
+      hits.sort((a, b) => a.d2 - b.d2);
+      return hits.slice(0, MAX_SCENT_SPOTS).map((h) => h.spot);
     },
 
     update(dt: number): void {
@@ -148,12 +202,14 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       unsubscribeSense();
       unsubscribeLayers?.();
       liveChunks.clear();
+      scentSpots.clear();
       for (const s of species) s.instances.dispose();
       disposeFloraParts(parts);
+      foliageAtlas.dispose();
       group.removeFromParent();
     },
   };
 }
 
-export type { SpeciesDef, SpeciesId } from "./species.ts";
+export type { ScentKey, SpeciesDef, SpeciesId } from "./species.ts";
 export { SPECIES, SPECIES_IDS } from "./species.ts";

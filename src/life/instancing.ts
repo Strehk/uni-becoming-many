@@ -63,7 +63,7 @@ export class SpeciesInstances {
   readonly def: SpeciesDef;
   private readonly parts: PartMesh[] = [];
   private readonly capacity: number;
-  private readonly material: FloraMaterialHandle;
+  private readonly materials: FloraMaterialHandle[] = [];
 
   /** Packing state — shared by every part (their transforms are identical). */
   private liveCount = 0;
@@ -77,11 +77,25 @@ export class SpeciesInstances {
     u: KitUniforms,
     life: LifeUniforms,
     layers?: FloraLayerCompositor,
+    foliageAtlas?: THREE.Texture,
   ) {
     this.def = def;
     // Worst case: every live chunk fills its cap at once.
     this.capacity = maxLiveChunks * def.perChunkCap;
-    this.material = createFloraMaterial(def, u, life, layers);
+
+    // Two material variants at most: solid parts share one graph, foliage parts
+    // (atlas-cutout cards, see material.ts) share the other. Built lazily — a
+    // rock never pays for the foliage material and vice versa.
+    let solid: FloraMaterialHandle | undefined;
+    let foliage: FloraMaterialHandle | undefined;
+    const materialFor = (part: FloraPart): FloraMaterialHandle => {
+      if (part.foliage && foliageAtlas) {
+        foliage ??= createFloraMaterial(def, u, life, layers, foliageAtlas);
+        return foliage;
+      }
+      solid ??= createFloraMaterial(def, u, life, layers);
+      return solid;
+    };
 
     for (const part of parts) {
       const geometry = part.geometry;
@@ -93,7 +107,9 @@ export class SpeciesInstances {
       const tint = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity * VEC3), VEC3);
       geometry.setAttribute("instanceTint", tint);
 
-      const mesh = new THREE.InstancedMesh(geometry, this.material.material, this.capacity);
+      const handle = materialFor(part);
+      if (!this.materials.includes(handle)) this.materials.push(handle);
+      const mesh = new THREE.InstancedMesh(geometry, handle.material, this.capacity);
       mesh.frustumCulled = false;
       mesh.instanceMatrix = matrix; // replace the default plain attribute
       mesh.count = 0; // packed total; grows as chunks stream in
@@ -113,9 +129,9 @@ export class SpeciesInstances {
     return this.liveCount;
   }
 
-  /** Rebuild the shared material's colorNode after a structural sense change. */
+  /** Rebuild the shared materials' colorNodes after a structural sense change. */
   rewire(): void {
-    this.material.rewire();
+    for (const handle of this.materials) handle.rewire();
   }
 
   /** Append one chunk's placed instances to the packed tail. */
@@ -210,6 +226,7 @@ export class SpeciesInstances {
     this.blocks.clear();
     this.order.length = 0;
     this.liveCount = 0;
-    this.material.material.dispose();
+    for (const handle of this.materials) handle.material.dispose();
+    this.materials.length = 0;
   }
 }

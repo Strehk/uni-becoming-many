@@ -91,17 +91,23 @@ export function scatterChunk(
     const slope = fields.slope[cell] ?? 1;
     if (slope > def.maxSlope) continue;
 
-    const affinityHere = affinity[fields.biome[cell] ?? 0] ?? 0;
+    const biomeHere = fields.biome[cell] ?? 0;
+    const affinityHere = affinity[biomeHere] ?? 0;
     if (affinityHere <= 0) continue;
+
+    // World position before the roll (pure reorder — consumes no rand() calls, so
+    // pre-existing species keep their exact placements). The optional `placement`
+    // modulator is how woodland.ts zones Forest into Nadel/Laub/Misch + Lichtungen.
+    const worldX = originX + u * chunkSize;
+    const worldZ = originZ + v * chunkSize;
+    const modulator = def.placement ? def.placement(worldX, worldZ, biomeHere) : 1;
 
     const density = fields.vegetation[cell] ?? 0;
     // Taper toward the slope limit so tree lines thin out rather than stopping dead.
     const slopeGate = 1 - slope / def.maxSlope;
-    const probability = density * affinityHere * slopeGate;
+    const probability = density * affinityHere * slopeGate * modulator;
     if (rand() > probability) continue;
 
-    const worldX = originX + u * chunkSize;
-    const worldZ = originZ + v * chunkSize;
     const worldY = sampleEntry(entry, worldX, worldZ);
 
     const scale = scaleMin + (scaleMax - scaleMin) * rand();

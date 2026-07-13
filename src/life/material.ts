@@ -45,6 +45,8 @@ import {
   positionGeometry,
   positionLocal,
   positionView,
+  texture,
+  uv,
   vec3,
 } from "three/tsl";
 import * as THREE from "three/webgpu";
@@ -83,33 +85,65 @@ export interface FloraMaterialHandle {
   rewire(): void;
 }
 
+/** Flora-wide sense-surface defaults — a species overrides them via `def.senses`. */
+const DEFAULT_TEMP_K = 296;
+const DEFAULT_TEMP_FACING_K = 8;
+const DEFAULT_UV_SIGNAL = 0.35;
+
+/** Alpha-cutout threshold for foliage cards. Cutout (not blending) keeps the
+ *  depth write and needs no sorting — right for instanced crowns. */
+const FOLIAGE_ALPHA_TEST = 0.5;
+
 /** Build the material for one part of one species. The part's own albedo travels
- *  per-instance in `instanceTint`, so every part of a species shares this graph. */
+ *  per-instance in `instanceTint`, so parts of a species share this graph — split
+ *  only into a solid and a foliage variant.
+ *
+ *  `foliageAtlas` switches the foliage variant on: the nature-kit's crowns/bushes
+ *  are 1-2 m cutout cards whose shape lives in a shared greyscale+alpha atlas
+ *  (see scripts/convert-nature.ts). RGB is shading (multiplied over the tint),
+ *  alpha is the cutout mask. */
 export function createFloraMaterial(
   def: SpeciesDef,
   u: KitUniforms,
   life: LifeUniforms,
   layers?: FloraLayerCompositor,
+  foliageAtlas?: THREE.Texture,
 ): FloraMaterialHandle {
   const material = new MeshBasicNodeMaterial();
   // Grass, flowers and foliage are single-sided planes in the source meshes.
   material.side = THREE.DoubleSide;
 
+  if (foliageAtlas) {
+    material.opacityNode = texture(foliageAtlas, uv()).a;
+    material.alphaTest = FOLIAGE_ALPHA_TEST;
+  }
+
   const rewire = (): void => {
     // ── Colour: instance tint → sense layers → fog → reveal, plus the glow ───
     const reveal = viewReveal(u.viewRadius, u.revealSoftness);
-    const tint = attribute<"vec3">("instanceTint", "vec3");
+    let tint: Node<"vec3"> = attribute<"vec3">("instanceTint", "vec3");
+    if (foliageAtlas) {
+      // Greyscale atlas shading over the species tint — leaf-cluster depth
+      // without per-leaf geometry.
+      tint = tint.mul(texture(foliageAtlas, uv()).r);
+    }
 
     // The plant as SenseSurface, through the SAME compositor pass as terrain +
     // water: echo reads pure camera depth, infrarot reads plants a touch warmer
-    // than the ground (they are alive), farben shades them with the shared sun.
+    // than the ground (they are alive) unless the species says otherwise (dead
+    // wood is ambient-cold, mushrooms run decomposition-warm, stone soaks sun),
+    // farben shades them with the shared sun.
+    const tempK = def.senses?.tempK ?? DEFAULT_TEMP_K;
+    const tempFacingK = def.senses?.tempFacingK ?? DEFAULT_TEMP_FACING_K;
+    const uvSignal = def.senses?.uvSignal ?? DEFAULT_UV_SIGNAL;
+
     let base: Node<"vec3"> | Node<"color"> = tint;
     if (layers) {
       const facing = normalWorld.dot(vec3(0.4, 0.75, 0.3).normalize()).clamp(0, 1);
       base = layers.buildColorNode({
         albedo: tint,
-        tempK: float(296).add(facing.mul(8)),
-        uvSignal: float(0.35),
+        tempK: float(tempK).add(facing.mul(tempFacingK)),
+        uvSignal: float(uvSignal),
         distance: positionView.z.negate(),
         light: facing.mul(0.65).add(0.35),
       });

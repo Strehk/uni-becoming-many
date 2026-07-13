@@ -7,12 +7,7 @@
     "base": {
       "color": "#ffffff"
     },
-    "order": [
-      "farben",
-      "echo",
-      "infrarot",
-      "uv"
-    ],
+    "order": ["farben", "echo", "infrarot", "uv"],
     "senses": {
       "farben": {
         "enabled": false,

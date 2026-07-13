@@ -10,8 +10,8 @@
 // The dev-only export button lives in the dev console (see dev-console/save-tuning.ts);
 // this module owns the file, the load, and the serialize.
 
-import savedTerrainState from "./state.json";
 import type { TerrainConfig, TerrainWorld } from "./index.ts";
+import savedTerrainState from "./state.json";
 
 export { savedTerrainState };
 

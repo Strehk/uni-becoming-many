@@ -32,6 +32,11 @@ const PLANT_SPOTS = 90;
 /** Ground-height source (world.groundHeightAt) — null over unloaded chunks. */
 export type GroundSource = (x: number, z: number) => number | null;
 
+/** Optional zone source fed from the ACTUAL placed flora (life.scentSpotsAround,
+ *  adapted in main.ts): given the new anchor, return anchor-LOCAL scent zones.
+ *  An empty answer falls back to the procedural generator (flora not streamed yet). */
+export type ZoneSource = (ax: number, ay: number, az: number, radius: number) => ScentZone[];
+
 export interface DuftSense {
   readonly controls: SensePanelDescriptor;
   update(dt: number): void;
@@ -338,6 +343,7 @@ export function createDuftSense(
   bus: Bus,
   rendererInstance: THREE.WebGPURenderer,
   ground: GroundSource,
+  zoneSource?: ZoneSource,
 ): DuftSense {
   const field = new ScentField({ fieldRadius: FIELD_RADIUS });
   scene.add(field.object);
@@ -358,7 +364,10 @@ export function createDuftSense(
     }
     anchor = { x: px, y: gy, z: pz };
     field.setCenter(px, gy, pz);
-    field.setZones(generateZones(px, gy, pz, ground));
+    // Real flora first: zones from the actually-placed plants around the anchor.
+    // Falls back to the procedural guesser while the flora is still streaming in.
+    const grown = zoneSource?.(px, gy, pz, FIELD_RADIUS - 6) ?? [];
+    field.setZones(grown.length > 0 ? grown : generateZones(px, gy, pz, ground));
     field.requestReseed();
     return true;
   };

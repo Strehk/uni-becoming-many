@@ -17,6 +17,7 @@ export const SCENT_TYPES: readonly ScentType[] = [
   { key: "baum", name: "Laubbaum (honigartig)", color: 0xffb340 },
   { key: "kiefer", name: "Kiefer (harzig)", color: 0x2fd6a3 },
   { key: "kraut", name: "Kräuterbusch (frisch)", color: 0xb8e02e },
+  { key: "pilz", name: "Pilz (erdig)", color: 0x8a6f4d },
 ];
 
 const typeIntensityArr = new Float32Array(SCENT_TYPES.map(() => 1.0));

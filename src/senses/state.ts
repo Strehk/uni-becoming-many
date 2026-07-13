@@ -17,9 +17,9 @@
 
 import type { SensePanelDescriptor } from "../dev-console/sense-controls.ts";
 import type { Bus } from "../signals/index.ts";
-import savedSenseState from "./state.json";
 import type { ShaderSenses } from "./shader/index.ts";
 import { SETTINGS_FORMAT, type SenseSettings } from "./shader/sense-system.ts";
+import savedSenseState from "./state.json";
 
 export { savedSenseState };
 

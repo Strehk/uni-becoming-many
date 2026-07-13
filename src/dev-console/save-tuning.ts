@@ -55,12 +55,16 @@ export function createSaveTuningControls(opts: {
   const sensesBtn = document.createElement("button");
   sensesBtn.textContent = "⤓ Sinne";
   sensesBtn.title = "Sinnes-Zustand als senses-state.json exportieren";
-  sensesBtn.addEventListener("click", () => downloadJson("senses-state.json", opts.serializeSenses()));
+  sensesBtn.addEventListener("click", () =>
+    downloadJson("senses-state.json", opts.serializeSenses()),
+  );
 
   const worldBtn = document.createElement("button");
   worldBtn.textContent = "⤓ World";
   worldBtn.title = "Welt-Zustand als terrain-state.json exportieren";
-  worldBtn.addEventListener("click", () => downloadJson("terrain-state.json", opts.serializeWorld()));
+  worldBtn.addEventListener("click", () =>
+    downloadJson("terrain-state.json", opts.serializeWorld()),
+  );
 
   row.append(sensesBtn, worldBtn);
   root.append(row);
