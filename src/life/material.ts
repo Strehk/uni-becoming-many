@@ -11,8 +11,8 @@
 // the scene has NO lights — lighting flows through the senses as the `light`
 // surface field. The previous MeshStandardNodeMaterial had no light to see by, so
 // its diffuse colour rendered black and flora showed only as emissive silhouettes.
-// A basic material has no emissive slot either, so the glow (fresnel rim +
-// awakening pulse) is ADDED into the colorNode — additive is what emissive did.
+// A basic material has no emissive slot either, so the glow (the fresnel rim) is
+// ADDED into the colorNode — additive is what emissive did.
 //
 // Two instancing traps this material is written around (three r185, verified):
 //
@@ -30,8 +30,7 @@
 //     and fold it into the compositor's albedo BEFORE the fog instead.
 //
 // Time comes from `life.clock` (mirroring `signals.time`), not TSL's `time`: the
-// former is the virtual clock, so pausing the transport freezes the wind, and the
-// `instanceAwaken` stamps stay on the same timebase as the wave that reads them.
+// former is the virtual clock, so pausing the transport freezes the wind.
 //
 // IMPORTANT — see AGENT.md "WebGPU rendering": node fns from `three/tsl`, classes
 // from `three/webgpu`. No GLSL.
@@ -46,7 +45,6 @@ import {
   positionGeometry,
   positionLocal,
   positionView,
-  smoothstep,
   vec3,
 } from "three/tsl";
 import * as THREE from "three/webgpu";
@@ -57,13 +55,6 @@ import { TAU } from "./matrix.ts";
 import type { SpeciesDef } from "./species.ts";
 import type { LifeUniforms } from "./uniforms.ts";
 
-/** `instanceAwaken` value meaning "this plant has never met the player". Any value
- *  far enough in the past that the decay term has long since reached zero. */
-export const NEVER_AWOKEN = -1000;
-
-/** Seconds for the awakening pulse to rise, then to fade back out. */
-const PULSE_RISE = 1.2;
-const PULSE_FALL = 3.5;
 /** Radians per second of the wind's fundamental. */
 const SWAY_SPEED = 1.1;
 
@@ -104,14 +95,6 @@ export function createFloraMaterial(
   // Grass, flowers and foliage are single-sided planes in the source meshes.
   material.side = THREE.DoubleSide;
 
-  // ── The awakening pulse ───────────────────────────────────────────────────
-  // A branchless rise-then-decay off the per-instance stamp. For a never-woken
-  // plant the age is enormous, so the decay term is already 0 — no sentinel test.
-  const age = life.clock.sub(attribute<"float">("instanceAwaken", "float"));
-  const pulse = smoothstep(float(0), float(PULSE_RISE), age).mul(
-    smoothstep(float(PULSE_RISE), float(PULSE_FALL), age).oneMinus(),
-  );
-
   const rewire = (): void => {
     // ── Colour: instance tint → sense layers → fog → reveal, plus the glow ───
     const reveal = viewReveal(u.viewRadius, u.revealSoftness);
@@ -133,12 +116,12 @@ export function createFloraMaterial(
     }
     const fogged = distanceFog(base, u.fogColor, u.fogNear, u.fogFar);
 
-    // Fresnel rim + self-glow, both lifted by the pulse — added, not emissive
-    // (unlit material). Sense-gated twice over: rimStrength and bioluminescence
-    // are both 0-able per sense, so e.g. echo's depth map stays near-pure.
+    // Fresnel rim self-glow — added, not emissive (unlit material). Sense-gated
+    // twice over: rimStrength and bioluminescence are both 0-able per sense, so
+    // e.g. echo's depth map stays near-pure.
     const glow = life.bioluminescence;
     const rim = fresnelEdge(u.rimPower).mul(u.rimStrength);
-    const lit = rim.mul(glow.mul(0.6).add(0.25)).add(pulse.mul(glow.mul(0.8).add(0.3)));
+    const lit = rim.mul(glow.mul(0.6).add(0.25));
     const shine = u.rimColor.mul(lit.mul(reveal).mul(life.emissiveGain.mul(0.5).add(0.75)));
 
     material.colorNode = mix(u.fogColor, fogged, reveal).add(shine);
@@ -155,7 +138,7 @@ export function createFloraMaterial(
     // Free per-instance randomness; no attribute needed.
     const phase = hash(instanceIndex).mul(TAU);
     const wave = life.clock.mul(SWAY_SPEED).add(phase).sin();
-    const amplitude = life.swayStrength.mul(def.sway).mul(pulse.mul(1.5).add(1));
+    const amplitude = life.swayStrength.mul(def.sway);
     const bend = vec3(
       wave.mul(amplitude).mul(mask),
       float(0),

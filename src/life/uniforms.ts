@@ -16,8 +16,7 @@ export function createLifeUniforms() {
      * Virtual elapsed seconds, mirroring `signals.time`. WRITER: life.update.
      *
      * Deliberately NOT TSL's `time`, which counts real renderer frames: the wind must
-     * obey the transport (pause/seek/timeScale), and the `instanceAwaken` stamps —
-     * taken from `signals.time` — must share a timebase with the wave that reads them.
+     * obey the transport (pause/seek/timeScale).
      */
     clock: uniform(0),
     /** Global sway amplitude multiplier. WRITER: life.update, from `signals.unrest`. */

@@ -4,8 +4,8 @@
 // stream with the terrain and read the signal substrate.
 //
 // Wiring, in the shape the rest of the app already uses:
-//   - terrain calls `onChunkBuilt`  → scatter, append instances, arm proximity
-//   - terrain calls `onChunkDisposed` → remove the chunk's instances, disarm
+//   - terrain calls `onChunkBuilt`  → scatter, append instances
+//   - terrain calls `onChunkDisposed` → remove the chunk's instances
 //   - main.ts calls `update(dt)`    → pump signals into the shared uniforms
 //
 // Life is a pure CONSUMER of signals: it reads `time`, `unrest`, `intensity`,
@@ -22,7 +22,6 @@ import { makeHeightEntry } from "../terrain/index.ts";
 import { disposeFloraParts, loadFloraParts } from "./assets.ts";
 import { SpeciesInstances } from "./instancing.ts";
 import type { FloraLayerCompositor } from "./material.ts";
-import { watchChunkProximity } from "./proximity.ts";
 import { biomeAffinityTable, scatterChunk } from "./scatter.ts";
 import { SPECIES, SPECIES_IDS } from "./species.ts";
 import { BIOLUMINESCENCE_BY_SENSE, createLifeUniforms } from "./uniforms.ts";
@@ -63,11 +62,6 @@ export interface Life {
   dispose(): void;
 }
 
-interface LiveChunk {
-  /** Tears down this chunk's `bus.when` crossing. */
-  unwatch: () => void;
-}
-
 const key = (gridX: number, gridZ: number): string => `${gridX},${gridZ}`;
 
 /** Create the flora world and add its group to the scene. Async: the GLBs must land
@@ -97,7 +91,7 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
     return { def, instances, affinity: biomeAffinityTable(def) };
   });
 
-  const liveChunks = new Map<string, LiveChunk>();
+  const liveChunks = new Set<string>();
 
   // ── Bioluminescence follows the active sense (event-rate → subscribe is right) ──
   let glowTarget = BIOLUMINESCENCE_BY_SENSE[signals.activeSense.peek()] ?? 0;
@@ -127,22 +121,13 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
         s.instances.addChunk(k, block);
       }
 
-      const centreX = (info.gridX + 0.5) * info.chunkSize;
-      const centreZ = (info.gridZ + 0.5) * info.chunkSize;
-      const unwatch = watchChunkProximity(centreX, centreZ, info.chunkSize, () => {
-        const at = signals.time.peek();
-        for (const s of species) s.instances.awakenChunk(k, at);
-      });
-
-      liveChunks.set(k, { unwatch });
+      liveChunks.add(k);
     },
 
     onChunkDisposed(cell: ChunkCell): void {
       const k = key(cell.gridX, cell.gridZ);
-      const live = liveChunks.get(k);
-      if (!live) return;
+      if (!liveChunks.has(k)) return;
 
-      live.unwatch();
       for (const s of species) s.instances.removeChunk(k);
       liveChunks.delete(k);
     },
@@ -162,7 +147,6 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
     dispose(): void {
       unsubscribeSense();
       unsubscribeLayers?.();
-      for (const live of liveChunks.values()) live.unwatch();
       liveChunks.clear();
       for (const s of species) s.instances.dispose();
       disposeFloraParts(parts);

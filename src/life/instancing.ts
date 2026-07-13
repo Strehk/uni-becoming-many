@@ -24,8 +24,8 @@
 // its bounds never leave the frustum and maintaining them would be churn. Culling is
 // coarse (whole flora set) — the per-chunk streaming radius is the real cull.
 //
-// Uploads happen only on the discrete stream/awaken events that touch a buffer, not
-// per frame; a still player uploads nothing. Parts of a species share the packing
+// Uploads happen only on the discrete stream events that touch a buffer, not per
+// frame; a still player uploads nothing. Parts of a species share the packing
 // (identical transforms) but keep their own buffers, written together.
 //
 // IMPORTANT — see AGENT.md "WebGPU rendering": classes from `three/webgpu`.
@@ -36,7 +36,6 @@ import type { FloraPart } from "./assets.ts";
 import {
   type FloraLayerCompositor,
   type FloraMaterialHandle,
-  NEVER_AWOKEN,
   createFloraMaterial,
 } from "./material.ts";
 import type { ScatterBlock } from "./scatter.ts";
@@ -50,7 +49,6 @@ interface PartMesh {
   readonly mesh: THREE.InstancedMesh;
   readonly matrix: THREE.StorageInstancedBufferAttribute;
   readonly tint: THREE.InstancedBufferAttribute;
-  readonly awaken: THREE.InstancedBufferAttribute;
   /** The part's material colour — the base every instance tint is jittered around. */
   readonly baseColor: THREE.Color;
 }
@@ -93,10 +91,7 @@ export class SpeciesInstances {
         MAT4,
       );
       const tint = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity * VEC3), VEC3);
-      const awaken = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity), 1);
-      awaken.array.fill(NEVER_AWOKEN);
       geometry.setAttribute("instanceTint", tint);
-      geometry.setAttribute("instanceAwaken", awaken);
 
       const mesh = new THREE.InstancedMesh(geometry, this.material.material, this.capacity);
       mesh.frustumCulled = false;
@@ -104,9 +99,8 @@ export class SpeciesInstances {
       mesh.count = 0; // packed total; grows as chunks stream in
       matrix.setUsage(THREE.DynamicDrawUsage);
       tint.setUsage(THREE.DynamicDrawUsage);
-      awaken.setUsage(THREE.DynamicDrawUsage);
 
-      this.parts.push({ mesh, matrix, tint, awaken, baseColor: part.baseColor });
+      this.parts.push({ mesh, matrix, tint, baseColor: part.baseColor });
     }
   }
 
@@ -151,7 +145,6 @@ export class SpeciesInstances {
         tints[j + 1] = part.baseColor.g * jitter;
         tints[j + 2] = part.baseColor.b * jitter;
       }
-      part.awaken.array.fill(NEVER_AWOKEN, offset, offset + used);
 
       this.markDirty(part);
       part.mesh.count = offset + used;
@@ -181,7 +174,6 @@ export class SpeciesInstances {
             this.liveCount * MAT4,
           );
           part.tint.array.copyWithin(block.offset * VEC3, tailStart * VEC3, this.liveCount * VEC3);
-          part.awaken.array.copyWithin(block.offset, tailStart, this.liveCount);
         }
       }
       this.liveCount -= block.length;
@@ -203,20 +195,9 @@ export class SpeciesInstances {
     }
   }
 
-  /** Stamp the awakening time across a chunk's instances — the proximity response. */
-  awakenChunk(key: string, at: number): void {
-    const block = this.blocks.get(key);
-    if (!block || block.length === 0) return;
-    for (const part of this.parts) {
-      part.awaken.array.fill(at, block.offset, block.offset + block.length);
-      part.awaken.needsUpdate = true;
-    }
-  }
-
   private markDirty(part: PartMesh): void {
     part.matrix.needsUpdate = true;
     part.tint.needsUpdate = true;
-    part.awaken.needsUpdate = true;
   }
 
   dispose(): void {
