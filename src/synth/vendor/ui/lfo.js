@@ -30,8 +30,21 @@ export const LfoModule = {
   active: false,
   params: {},          // { lfo_a: 0..1, … } — gelesen von App.frame()
   lanes: null,
+  seed: null,          // aus state.json geladene Lane-Werte, bis buildCard sie übernimmt
 
   toggle(app) { this.active ? this.close() : this.open(app); },
+
+  /* Aus loadState: form/tempo je Lane setzen. Ist die Karte noch nicht (oder
+     nur geschlossen) gebaut, merkt sich buildCard die Seed-Werte; eine bereits
+     geschlossen gebaute Karte wird verworfen, damit sie beim nächsten Öffnen
+     aus dem Seed neu entsteht (Regler/Auswahl spiegeln die Werte dann korrekt). */
+  applyState(arr) {
+    this.seed = arr;
+    if (this.lanes) {
+      this.lanes.forEach((l, i) => { if (arr[i]) { l.form = arr[i].form; l.tempo = arr[i].tempo; } });
+    }
+    if (!this.active && this.card) { this.card = null; this.lanes = null; }
+  },
 
   open(app) {
     this.app = app;
@@ -83,10 +96,11 @@ export const LfoModule = {
     card.append(head);
 
     this.lanes = LFO_QUELLEN.map(([id, label], i) => {
+      const seed = this.seed && this.seed[i];      // aus state.json, falls geladen
       const lane = {
         id, label, color: LANE_COLORS[id],
-        form: ["sinus", "zufall", "dreieck"][i],   // abwechslungsreiche Startformen
-        tempo: [0.45, 0.62, 0.3][i],
+        form: seed ? seed.form : ["sinus", "zufall", "dreieck"][i],   // abwechslungsreiche Startformen
+        tempo: seed ? seed.tempo : [0.45, 0.62, 0.3][i],
         phase: Math.random(),                      // nicht alle synchron starten
         rndA: Math.random(), rndB: Math.random(),  // Stützpunkte für zufall/stufen
         value: 0.5,

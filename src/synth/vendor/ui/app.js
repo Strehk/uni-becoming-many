@@ -34,9 +34,18 @@ const BM_DEFAULT_SYNTHS = [
   "magnet", "rhythmus", "sicht", "chemie",
 ];
 
+/* Drift-Lanes, falls das Modul beim Serialisieren noch nie geöffnet wurde —
+   spiegelt die Startwerte aus LfoModule.buildCard (Reihenfolge lfo_a/b/c). */
+const DEFAULT_LFO_STATE = [
+  { form: "sinus",   tempo: 0.45 },
+  { form: "zufall",  tempo: 0.62 },
+  { form: "dreieck", tempo: 0.3 },
+];
+
 export class App {
-  constructor(engine) {
+  constructor(engine, savedState = null) {
     this.engine = engine;
+    this.savedState = savedState;   // committed state.json (oder null) — siehe ensureBecomingManyDefaults
     this.layers = [];   // { layer, card, pad }
     this.overlay = null;
     this.root = document.getElementById("app");
@@ -59,11 +68,16 @@ export class App {
     head.append(brandRow, this.breath);
 
     const world = h("div", "world");
-    world.append(
-      this.select("grundton", ["E1","A1","C2","D2","E2","G2","A2"], "A2", v => this.engine.setRoot(v)),
-      this.select("skala", Object.keys(SCALES), this.engine.world.scaleName, v => this.engine.setScale(v)),
-      this.select("puls", ["36","46","54","66","80"], "54", v => this.engine.setPulse(+v)),
-    );
+    // Refs behalten: die Welt-Werte (Grundton one-way name→midi, Puls auf dem
+    // Transport, Master am Gain) sind aus der Engine nicht sauber rücklesbar —
+    // die <select>/<input> sind die Quelle der Wahrheit für serializeState().
+    const rootWrap  = this.select("grundton", ["E1","A1","C2","D2","E2","G2","A2"], "A2", v => this.engine.setRoot(v));
+    const scaleWrap = this.select("skala", Object.keys(SCALES), this.engine.world.scaleName, v => this.engine.setScale(v));
+    const pulseWrap = this.select("puls", ["36","46","54","66","80"], "54", v => this.engine.setPulse(+v));
+    this.rootSel = rootWrap.querySelector("select");
+    this.scaleSel = scaleWrap.querySelector("select");
+    this.pulseSel = pulseWrap.querySelector("select");
+    world.append(rootWrap, scaleWrap, pulseWrap);
 
     this.rack = h("main"); this.rack.id = "rack";
     this.list = h("div"); this.list.id = "layers";
@@ -80,6 +94,7 @@ export class App {
     vol.type = "range"; vol.id = "master";
     vol.min = 0; vol.max = 1; vol.step = 0.01; vol.value = 0.8;
     vol.addEventListener("input", () => this.engine.setMasterVolume(+vol.value));
+    this.masterInput = vol;
     const fly = h("button", null, "✈");
     fly.id = "fly-btn";
     fly.title = "flugmodus";
@@ -100,6 +115,17 @@ export class App {
     add.id = "add-btn";
     add.addEventListener("click", () => this.openSheet());
     bar.append(vol, lfo, mst, cfg, fly, add);
+
+    // Nur in der Entwicklung: die aktuelle Komposition als state.json exportieren
+    // (Theatre-Manier — Datei ins Repo legen & committen). import.meta.env.DEV
+    // wird von Vite im Prod-Build zu false → der Button fällt komplett weg.
+    if (import.meta.env.DEV) {
+      const save = h("button", null, "⤓");
+      save.id = "save-btn";
+      save.title = "Komposition als state.json exportieren";
+      save.addEventListener("click", () => this.downloadState());
+      bar.append(save);
+    }
 
     this.root.append(head, world, this.rack, bar);
   }
@@ -140,10 +166,10 @@ export class App {
   }
 
   /* ---------- Layer ---------- */
-  addLayer(senseId) {
+  addLayer(senseId, variantIdx = 0) {
     const sense = senseById(senseId);
     if (!sense) return null;
-    const layer = new SenseLayer(sense, this.engine);
+    const layer = new SenseLayer(sense, this.engine, variantIdx);
     const card = h("div", "card");
     card.style.setProperty("--c", sense.color);
     const info = { layer, card, pad: null };
@@ -171,9 +197,18 @@ export class App {
     }
   }
 
+  /* Erster Aufbau (einmalig, beide Boot-Pfade laufen hier durch). Liegt eine
+     komponierte state.json vor, wird sie geladen; sonst greifen die fest
+     verdrahteten (kabellosen) Standard-Layer. */
   ensureBecomingManyDefaults() {
     if (this._bmDefaultsReady) return;
     this._bmDefaultsReady = true;
+
+    const saved = this.savedState;
+    if (saved && Array.isArray(saved.layers) && saved.layers.length) {
+      this.loadState(saved);
+      return;
+    }
 
     for (const synth of BM_DEFAULT_SYNTHS) {
       if (!this.layers.some(info => info.layer.sense.id === synth)) {
@@ -191,6 +226,131 @@ export class App {
 
     if (!FlightModule.active) FlightModule.open(this);
     this.flightMap.emit();
+  }
+
+  /* ---------- Komposition speichern / laden (Theatre-Manier) ---------- */
+
+  /* Die lebende Komposition als schlichtes JSON-Objekt — Welt, Master-FX,
+     Layer (Sinn/Variante/Regler), Kabel und Drift-Lanes. Kabel referenzieren
+     ihr Ziel-Layer über den ARRAY-INDEX, nicht die flüchtige "L#"-Id. */
+  serializeState() {
+    const idIndex = new Map();
+    this.layers.forEach((info, i) => idIndex.set(info.layer.id, i));
+
+    const layers = this.layers.map(info => {
+      const L = info.layer;
+      return {
+        sense: L.sense.id,
+        variant: L.variantIdx,
+        muted: L.muted,
+        volume: L.volume,
+        room: L.roomVal,
+        cut: L.cutVal,
+        macro: L.macroVal,
+        melody: L.melodyVal,
+        xy: L.xy ? [L.xy[0], L.xy[1]] : [0.5, 0.5],
+        params: (L.paramVals || []).slice(),
+      };
+    });
+
+    const cables = [];
+    for (const m of this.flightMap.list) {
+      const layer = m.layerId === "master" ? "master" : idIndex.get(m.layerId);
+      if (layer === undefined) continue;   // Kabel auf ein nicht mehr existentes Layer
+      const c = {
+        quelle: m.quelle, layer, control: m.control,
+        min: m.min, max: m.max, staerke: m.staerke, glatt: m.glatt, kurve: m.kurve,
+      };
+      if (m.spatial) c.spatial = { ref: m.spatial.ref, roll: m.spatial.roll };
+      cables.push(c);
+    }
+
+    const lanes = LfoModule.lanes || DEFAULT_LFO_STATE;
+    const lfo = lanes.map(l => ({ form: l.form, tempo: l.tempo }));
+
+    return {
+      version: 1,
+      world: {
+        root: this.rootSel ? this.rootSel.value : "A2",
+        scale: this.scaleSel ? this.scaleSel.value : this.engine.world.scaleName,
+        pulse: this.pulseSel ? +this.pulseSel.value : 54,
+        master: this.masterInput ? +this.masterInput.value : 0.8,
+      },
+      fx: { ...this.engine.fx },
+      layers,
+      cables,
+      lfo,
+    };
+  }
+
+  /* Komposition aus einem serialisierten Zustand aufbauen. Reihenfolge zählt:
+     Welt/FX → Layer (Variante VOR Regler-Werten) → Kabel (neu verzeigert) → Drift. */
+  loadState(state) {
+    const w = state.world || {};
+    if (w.root != null)   { this.engine.setRoot(w.root);          if (this.rootSel)  this.rootSel.value = w.root; }
+    if (w.scale != null)  { this.engine.setScale(w.scale);        if (this.scaleSel) this.scaleSel.value = w.scale; }
+    if (w.pulse != null)  { this.engine.setPulse(+w.pulse);       if (this.pulseSel) this.pulseSel.value = String(w.pulse); }
+    if (w.master != null) { this.engine.setMasterVolume(+w.master); if (this.masterInput) this.masterInput.value = String(w.master); }
+
+    const fx = state.fx || {};
+    if (fx.eqlow != null)  this.engine.setEq("low", fx.eqlow);
+    if (fx.eqmid != null)  this.engine.setEq("mid", fx.eqmid);
+    if (fx.eqhigh != null) this.engine.setEq("high", fx.eqhigh);
+    if (fx.filter != null) this.engine.setFilterCutoff(fx.filter);
+    // Delay bleibt lazy: nur anlegen, wenn wirklich ein Anteil gespeichert ist.
+    if (fx.delaymix != null && fx.delaymix > 0) {
+      this.engine.setDelayMix(fx.delaymix);
+      if (fx.delaytime != null) this.engine.setDelayTime(fx.delaytime);
+      if (fx.delayfb != null)   this.engine.setDelayFeedback(fx.delayfb);
+    }
+
+    // Layer — mit Variante synchron bauen (first=true), dann Werte VARIANTE-ZUERST.
+    const newIds = [];
+    for (const ls of (state.layers || [])) {
+      const info = this.addLayer(ls.sense, ls.variant || 0);
+      if (!info) { newIds.push(null); continue; }
+      const L = info.layer;
+      if (Array.isArray(ls.params)) ls.params.forEach((v, i) => L.setParam(i, v));
+      if (ls.macro != null)  L.setMacro(ls.macro);
+      if (ls.melody != null) L.setMelody(ls.melody);
+      if (Array.isArray(ls.xy)) L.setXY(ls.xy[0], ls.xy[1]);
+      if (ls.volume != null) L.setVolume(ls.volume);
+      if (ls.room != null)   L.setRoom(ls.room);
+      if (ls.cut != null)    L.setCut(ls.cut);
+      this.setLayerMuted(info, !!ls.muted);
+      this.fillCard(info);   // Karte neu befüllen → Regler zeigen die geladenen Werte
+      newIds.push(L.id);
+    }
+
+    // Kabel — Ziel-Layer per Index auf die frischen Ids umzeigen.
+    for (const c of (state.cables || [])) {
+      const layerId = c.layer === "master" ? "master" : newIds[c.layer];
+      if (layerId == null) continue;
+      const m = this.flightMap.add(`${layerId}|${c.control}`, c.quelle);
+      if (!m) continue;   // z. B. Spatial/Ort-Nichtübereinstimmung
+      if (c.min != null)     m.min = c.min;
+      if (c.max != null)     m.max = c.max;
+      if (c.staerke != null) m.staerke = c.staerke;
+      if (c.glatt != null)   m.glatt = c.glatt;
+      if (c.kurve != null)   m.kurve = c.kurve;
+      if (c.spatial && m.spatial) { m.spatial.ref = c.spatial.ref; m.spatial.roll = c.spatial.roll; }
+    }
+
+    if (Array.isArray(state.lfo)) LfoModule.applyState(state.lfo);
+
+    if (!FlightModule.active) FlightModule.open(this);
+    this.flightMap.emit();
+  }
+
+  /* Dev-Export: serialisieren und als state.json herunterladen. */
+  downloadState() {
+    const json = JSON.stringify(this.serializeState(), null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "state.json";
+    document.body.append(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
   }
 
   /* Zeigt die kompakte Karte diesen Regler? layer.shown pflegt der

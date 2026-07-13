@@ -9,6 +9,7 @@ import "./styles/patch.css";
 import { Engine } from "./core/engine.js";
 import { App } from "./ui/app.js";
 import { loadLayout, applyTheme } from "./ui/settings.js";
+import savedState from "./state.json";   // committете Komposition (Theatre-Manier)
 
 (() => {
   applyTheme(loadLayout());
@@ -18,7 +19,7 @@ import { loadLayout, applyTheme } from "./ui/settings.js";
   }
 
   const engine = new Engine();
-  const app = new App(engine);
+  const app = new App(engine, savedState);
   app.ensureBecomingManyDefaults();
   window.bmApp = app;
   window.bmEngine = engine;

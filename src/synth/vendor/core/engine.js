@@ -25,6 +25,11 @@ export class Engine {
       scale: SCALES["pent. moll"],
     };
 
+    // Grundpuls (BPM). Lebt sonst nur auf Tone.Transport.bpm, das start()
+    // erst beim Audio-Unlock setzt — hier gespiegelt, damit ein geladener
+    // Puls den Unlock überlebt (start() liest this.pulse statt einer Zahl).
+    this.pulse = 54;
+
     // Master: Layer → master → EQ → Filter → [Delay] → Limiter → Lautsprecher
     // EQ und Filter starten neutral und kosten fast nichts (Biquads);
     // das Delay wird erst beim ersten Aufdrehen erzeugt (lazy).
@@ -67,7 +72,7 @@ export class Engine {
       const s = ctx.createBufferSource();
       s.buffer = b; s.connect(ctx.destination); s.start(0);
     } catch (e) {}
-    Tone.Transport.bpm.value = 54;   // ruhiger Grundpuls
+    Tone.Transport.bpm.value = this.pulse;   // ruhiger Grundpuls (geladener Wert überlebt Unlock)
     Tone.Transport.start();
     this.running = true;
   }
@@ -82,7 +87,7 @@ export class Engine {
   setScale(name) {
     if (SCALES[name]) { this.world.scaleName = name; this.world.scale = SCALES[name]; }
   }
-  setPulse(bpm)  { Tone.Transport.bpm.rampTo(bpm, 2); }
+  setPulse(bpm)  { this.pulse = bpm; Tone.Transport.bpm.rampTo(bpm, 2); }
   setMasterVolume(v) { this.master.gain.rampTo(v, 0.05); } // 0..1
 
   /* ---------- Master-Effekte (alle Werte 0..1, 0.5/1.0 = neutral) ---------- */

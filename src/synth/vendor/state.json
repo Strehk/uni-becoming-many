@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "world": { "root": "A2", "scale": "pent. moll", "pulse": 54, "master": 0.8 },
+  "fx": {
+    "eqlow": 0.5,
+    "eqmid": 0.5,
+    "eqhigh": 0.5,
+    "filter": 1,
+    "delaymix": 0,
+    "delaytime": 0.32,
+    "delayfb": 0.4
+  },
+  "layers": [],
+  "cables": [],
+  "lfo": [
+    { "form": "sinus", "tempo": 0.45 },
+    { "form": "zufall", "tempo": 0.62 },
+    { "form": "dreieck", "tempo": 0.3 }
+  ]
+}
