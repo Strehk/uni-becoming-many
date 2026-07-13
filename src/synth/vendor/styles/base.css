@@ -105,6 +105,14 @@ header.top {
 .card.muted { opacity: 0.45; }
 
 .card-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px 6px 14px; }
+.card-gate { display: flex; align-items: center; gap: 8px; padding: 0 12px 6px 14px; }
+.card-gate span { letter-spacing: 0.14em; text-transform: uppercase; font-size: 9px;
+  color: var(--dim); flex: none; }
+.card-gate select {
+  flex: 1; min-width: 0; background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 5px 6px;
+  font-family: var(--mono); font-size: 11px; appearance: none;
+}
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c);
   box-shadow: 0 0 10px var(--c); flex: none; }
 .card-title { flex: 1; min-width: 0; }

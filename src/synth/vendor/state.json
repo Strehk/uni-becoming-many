@@ -1,6 +1,11 @@
 {
   "version": 1,
-  "world": { "root": "A2", "scale": "pent. moll", "pulse": 54, "master": 0.8 },
+  "world": {
+    "root": "A2",
+    "scale": "pent. moll",
+    "pulse": 54,
+    "master": 0.8
+  },
   "fx": {
     "eqlow": 0.5,
     "eqmid": 0.5,
@@ -10,11 +15,194 @@
     "delaytime": 0.32,
     "delayfb": 0.4
   },
-  "layers": [],
+  "layers": [
+    {
+      "sense": "luft",
+      "variant": 0,
+      "muted": false,
+      "gate": "immer",
+      "volume": 0.68,
+      "room": 0.34,
+      "cut": 0.9,
+      "macro": 0.3,
+      "melody": 0.25,
+      "xy": [
+        0.45,
+        0.5
+      ],
+      "params": [
+        0.15,
+        0.5,
+        1
+      ]
+    },
+    {
+      "sense": "echo",
+      "variant": 0,
+      "muted": false,
+      "gate": "sinn_echo",
+      "volume": 0.68,
+      "room": 0.34,
+      "cut": 0.9,
+      "macro": 0.55,
+      "melody": 0.55,
+      "xy": [
+        0.4,
+        0.6
+      ],
+      "params": [
+        0.5,
+        0.4
+      ]
+    },
+    {
+      "sense": "motion",
+      "variant": 0,
+      "muted": true,
+      "gate": "sinn_motion",
+      "volume": 0.68,
+      "room": 0.34,
+      "cut": 0.9,
+      "macro": 0.2,
+      "melody": 0,
+      "xy": [
+        0.25,
+        0.4
+      ],
+      "params": [
+        0.6,
+        0.4
+      ]
+    },
+    {
+      "sense": "infrarot",
+      "variant": 0,
+      "muted": true,
+      "gate": "sinn_infrarot",
+      "volume": 0.68,
+      "room": 0.34,
+      "cut": 0.9,
+      "macro": 0.45,
+      "melody": 0.28,
+      "xy": [
+        0.42,
+        0.55
+      ],
+      "params": [
+        0.35,
+        0.45
+      ]
+    },
+    {
+      "sense": "licht",
+      "variant": 0,
+      "muted": true,
+      "gate": "sinn_uv",
+      "volume": 0.68,
+      "room": 0.34,
+      "cut": 0.9,
+      "macro": 0.5,
+      "melody": 0.4,
+      "xy": [
+        0.55,
+        0.35
+      ],
+      "params": [
+        0.5,
+        0.3
+      ]
+    },
+    {
+      "sense": "magnet",
+      "variant": 0,
+      "muted": true,
+      "gate": "sinn_magnetfeld",
+      "volume": 0.68,
+      "room": 0.34,
+      "cut": 0.9,
+      "macro": 0.25,
+      "melody": 0,
+      "xy": [
+        0.3,
+        0.35
+      ],
+      "params": [
+        0.45,
+        0.5,
+        1
+      ]
+    },
+    {
+      "sense": "rhythmus",
+      "variant": 0,
+      "muted": true,
+      "gate": "sinn_netzwerk",
+      "volume": 0.68,
+      "room": 0.34,
+      "cut": 0.9,
+      "macro": 0.35,
+      "melody": 0,
+      "xy": [
+        0.3,
+        0.6
+      ],
+      "params": [
+        0.35,
+        0.6
+      ]
+    },
+    {
+      "sense": "sicht",
+      "variant": 0,
+      "muted": true,
+      "gate": "sinn_rundum",
+      "volume": 0.68,
+      "room": 0.34,
+      "cut": 0.9,
+      "macro": 0.15,
+      "melody": 0.45,
+      "xy": [
+        0.35,
+        0.7
+      ],
+      "params": [
+        0.3,
+        0.5
+      ]
+    },
+    {
+      "sense": "chemie",
+      "variant": 0,
+      "muted": true,
+      "gate": "sinn_duft",
+      "volume": 0.68,
+      "room": 0.34,
+      "cut": 0.9,
+      "macro": 0.4,
+      "melody": 0.3,
+      "xy": [
+        0.3,
+        0.6
+      ],
+      "params": [
+        0.3,
+        0.5
+      ]
+    }
+  ],
   "cables": [],
   "lfo": [
-    { "form": "sinus", "tempo": 0.45 },
-    { "form": "zufall", "tempo": 0.62 },
-    { "form": "dreieck", "tempo": 0.3 }
+    {
+      "form": "sinus",
+      "tempo": 0.45
+    },
+    {
+      "form": "zufall",
+      "tempo": 0.62
+    },
+    {
+      "form": "dreieck",
+      "tempo": 0.3
+    }
   ]
 }

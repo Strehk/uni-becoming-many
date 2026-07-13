@@ -34,6 +34,27 @@ const BM_DEFAULT_SYNTHS = [
   "magnet", "rhythmus", "sicht", "chemie",
 ];
 
+/* Sinn-Gate: je Karte wählbare Quelle, die die Karte an-/ausschaltet. Der Wert
+   (value) ist entweder ein Schlüssel aus window.__bmFrame.senses oder ein
+   Sonderwort ("immer" = immer an, "aus" = immer aus). Sinne heißen dort
+   sinn_<id>, die Dramaturgie-Signale unrest/intensity/quality heißen schlicht. */
+const GATE_OPTIONS = [
+  { value: "immer",           label: "immer an" },
+  { value: "aus",             label: "aus" },
+  { value: "sinn_farben",     label: "farben" },
+  { value: "sinn_echo",       label: "echo" },
+  { value: "sinn_infrarot",   label: "infrarot" },
+  { value: "sinn_uv",         label: "uv" },
+  { value: "sinn_duft",       label: "duft" },
+  { value: "sinn_netzwerk",   label: "netzwerk" },
+  { value: "sinn_motion",     label: "motion" },
+  { value: "sinn_magnetfeld", label: "magnetfeld" },
+  { value: "sinn_rundum",     label: "rundum" },
+  { value: "unrest",          label: "unrest" },
+  { value: "intensity",       label: "intensity" },
+  { value: "quality",         label: "quality" },
+];
+
 /* Drift-Lanes, falls das Modul beim Serialisieren noch nie geöffnet wurde —
    spiegelt die Startwerte aus LfoModule.buildCard (Reihenfolge lfo_a/b/c). */
 const DEFAULT_LFO_STATE = [
@@ -170,6 +191,7 @@ export class App {
     const sense = senseById(senseId);
     if (!sense) return null;
     const layer = new SenseLayer(sense, this.engine, variantIdx);
+    layer.gate = "immer";   // Sinn-Gate: standardmäßig immer an (siehe frame())
     const card = h("div", "card");
     card.style.setProperty("--c", sense.color);
     const info = { layer, card, pad: null };
@@ -190,12 +212,12 @@ export class App {
     if (muteBtn) muteBtn.classList.toggle("on", !layer.muted);
   }
 
-  syncSenseLayers(synthId, value) {
-    const on = value > 0.001;
-    for (const info of this.layers) {
-      if (info.layer.sense.id === synthId) this.setLayerMuted(info, !on);
-    }
-  }
+  /* Früher schaltete der Host hierüber die Karten fest nach Sinn-Zuordnung.
+     Jetzt besitzt jede Karte ein eigenes, wählbares Gate (layer.gate), das in
+     frame() ausgewertet wird — deshalb ist dies ein No-op. Die Methode bleibt
+     bestehen, damit der Host-Zweig `if (app.syncSenseLayers)` weiterhin greift
+     und NICHT ersatzweise Layer nachlädt. */
+  syncSenseLayers(_synthId, _value) {}
 
   /* Erster Aufbau (einmalig, beide Boot-Pfade laufen hier durch). Liegt eine
      komponierte state.json vor, wird sie geladen; sonst greifen die fest
@@ -243,6 +265,7 @@ export class App {
         sense: L.sense.id,
         variant: L.variantIdx,
         muted: L.muted,
+        gate: L.gate,
         volume: L.volume,
         room: L.roomVal,
         cut: L.cutVal,
@@ -317,6 +340,7 @@ export class App {
       if (ls.volume != null) L.setVolume(ls.volume);
       if (ls.room != null)   L.setRoom(ls.room);
       if (ls.cut != null)    L.setCut(ls.cut);
+      if (ls.gate != null)   L.gate = ls.gate;   // sonst greift der addLayer-Standard "immer"
       this.setLayerMuted(info, !!ls.muted);
       this.fillCard(info);   // Karte neu befüllen → Regler zeigen die geladenen Werte
       newIds.push(L.id);
@@ -449,7 +473,19 @@ export class App {
         mk("param" + i, { label: p.label, value: layer.paramVals[i], onChange: x => layer.setParam(i, x) });
     });
 
-    card.append(head, info.pad.el, knobs);
+    // Sinn-Gate-Auswahl: welche Quelle diese Karte an-/ausschaltet (frame()).
+    const gateWrap = h("label", "card-gate", `<span>sinn</span>`);
+    const gateSel = document.createElement("select");
+    GATE_OPTIONS.forEach(o => {
+      const op = document.createElement("option");
+      op.value = o.value; op.textContent = o.label;
+      if (o.value === (layer.gate || "immer")) op.selected = true;
+      gateSel.append(op);
+    });
+    gateSel.addEventListener("change", () => { layer.gate = gateSel.value; });
+    gateWrap.append(gateSel);
+
+    card.append(head, gateWrap, info.pad.el, knobs);
   }
 
   removeLayer(info) {
@@ -755,6 +791,17 @@ export class App {
     // der Host pusht sie in window.__bmFrame; ohne Host-Frame frieren sie ein.
     if (window.__bmFrame && window.__bmFrame.senses) Object.assign(live, window.__bmFrame.senses);
     this.flightMap.apply(live);
+
+    // Sinn-Gate: jede Karte an-/ausschalten nach ihrer gewählten Quelle.
+    const gsrc = (window.__bmFrame && window.__bmFrame.senses) || null;
+    for (const info of this.layers) {
+      const g = info.layer.gate;
+      let on;
+      if (g === "immer" || !g) on = true;
+      else if (g === "aus")   on = false;             // hartes Aus, ignoriert Signale
+      else on = gsrc ? (gsrc[g] || 0) > 0.5 : false;  // ohne Host-Frame: gegatete Karten aus
+      this.setLayerMuted(info, !on);
+    }
 
     // Räumliches Hören: Hörer folgt der Kamera, gebundene Sinne sitzen an
     // ihren Ankern. Ohne Flug (pose null) gleiten die Panner heim.
