@@ -143,7 +143,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   // ── Rock (never sways) ────────────────────────────────────────────────────
   rock: {
     id: "rock",
-    targetHeight: 1.2,
+    targetHeight: 1.9,
     perChunkCap: 32,
     biomes: {
       [Biome.RockyMountain]: 1.0,
@@ -154,13 +154,13 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
       [Biome.Grassland]: 0.1,
     },
     maxSlope: 0.95,
-    scale: [0.6, 1.9],
+    scale: [0.45, 3.2],
     tintJitter: 0.12,
     sway: 0,
   },
   "moss-rock": {
     id: "moss-rock",
-    targetHeight: 1.0,
+    targetHeight: 1.6,
     perChunkCap: 22,
     biomes: {
       [Biome.Forest]: 0.7,
@@ -169,7 +169,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
       [Biome.Hills]: 0.25,
     },
     maxSlope: 0.9,
-    scale: [0.6, 1.7],
+    scale: [0.45, 2.8],
     tintJitter: 0.12,
     sway: 0,
   },
