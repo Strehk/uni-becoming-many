@@ -27,7 +27,7 @@
       "macro": 0.3,
       "melody": 0.25,
       "xy": [
-        0.45,
+        0.9342930890866646,
         0.5
       ],
       "params": [
@@ -58,16 +58,16 @@
     {
       "sense": "motion",
       "variant": 0,
-      "muted": true,
+      "muted": false,
       "gate": "sinn_motion",
-      "volume": 0.68,
+      "volume": 0.2033854166666667,
       "room": 0.34,
       "cut": 0.9,
       "macro": 0.2,
       "melody": 0,
       "xy": [
-        0.25,
-        0.4
+        0.4999999999999999,
+        0.5
       ],
       "params": [
         0.6,
@@ -77,16 +77,16 @@
     {
       "sense": "infrarot",
       "variant": 0,
-      "muted": true,
+      "muted": false,
       "gate": "sinn_infrarot",
-      "volume": 0.68,
+      "volume": 0.7174739583333334,
       "room": 0.34,
       "cut": 0.9,
       "macro": 0.45,
       "melody": 0.28,
       "xy": [
-        0.42,
-        0.55
+        0.49818908622632396,
+        0.45065030524531924
       ],
       "params": [
         0.35,
@@ -96,9 +96,9 @@
     {
       "sense": "licht",
       "variant": 0,
-      "muted": true,
+      "muted": false,
       "gate": "sinn_uv",
-      "volume": 0.68,
+      "volume": 0.2168489583333334,
       "room": 0.34,
       "cut": 0.9,
       "macro": 0.5,
@@ -115,16 +115,16 @@
     {
       "sense": "magnet",
       "variant": 0,
-      "muted": true,
+      "muted": false,
       "gate": "sinn_magnetfeld",
-      "volume": 0.68,
-      "room": 0.34,
+      "volume": 0.17690104166666673,
+      "room": 0.702734375,
       "cut": 0.9,
-      "macro": 0.25,
+      "macro": 0.48802083333333335,
       "melody": 0,
       "xy": [
         0.3,
-        0.35
+        0.4410440653434249
       ],
       "params": [
         0.45,
@@ -135,9 +135,9 @@
     {
       "sense": "rhythmus",
       "variant": 0,
-      "muted": true,
+      "muted": false,
       "gate": "sinn_netzwerk",
-      "volume": 0.68,
+      "volume": 0.3114322916666667,
       "room": 0.34,
       "cut": 0.9,
       "macro": 0.35,
@@ -154,9 +154,9 @@
     {
       "sense": "sicht",
       "variant": 0,
-      "muted": true,
+      "muted": false,
       "gate": "sinn_rundum",
-      "volume": 0.68,
+      "volume": 0.5876302083333333,
       "room": 0.34,
       "cut": 0.9,
       "macro": 0.15,
@@ -190,7 +190,48 @@
       ]
     }
   ],
-  "cables": [],
+  "cables": [
+    {
+      "quelle": "hoehe",
+      "layer": 0,
+      "control": "padx",
+      "min": 0,
+      "max": 1,
+      "staerke": 1,
+      "glatt": 0.4,
+      "kurve": "linear"
+    },
+    {
+      "quelle": "kurve",
+      "layer": 2,
+      "control": "padx",
+      "min": 0,
+      "max": 1,
+      "staerke": 1,
+      "glatt": 0.4,
+      "kurve": "linear"
+    },
+    {
+      "quelle": "neigung",
+      "layer": 2,
+      "control": "pady",
+      "min": 0,
+      "max": 1,
+      "staerke": 1,
+      "glatt": 0.4,
+      "kurve": "linear"
+    },
+    {
+      "quelle": "richtung",
+      "layer": 5,
+      "control": "pady",
+      "min": 0,
+      "max": 1,
+      "staerke": 1,
+      "glatt": 0.4,
+      "kurve": "linear"
+    }
+  ],
   "lfo": [
     {
       "form": "sinus",
