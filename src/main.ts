@@ -13,6 +13,7 @@ import {
 } from "./experience/config.ts";
 import { createInterfaceModeController } from "./experience/interface-mode.ts";
 import { createStartMenu } from "./experience/start-menu.ts";
+import { type Grass, createGrass } from "./grass/index.ts";
 import { type ControlOrientation, connectHost } from "./icaros/index.ts";
 import { createLife } from "./life/index.ts";
 import { createMinimap } from "./minimap/index.ts";
@@ -96,14 +97,37 @@ window.addEventListener("pagehide", () => atmosphere.dispose());
 // It shares the senses' atmosphere uniforms (sense transitions restyle the world live),
 // composites the four shader-sense colour layers over the biome albedo, and fires the
 // chunk hooks that let flora grow on each chunk and be freed with it.
+// GPU grass shares the terrain's chunk hooks (fields cache) and sense look. Declared
+// before the world so its `onChunkBuilt`/`onChunkDisposed` can fan out alongside life's;
+// assigned just after (it needs `world.groundHeightAt` for the CPU→GPU height bridge).
+// biome-ignore lint/style/useConst: forward-referenced by the terrain chunk hooks below before assignment
+let grass: Grass | undefined;
 const { world } = createTerrainWorld({
   scene: renderer.scene,
   uTime: time,
   uniforms: senses.uniforms,
   layers: senses.shader.compositor,
-  onChunkBuilt: (info) => life.onChunkBuilt(info),
-  onChunkDisposed: (cell) => life.onChunkDisposed(cell),
+  onChunkBuilt: (info) => {
+    life.onChunkBuilt(info);
+    grass?.onChunkBuilt(info);
+  },
+  onChunkDisposed: (cell) => {
+    life.onChunkDisposed(cell);
+    grass?.onChunkDisposed(cell);
+  },
 });
+
+// Compute-driven grass: a camera-centred field of bezier blades on grass-fitting biomes,
+// hidden in the void and revealed with the senses like the flora (see src/grass/).
+grass = createGrass({
+  scene: renderer.scene,
+  renderer: renderer.instance,
+  camera: renderer.camera,
+  uniforms: senses.uniforms,
+  layers: senses.shader.compositor,
+  groundHeightAt: (x, z) => world.groundHeightAt(x, z),
+});
+window.addEventListener("pagehide", () => grass?.dispose());
 
 // Restore the committed worldgen tuning (provider / config / param overrides) before
 // chunks stream — the dev-console World panel then opens on these values.
@@ -415,6 +439,7 @@ renderer.start((dtSeconds) => {
   // ── CONSUME ──
   world.update(pose.x, pose.z); // 6. stream chunks around the player
   life.update(dtSeconds); // 7. pump time / unrest / intensity / sense into the flora uniforms
+  grass?.update(dtSeconds); // GPU grass: snap, repaint field texture, dispatch compute (void-gated)
   atmosphere.update(dtSeconds); // 8. pump player pose + virtual clock into the dust uniforms
 });
 

@@ -26,15 +26,14 @@
 //
 // A species you raise the cap on costs its full price in EVERY chunk, including biomes
 // its rules never let it grow in — so spend where fullness reads cheapest. Ground cover
-// (grass/flowers, ~190-410 tris) is most of the instances but little of the triangle
+// (flowers/wheat, ~190-410 tris) is most of the instances but little of the triangle
 // weight; trees (1700-2900 tris) now cap at ~195/forest-chunk (pine 100 · common 55 · birch 40),
-// a dense closed-canopy woodland rather than the earlier ~48/chunk open stand. Because a cap is
-// paid in EVERY chunk, this ~5× raises the flora triangle budget from ~12.9 M toward ~29 M — still
-// inside desktop-WebGPU headroom, but the first thing to trim for a Quest-class target.
+// a dense closed-canopy woodland rather than the earlier ~48/chunk open stand. (The former
+// grass tufts are gone — the GPU grass in src/grass/ replaces that ground layer.)
 //
 // Source triangle counts (per instance, summed over parts):
 //   common-tree 2888 · pine 1910 · palm 1772 · birch 1704 · berry-bush 891 · dead 820
-//   cactus 434 · wheat/flower 408 · bush 363 · stump 232 · grass 192 · rock 70
+//   cactus 434 · wheat/flower 408 · bush 363 · stump 232 · rock 70
 
 import { Biome } from "../terrain/index.ts";
 
@@ -46,8 +45,6 @@ export type SpeciesId =
   | "palm"
   | "rock"
   | "moss-rock"
-  | "grass"
-  | "grass-short"
   | "wheat"
   | "bush"
   | "berry-bush"
@@ -175,31 +172,8 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   },
 
   // ── Ground cover ──────────────────────────────────────────────────────────
-  grass: {
-    id: "grass",
-    targetHeight: 0.5,
-    perChunkCap: 320,
-    biomes: { [Biome.Grassland]: 1.0, [Biome.Hills]: 0.5, [Biome.Forest]: 0.3, [Biome.Taiga]: 0.2 },
-    maxSlope: 0.7,
-    scale: [0.7, 1.5],
-    tintJitter: 0.2,
-    sway: 0.09,
-  },
-  "grass-short": {
-    id: "grass-short",
-    targetHeight: 0.32,
-    perChunkCap: 240,
-    biomes: {
-      [Biome.Grassland]: 0.8,
-      [Biome.Tundra]: 0.5,
-      [Biome.Hills]: 0.4,
-      [Biome.Beach]: 0.15,
-    },
-    maxSlope: 0.75,
-    scale: [0.7, 1.4],
-    tintJitter: 0.2,
-    sway: 0.07,
-  },
+  // Grass/grass-short were removed: the GPU grass (src/grass/) replaces them, with the
+  // biome affinities carried on in src/grass/biomes.ts.
   wheat: {
     id: "wheat",
     targetHeight: 0.9,
@@ -272,8 +246,6 @@ export const SPECIES_IDS: readonly SpeciesId[] = [
   "palm",
   "rock",
   "moss-rock",
-  "grass",
-  "grass-short",
   "wheat",
   "bush",
   "berry-bush",
