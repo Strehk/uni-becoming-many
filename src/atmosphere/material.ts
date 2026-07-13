@@ -16,7 +16,9 @@
 //  2. `colorNode` / `opacityNode` — a soft round dot (from the quad `uv`), faded out
 //     right at the eye (no in-your-face smear) and toward the sense's `viewRadius` (so
 //     dust doesn't hang in the void past where the world itself fades). The colour is
-//     a plain neutral fleck — subtle daylight dust, not tied to the sense mood.
+//     a plain neutral fleck — subtle daylight dust, not tied to the sense mood. Its
+//     PRESENCE is per-sense though: `u.dustStrength` (a SENSE_PROFILES field) gates the
+//     opacity, so senses that need an unpolluted image (echo's depth map) fade it out.
 //
 // The wrap centers on `atmo.playerPos` (fed from `signals.playerPose`), NOT the TSL
 // `cameraPosition` node. `cameraPosition` is still used for the near-eye fade, where
@@ -93,7 +95,9 @@ export function createDustMaterial(u: KitUniforms, atmo: AtmosphereUniforms): Sp
   const farFade = smoothstep(u.viewRadius, u.viewRadius.mul(0.55), dist);
 
   material.colorNode = vec3(0.0, 0.0, 0.0); // black motes (NormalBlending darkens the backdrop)
-  material.opacityNode = disc.mul(nearFade).mul(farFade).mul(float(0.9));
+  // `dustStrength` is the per-sense presence the SenseManager lerps — echo zeroes it,
+  // because fixed black specks would corrupt its pure distance→brightness depth map.
+  material.opacityNode = disc.mul(nearFade).mul(farFade).mul(u.dustStrength).mul(float(0.9));
 
   return material;
 }

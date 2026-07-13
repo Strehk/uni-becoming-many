@@ -79,7 +79,11 @@ renderer.scene.background = senses.uniforms.fogColor.value;
 // It shares the senses' uniforms so it reveals/fades with the world and reads
 // `activeSense` for its bioluminescence. Gated on a sense being active (the void
 // must stay empty) by toggling `life.group.visible` in the frame loop.
-const life = await createLife({ scene: renderer.scene, uniforms: senses.uniforms });
+const life = await createLife({
+  scene: renderer.scene,
+  uniforms: senses.uniforms,
+  layers: senses.shader.compositor,
+});
 window.addEventListener("pagehide", () => life.dispose());
 
 // Atmosphere: a field of stationary dust motes hanging in the air. As the player flies
@@ -127,8 +131,9 @@ window.addEventListener("pagehide", () => creatures.dispose());
 const netzwerk = createNetzwerkSense(renderer.scene, bus, creatures);
 window.addEventListener("pagehide", () => netzwerk.dispose());
 
-// Motion sense: particle trails from the birds' animated vertices; the meshes
-// hide while `signals.sense.motion` is up (module recommendation, host applies).
+// Motion sense: particle trails from the birds' animated vertices. The bird meshes
+// themselves stay hidden under EVERY sense (see the frame loop) — the trails are
+// the only way the swarm becomes visible.
 const motion = createMotionSense(renderer.scene, bus, creatures);
 window.addEventListener("pagehide", () => motion.dispose());
 
@@ -389,13 +394,11 @@ renderer.start((dtSeconds) => {
   magnetfeld.update(dtSeconds); // sky dome fade + follow player + spine time
   duft.update(clock.delta); // scent field: fade, re-anchor, GPU sim (spine-scaled dt)
   creatures.update(clock.delta); // boids swarm + mushroom anchors (obey pause/timeScale)
-  // Creatures are perception-dependent: hidden in the white void (no sense active),
-  // revealed once any sense is on — except while `motion` is up, which replaces the
-  // bird meshes with their motion trails. The boids keep flying while hidden, so the
-  // netzwerk web and motion trails still read live positions/animation.
-  creatures.setBirdsVisible(
-    signals.activeSense.peek() !== "none" && signals.sense.motion.peek() <= 0,
-  );
+  // The bird MESHES are never drawn: birds enter the picture only through the senses
+  // that perceive them — `motion` draws their vertex trails, `netzwerk` its swarm web.
+  // Their raw dark meshes would pollute every other view (e.g. echo's pure depth map).
+  // The boids keep flying while hidden, so those senses read live positions/animation.
+  creatures.setBirdsVisible(false);
   // Flora is perception-dependent: the white void must read as an empty uniform field,
   // so the flora stays hidden until a sense reveals the world. Dust, by contrast, hangs
   // in the air even in the void — a faint drift of motes so the white-out never reads as

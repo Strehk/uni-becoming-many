@@ -21,6 +21,7 @@ import type { ChunkBuiltInfo, ChunkCell } from "../terrain/index.ts";
 import { makeHeightEntry } from "../terrain/index.ts";
 import { disposeFloraParts, loadFloraParts } from "./assets.ts";
 import { SpeciesInstances } from "./instancing.ts";
+import type { FloraLayerCompositor } from "./material.ts";
 import { watchChunkProximity } from "./proximity.ts";
 import { biomeAffinityTable, scatterChunk } from "./scatter.ts";
 import { SPECIES, SPECIES_IDS } from "./species.ts";
@@ -45,6 +46,9 @@ export interface CreateLifeOptions {
   scene: THREE.Scene;
   /** The live sense uniforms — the same set the terrain wears. */
   uniforms: KitUniforms;
+  /** The shader-sense compositor (same object the terrain gets) — flora colour runs
+   *  through the SAME sense layers, so e.g. echo reads plants as pure depth. */
+  layers?: FloraLayerCompositor;
 }
 
 export interface Life {
@@ -81,7 +85,14 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
     const def = SPECIES[id];
     const partList = parts.get(id);
     if (!partList) throw new Error(`[life] no geometry loaded for species "${id}"`);
-    const instances = new SpeciesInstances(def, partList, MAX_LIVE_CHUNKS, opts.uniforms, life);
+    const instances = new SpeciesInstances(
+      def,
+      partList,
+      MAX_LIVE_CHUNKS,
+      opts.uniforms,
+      life,
+      opts.layers,
+    );
     for (const mesh of instances.meshes) group.add(mesh);
     return { def, instances, affinity: biomeAffinityTable(def) };
   });
@@ -93,6 +104,12 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
   life.bioluminescence.value = glowTarget;
   const unsubscribeSense = signals.activeSense.subscribe((id: SenseId | "none") => {
     glowTarget = BIOLUMINESCENCE_BY_SENSE[id] ?? 0;
+  });
+
+  // Structural sense changes (blend mode / layer order) rebuild the colorNode —
+  // the same contract the terrain material follows.
+  const unsubscribeLayers = opts.layers?.onStructureChange(() => {
+    for (const s of species) s.instances.rewire();
   });
 
   return {
@@ -144,6 +161,7 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
 
     dispose(): void {
       unsubscribeSense();
+      unsubscribeLayers?.();
       for (const live of liveChunks.values()) live.unwatch();
       liveChunks.clear();
       for (const s of species) s.instances.dispose();

@@ -25,7 +25,7 @@ import {
   vec3,
 } from "three/tsl";
 import { DoubleSide, MeshBasicNodeMaterial, type Node } from "three/webgpu";
-import { viewReveal } from "../../render/tsl-kit.ts";
+import { distanceFog, viewReveal } from "../../render/tsl-kit.ts";
 import type { TerrainLayerCompositor, TimeNode } from "./terrain-material.ts";
 import type { KitUniforms } from "./uniforms.ts";
 
@@ -79,10 +79,14 @@ export function createWaterMaterial(
       col = tinted.add(spec);
     }
 
-    // Sense fade: dissolve into the void with the terrain's view bubble, gated by the
-    // master reveal so the water vanishes entirely while no sense is active.
+    // Shared atmosphere: the SAME distance fog the terrain wears (its stage 2) —
+    // without it water sits visibly darker/brighter than land at equal distance,
+    // which breaks e.g. echo's pure depth read. Then the sense fade: dissolve into
+    // the void with the terrain's view bubble, gated by the master reveal so the
+    // water vanishes entirely while no sense is active.
+    const fogged = distanceFog(col, u.fogColor, u.fogNear, u.fogFar);
     const reveal = viewReveal(u.viewRadius, u.revealSoftness).mul(u.worldReveal);
-    mat.colorNode = mix(u.fogColor, col, reveal);
+    mat.colorNode = mix(u.fogColor, fogged, reveal);
     mat.opacityNode = clamp(float(0.82), 0, 0.96).mul(reveal);
     mat.needsUpdate = true;
   };

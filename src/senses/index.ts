@@ -56,6 +56,9 @@ export interface SenseProfile {
   fogColor: number;
   /** Fresnel edge-glow colour (hex). */
   rimColor: number;
+  /** Presence of the ambient dust motes, 0..1 — 0 for senses that must stay clean
+   *  (echo reads as a pure depth map; fixed black specks would corrupt it). */
+  dustStrength: number;
 }
 
 export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
@@ -75,6 +78,7 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
     colorFar: 0xf0f4ff,
     fogColor: 0xf0f4ff,
     rimColor: 0xf0f4ff,
+    dustStrength: 1,
   },
   // 1 — daylight colour vision: full-colour, near-continuous shading.
   farben: {
@@ -91,23 +95,27 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
     colorFar: 0x6a7a88,
     fogColor: 0x0a0a14,
     rimColor: 0x9fc0ff,
+    dustStrength: 1,
   },
-  // 2 — bat sonar: pure luminance depth. No coloured atmosphere/rim: echolocation
-  // should read as a black/white/greyscale depth map.
+  // 2 — bat sonar: a PURE camera depth map — near black, far white, nothing else.
+  // The fog is WHITE and tracks the echo layer's near/far ramp, so distance haze,
+  // the reveal edge and the empty sky all read as "far" (white) instead of
+  // inverting the map; rim stays 0 and the dust is gone entirely.
   echo: {
     id: "echo",
     label: SENSE_LABELS.echo,
-    viewRadius: 120,
-    revealSoftness: 30,
+    viewRadius: 140,
+    revealSoftness: 40,
     depthLevels: 7,
-    fogNear: 12,
-    fogFar: 150,
+    fogNear: 2,
+    fogFar: 140,
     rimPower: 3.0,
     rimStrength: 0,
     colorNear: 0x000000,
     colorFar: 0xffffff,
-    fogColor: 0x000000,
+    fogColor: 0xffffff,
     rimColor: 0xffffff,
+    dustStrength: 0, // black specks would break the pure depth read
   },
   // 3 — thermal: wide field, heat tint, warm edges.
   infrarot: {
@@ -124,6 +132,7 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
     colorFar: 0x3a0d52,
     fogColor: 0x180a14,
     rimColor: 0xff7a3c,
+    dustStrength: 1,
   },
   // 4 — ultraviolet: violet dusk, revealed signals glow against it.
   uv: {
@@ -140,6 +149,7 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
     colorFar: 0x120a24,
     fogColor: 0x0a0614,
     rimColor: 0xb26bff,
+    dustStrength: 1,
   },
   // 5 — smell / chemosense: wide field, green gradient; scent plumes carry the colour.
   duft: {
@@ -156,6 +166,7 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
     colorFar: 0x2f5a4a,
     fogColor: 0x0c1612,
     rimColor: 0x9ff06a,
+    dustStrength: 1,
   },
   // 6 — collective / network: wide field, red accent over near-dark ground.
   netzwerk: {
@@ -172,6 +183,7 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
     colorFar: 0x1a1030,
     fogColor: 0x0a0814,
     rimColor: 0xff5a6a,
+    dustStrength: 1,
   },
   // 7 — motion vision: the still world sinks into darkness, only movement glows.
   motion: {
@@ -188,6 +200,7 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
     colorFar: 0x05070a,
     fogColor: 0x04050a,
     rimColor: 0x7f9fbf,
+    dustStrength: 1,
   },
   // 8 — magnetoreception: cool auroral dusk, the sky carries the field.
   magnetfeld: {
@@ -204,6 +217,7 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
     colorFar: 0x101c2e,
     fogColor: 0x060a12,
     rimColor: 0x5cf0c8,
+    dustStrength: 1,
   },
   // 9 — 360° vision: warm, wide, near-continuous — the projection does the work.
   rundum: {
@@ -220,6 +234,7 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
     colorFar: 0x6a7a88,
     fogColor: 0x0c0a12,
     rimColor: 0xffd9a0,
+    dustStrength: 1,
   },
 };
 
@@ -244,6 +259,7 @@ export function createSenseUniforms(start: AtmosphereId) {
     colorFar: uniform(new Color(p.colorFar)),
     fogColor: uniform(new Color(p.fogColor)),
     rimColor: uniform(new Color(p.rimColor)),
+    dustStrength: uniform(p.dustStrength),
     /** Master world visibility 0..1 — 0 while no sense is active (the pale void),
      *  eased to 1 as senses reveal the world. The terrain + water gate on this. */
     worldReveal: uniform(start === "none" ? 0 : 1),
@@ -261,6 +277,7 @@ interface ScalarSnapshot {
   fogFar: number;
   rimPower: number;
   rimStrength: number;
+  dustStrength: number;
   worldReveal: number;
 }
 
@@ -344,6 +361,7 @@ export class SenseManager {
     this.u.fogFar.value = lerp(this.from.fogFar, this.to.fogFar, st);
     this.u.rimPower.value = lerp(this.from.rimPower, this.to.rimPower, st);
     this.u.rimStrength.value = lerp(this.from.rimStrength, this.to.rimStrength, st);
+    this.u.dustStrength.value = lerp(this.from.dustStrength, this.to.dustStrength, st);
     // Master reveal leads the styling (rt, the radius curve) so the world fades in from
     // the void slightly behind the atmosphere settling — and out ahead of it.
     this.u.worldReveal.value = lerp(this.from.worldReveal, revealTarget(this.to.id), st);
@@ -382,6 +400,7 @@ export class SenseManager {
       fogFar: this.u.fogFar.value,
       rimPower: this.u.rimPower.value,
       rimStrength: this.u.rimStrength.value,
+      dustStrength: this.u.dustStrength.value,
       worldReveal: this.u.worldReveal.value,
     };
   }
@@ -394,6 +413,7 @@ export class SenseManager {
     this.u.fogFar.value = p.fogFar;
     this.u.rimPower.value = p.rimPower;
     this.u.rimStrength.value = p.rimStrength;
+    this.u.dustStrength.value = p.dustStrength;
     this.u.worldReveal.value = revealTarget(p.id);
     this.u.colorNear.value.set(p.colorNear);
     this.u.colorFar.value.set(p.colorFar);
