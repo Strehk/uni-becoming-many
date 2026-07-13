@@ -156,13 +156,22 @@ const decimals = (step: number): number =>
   step >= 1 ? 0 : (String(step).split(".")[1]?.length ?? 2);
 const fmt = (v: number, step: number): string => v.toFixed(decimals(step));
 
-/** Read a slider's default from the world's live state (config knobs) or the
- *  worldgen base params (everything else), clamped into the slider's range. */
+/** Read a slider's start value from the world's live state: config knobs from
+ *  `world.config`, worldgen knobs from any live override (e.g. a loaded state.json)
+ *  falling back to the base params. Clamped into the slider's range. */
 function defaultFor(world: TerrainWorld, group: Group, spec: SliderSpec): number {
   const raw =
     group.target === "config"
       ? ((world.config as unknown as Record<string, number>)[spec.key] ?? 0)
-      : ((WORLDGEN_PARAMS as unknown as Record<string, number>)[spec.key] ?? 0);
+      : (world.paramOverrides[spec.key] ??
+        (WORLDGEN_PARAMS as unknown as Record<string, number>)[spec.key] ??
+        0);
+  return clamp(raw, spec.min, spec.max);
+}
+
+/** The worldgen knob's canonical (code) default, used by Reset to clear any override. */
+function canonicalParamDefault(spec: SliderSpec): number {
+  const raw = (WORLDGEN_PARAMS as unknown as Record<string, number>)[spec.key] ?? spec.min;
   return clamp(raw, spec.min, spec.max);
 }
 
@@ -343,10 +352,10 @@ export function createWorldControls(world: TerrainWorld): WorldControls {
     pendingConfig = {};
     pendingParams = {};
     for (const { group, spec, input, valueEl } of sliderControls) {
-      const def = defaultFor(world, group, spec);
-      // For config knobs, the "default" is the current live value; use the spec's
-      // canonical starting point instead so Reset is meaningful.
-      const start = group.target === "config" ? canonicalConfigDefault(spec) : def;
+      // Reset to canonical code defaults, not the live values — `defaultFor` now
+      // reflects any loaded override, which is exactly what Reset must clear.
+      const start =
+        group.target === "config" ? canonicalConfigDefault(spec) : canonicalParamDefault(spec);
       input.value = String(start);
       valueEl.textContent = fmt(start, spec.step);
     }
