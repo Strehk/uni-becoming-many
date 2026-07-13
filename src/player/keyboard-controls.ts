@@ -17,7 +17,8 @@
  *   - W / ArrowUp, S / ArrowDown → pitch up / down
  *   - A / ArrowLeft, D / ArrowRight → turn left / right
  *   - Shift → hold for 2× flight speed
- *   - Space → toggle position hold (freeze translation; steering still springs)
+ *
+ * (Space is not a flight key — it pauses the timeline via the clock transport.)
  */
 
 export type KeyboardControlsOptions = Readonly<{
@@ -79,7 +80,6 @@ export function createKeyboardControls(options: KeyboardControlsOptions = {}): K
   const stiffness = options.stiffness ?? 10;
 
   const pressed = new Set<string>();
-  let paused = false;
 
   // Target: instantaneous intent from the keys. `locomotion` springs toward it in `update`.
   const target_ = { pitch: 0, turn: 0, throttle: 1 };
@@ -105,7 +105,6 @@ export function createKeyboardControls(options: KeyboardControlsOptions = {}): K
     target_.pitch = axis(PITCH_KEYS);
     target_.turn = axis(TURN_KEYS);
     target_.throttle = shiftHeld() ? boost : 1;
-    locomotion.paused = paused; // discrete — no spring
   };
 
   // Frame-rate-independent exponential approach: same easing whether the frame is 8ms or 33ms.
@@ -125,24 +124,14 @@ export function createKeyboardControls(options: KeyboardControlsOptions = {}): K
   };
 
   const isBound = (code: string): boolean =>
-    code in PITCH_KEYS ||
-    code in TURN_KEYS ||
-    code === "ShiftLeft" ||
-    code === "ShiftRight" ||
-    code === "Space";
+    code in PITCH_KEYS || code in TURN_KEYS || code === "ShiftLeft" || code === "ShiftRight";
 
   const onKeyDown = (event: KeyboardEvent): void => {
     if (!isBound(event.code)) {
       return;
     }
-    event.preventDefault(); // Space/arrows would otherwise scroll the page
-    if (event.code === "Space") {
-      if (!event.repeat) {
-        paused = !paused; // toggle on the initial press, ignore auto-repeat
-      }
-    } else {
-      pressed.add(event.code);
-    }
+    event.preventDefault(); // arrows would otherwise scroll the page
+    pressed.add(event.code);
     recompute();
   };
 

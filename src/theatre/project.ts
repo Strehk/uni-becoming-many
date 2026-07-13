@@ -61,6 +61,12 @@ export interface Theatre {
   readonly timeline: ISheet;
   /** Drive the timeline playhead. Call each frame **only while the clock is running**. */
   setPosition(seconds: number): void;
+  /**
+   * Halt Theatre's own sequence playback (e.g. Studio's play button), keeping the clock the sole
+   * time authority. A no-op when nothing is self-playing — the clock normally freezes Theatre by
+   * simply not advancing `setPosition`.
+   */
+  pauseSequence(): void;
   dispose(): void;
 }
 
@@ -98,6 +104,9 @@ export async function initTheatre(): Promise<Theatre> {
     timeline,
     setPosition(seconds: number): void {
       timeline.sequence.position = seconds;
+    },
+    pauseSequence(): void {
+      timeline.sequence.pause();
     },
     dispose(): void {
       // Theatre core holds no per-project teardown; sheets/objects live for the page's lifetime.

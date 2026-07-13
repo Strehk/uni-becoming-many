@@ -55,7 +55,7 @@ let experienceConfig: ExperienceConfig = loadExperienceConfig();
 if (!useTheatreStudio) {
   clock.pause();
 }
-// Keyboard transport for authoring/debugging: K pause, J/L seek, ,/. timeScale, 0 reset.
+// Keyboard transport for authoring/debugging: Space/K pause, J/L seek, ,/. timeScale, 0 reset.
 const transport = createTransport(clock);
 window.addEventListener("pagehide", () => transport.dispose());
 
@@ -320,13 +320,18 @@ window.addEventListener("pagehide", () => {
 });
 
 // ── Frame loop — the §5 ordering: PRODUCE → REACT → CONSUME ─────────────────
+// Tracks the clock's running state across frames so a pause can also halt Theatre's own playback.
+let wasClockRunning = clock.running;
 renderer.start((dtSeconds) => {
   // ── PRODUCE ──
   clock.advance(dtSeconds); // 1. spine advances; time-cues fire
   signals.time.value = clock.now; // publish time onto the substrate (the one clock→signals bridge)
   if (clock.running) {
     theatre.setPosition(clock.now); // 2. slave Theatre's playhead to the spine (Studio owns it when paused)
+  } else if (wasClockRunning) {
+    theatre.pauseSequence(); // clock just paused ⇒ also halt any Theatre self-playback (Studio's play)
   }
+  wasClockRunning = clock.running;
   pumpAuthored(theatre.arc); // 3. authored Theatre values → authored signals (the one-writer bridge)
 
   keyboard.update(dtSeconds); // 4. input → player → emergent signals

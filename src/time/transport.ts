@@ -3,8 +3,8 @@
  * form of the "transport strip" in docs/time-signals-theatre-plan.md §6). Lets you drive the one
  * spine by hand so pause/seek/timeScale are observable while tuning.
  *
- * Bindings (chosen to avoid the flight keys W/A/S/D, Shift, Space and the dev-console `C`):
- *   - K            → pause / resume the clock
+ * Bindings (chosen to avoid the flight keys W/A/S/D, Shift and the dev-console `C`):
+ *   - Space / K    → pause / resume the clock (Space is the primary pause; also halts Theatre)
  *   - J / L        → seek −5s / +5s
  *   - , / .        → timeScale ×0.5 / ×2  (clamped to 0.125 … 8)
  *   - 0            → reset the timeline to t=0
@@ -37,6 +37,7 @@ export function createTransport(clock: Clock, target: Window | HTMLElement = win
       return;
     }
     switch (event.code) {
+      case "Space":
       case "KeyK":
         clock.toggle();
         break;
