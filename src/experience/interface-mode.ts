@@ -229,7 +229,8 @@ function injectStyles(): void {
     .bm-config-shell {
       position: fixed;
       top: 12px;
-      right: 16px;
+      left: 50%;
+      transform: translateX(-50%);
       z-index: 10020;
       display: flex;
       align-items: center;
