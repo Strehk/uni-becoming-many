@@ -27,8 +27,10 @@
 // A species you raise the cap on costs its full price in EVERY chunk, including biomes
 // its rules never let it grow in — so spend where fullness reads cheapest. Ground cover
 // (grass/flowers, ~190-410 tris) is most of the instances but little of the triangle
-// weight; trees (1700-2900 tris) sit at ~48/chunk, one per ~1400 m² — a believable open
-// woodland from flight height.
+// weight; trees (1700-2900 tris) now cap at ~195/forest-chunk (pine 100 · common 55 · birch 40),
+// a dense closed-canopy woodland rather than the earlier ~48/chunk open stand. Because a cap is
+// paid in EVERY chunk, this ~5× raises the flora triangle budget from ~12.9 M toward ~29 M — still
+// inside desktop-WebGPU headroom, but the first thing to trim for a Quest-class target.
 //
 // Source triangle counts (per instance, summed over parts):
 //   common-tree 2888 · pine 1910 · palm 1772 · birch 1704 · berry-bush 891 · dead 820
@@ -80,7 +82,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   pine: {
     id: "pine",
     targetHeight: 9,
-    perChunkCap: 20,
+    perChunkCap: 100,
     biomes: {
       [Biome.Taiga]: 1.0,
       [Biome.Forest]: 0.85,
@@ -95,7 +97,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "common-tree": {
     id: "common-tree",
     targetHeight: 8,
-    perChunkCap: 11,
+    perChunkCap: 55,
     biomes: { [Biome.Forest]: 1.0, [Biome.Grassland]: 0.3, [Biome.Hills]: 0.45 },
     maxSlope: 0.5,
     scale: [0.8, 1.3],
@@ -105,7 +107,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   birch: {
     id: "birch",
     targetHeight: 7.5,
-    perChunkCap: 8,
+    perChunkCap: 40,
     biomes: { [Biome.Forest]: 0.55, [Biome.Taiga]: 0.5, [Biome.Tundra]: 0.2, [Biome.Hills]: 0.3 },
     maxSlope: 0.5,
     scale: [0.85, 1.2],
