@@ -46,12 +46,13 @@ export function createInterfaceModeController(
 
   shell.append(title, timeline, settings, synth);
 
+  // The WebGPU/three.js inspector toggle. Always in the shell — and the shell only shows in
+  // configure mode — so the inspector is reachable there without needing ?debug=1, while playback
+  // stays clean. (`debugEnabled` still governs whether the dev console reopens on restore.)
   const debug = shellButton("Render Debug", () => {
     setInspectorVisible(!options.inspectorElement.parentNode);
   });
-  if (options.debugEnabled === true) {
-    shell.append(debug);
-  }
+  shell.append(debug);
 
   document.body.append(shell);
 
