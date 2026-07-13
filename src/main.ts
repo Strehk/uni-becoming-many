@@ -369,11 +369,12 @@ renderer.start((dtSeconds) => {
   creatures.setBirdsVisible(
     signals.activeSense.peek() !== "none" && signals.sense.motion.peek() <= 0,
   );
-  // Flora + dust are perception-dependent too: the white void must read as an empty
-  // uniform field, so both stay hidden until a sense reveals the world.
+  // Flora is perception-dependent: the white void must read as an empty uniform field,
+  // so the flora stays hidden until a sense reveals the world. Dust, by contrast, hangs
+  // in the air even in the void — a faint drift of motes so the white-out never reads as
+  // a dead blank screen before the first sense comes up.
   const worldRevealed = signals.activeSense.peek() !== "none";
   life.group.visible = worldRevealed;
-  atmosphere.group.visible = worldRevealed;
   netzwerk.update(clock.delta); // swarm web + mycelium (fade, rebuild, pulse)
   motion.update(clock.delta); // vertex-motion trails (spawn/fade ring buffer)
   synth.update(dtSeconds); // push the signal packet into the synth iframe

@@ -15,8 +15,8 @@
 
 import * as THREE from "three/webgpu";
 
-/** How many motes fill the box. ~3 k is plenty at this size — one cheap draw call. */
-const COUNT = 3000;
+/** How many motes fill the box. ~6 k reads as a denser haze — still one cheap draw call. */
+const COUNT = 6000;
 /** Box the motes fill, in metres: XZ span, vertical band, XZ span. Must match `material.ts`. */
 const BOX_X = 60;
 const BOX_Y = 30;

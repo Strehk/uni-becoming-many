@@ -48,8 +48,8 @@ import type { AtmosphereUniforms } from "./uniforms.ts";
 const BOX_X = 60;
 const BOX_Y = 30;
 const BOX_Z = 60;
-/** Mote radius in metres — tiny specks (jittered a little per instance). */
-const MOTE_RADIUS = 0.05;
+/** Mote radius in metres — small specks, a touch bigger (jittered a little per instance). */
+const MOTE_RADIUS = 0.08;
 const TAU = 6.2831853;
 
 /** Build the single material shared by every mote. */
@@ -93,7 +93,7 @@ export function createDustMaterial(u: KitUniforms, atmo: AtmosphereUniforms): Sp
   const farFade = smoothstep(u.viewRadius, u.viewRadius.mul(0.55), dist);
 
   material.colorNode = vec3(0.0, 0.0, 0.0); // black motes (NormalBlending darkens the backdrop)
-  material.opacityNode = disc.mul(nearFade).mul(farFade).mul(float(0.8));
+  material.opacityNode = disc.mul(nearFade).mul(farFade).mul(float(0.9));
 
   return material;
 }
