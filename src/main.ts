@@ -155,6 +155,16 @@ renderer.scene.add(player.rig);
 const theatre = await initTheatre();
 window.addEventListener("pagehide", () => theatre.dispose());
 
+// While the clock is paused, Studio owns Theatre's playhead — mirror its scrubbing back into the
+// clock so resuming continues from where you scrubbed, instead of the clock yanking Theatre back to
+// its old time. Guarded on `!clock.running` so the frame loop's own `setPosition` never echoes.
+const offTheatrePosition = theatre.onPositionChange((seconds) => {
+  if (!clock.running) {
+    clock.seek(seconds);
+  }
+});
+window.addEventListener("pagehide", offTheatrePosition);
+
 if (import.meta.env.DEV) {
   (window as Window & { __bmDebug?: unknown }).__bmDebug = { clock, signals, theatre };
 }

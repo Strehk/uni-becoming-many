@@ -26,7 +26,7 @@
  * In Studio mode we disable Theatre's browser-persistent draft cache so the editor opens on
  * the committed disk state instead of an old localStorage snapshot.
  */
-import { getProject, types } from "@theatre/core";
+import { getProject, onChange, types } from "@theatre/core";
 import type { ISheet, ISheetObject } from "@theatre/core";
 import projectState from "./state.json";
 
@@ -67,6 +67,12 @@ export interface Theatre {
    * simply not advancing `setPosition`.
    */
   pauseSequence(): void;
+  /**
+   * Observe the sequence playhead (seconds). Fires whenever Theatre's position changes — including
+   * when Studio scrubs it while the clock is paused. Returns an unsubscribe function. Lets the host
+   * mirror a Studio scrub back into the clock so the two don't diverge.
+   */
+  onPositionChange(listener: (seconds: number) => void): () => void;
   dispose(): void;
 }
 
@@ -107,6 +113,9 @@ export async function initTheatre(): Promise<Theatre> {
     },
     pauseSequence(): void {
       timeline.sequence.pause();
+    },
+    onPositionChange(listener: (seconds: number) => void): () => void {
+      return onChange(timeline.sequence.pointer.position, listener);
     },
     dispose(): void {
       // Theatre core holds no per-project teardown; sheets/objects live for the page's lifetime.
