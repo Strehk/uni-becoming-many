@@ -33,7 +33,12 @@
 import * as THREE from "three/webgpu";
 import type { KitUniforms } from "../render/uniforms.ts";
 import type { FloraPart } from "./assets.ts";
-import { NEVER_AWOKEN, createFloraMaterial } from "./material.ts";
+import {
+  type FloraLayerCompositor,
+  type FloraMaterialHandle,
+  NEVER_AWOKEN,
+  createFloraMaterial,
+} from "./material.ts";
 import type { ScatterBlock } from "./scatter.ts";
 import type { SpeciesDef } from "./species.ts";
 import type { LifeUniforms } from "./uniforms.ts";
@@ -60,7 +65,7 @@ export class SpeciesInstances {
   readonly def: SpeciesDef;
   private readonly parts: PartMesh[] = [];
   private readonly capacity: number;
-  private readonly material: THREE.MeshStandardNodeMaterial;
+  private readonly material: FloraMaterialHandle;
 
   /** Packing state — shared by every part (their transforms are identical). */
   private liveCount = 0;
@@ -73,11 +78,12 @@ export class SpeciesInstances {
     maxLiveChunks: number,
     u: KitUniforms,
     life: LifeUniforms,
+    layers?: FloraLayerCompositor,
   ) {
     this.def = def;
     // Worst case: every live chunk fills its cap at once.
     this.capacity = maxLiveChunks * def.perChunkCap;
-    this.material = createFloraMaterial(def, u, life);
+    this.material = createFloraMaterial(def, u, life, layers);
 
     for (const part of parts) {
       const geometry = part.geometry;
@@ -92,7 +98,7 @@ export class SpeciesInstances {
       geometry.setAttribute("instanceTint", tint);
       geometry.setAttribute("instanceAwaken", awaken);
 
-      const mesh = new THREE.InstancedMesh(geometry, this.material, this.capacity);
+      const mesh = new THREE.InstancedMesh(geometry, this.material.material, this.capacity);
       mesh.frustumCulled = false;
       mesh.instanceMatrix = matrix; // replace the default plain attribute
       mesh.count = 0; // packed total; grows as chunks stream in
@@ -111,6 +117,11 @@ export class SpeciesInstances {
   /** Live (drawn) instance count across this species — for diagnostics. */
   get instanceCount(): number {
     return this.liveCount;
+  }
+
+  /** Rebuild the shared material's colorNode after a structural sense change. */
+  rewire(): void {
+    this.material.rewire();
   }
 
   /** Append one chunk's placed instances to the packed tail. */
@@ -218,6 +229,6 @@ export class SpeciesInstances {
     this.blocks.clear();
     this.order.length = 0;
     this.liveCount = 0;
-    this.material.dispose();
+    this.material.material.dispose();
   }
 }

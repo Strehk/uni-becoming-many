@@ -32,7 +32,7 @@
         "opacity": 1,
         "range": 600,
         "rangeSoft": 80,
-        "blendMode": "multiply",
+        "blendMode": "normal",
         "params": {
           "near": 2,
           "far": 140,

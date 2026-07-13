@@ -41,6 +41,8 @@ export interface SenseUniformSeed {
   fogColor: number;
   /** Fresnel edge-glow colour (hex). */
   rimColor: number;
+  /** Presence of the ambient dust motes, 0..1 — per-sense fade of the dust field. */
+  dustStrength: number;
 }
 
 /** The look a world opens with when no sense is driving it yet. */
@@ -56,6 +58,7 @@ export const DEFAULT_SENSE_SEED: SenseUniformSeed = {
   colorFar: 0x6a7a88,
   fogColor: 0x0a0a14,
   rimColor: 0x9fc0ff,
+  dustStrength: 1,
 };
 
 /** Build the live sense uniforms, seeded to `seed`. */
@@ -72,6 +75,7 @@ export function createSenseUniforms(seed: SenseUniformSeed = DEFAULT_SENSE_SEED)
     colorFar: uniform(new THREE.Color(seed.colorFar)),
     fogColor: uniform(new THREE.Color(seed.fogColor)),
     rimColor: uniform(new THREE.Color(seed.rimColor)),
+    dustStrength: uniform(seed.dustStrength),
   };
 }
 

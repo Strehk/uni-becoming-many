@@ -15,8 +15,11 @@
 //
 //  2. `colorNode` / `opacityNode` — a soft round dot (from the quad `uv`), faded out
 //     right at the eye (no in-your-face smear) and toward the sense's `viewRadius` (so
-//     dust doesn't hang in the void past where the world itself fades). The colour is
-//     a plain neutral fleck — subtle daylight dust, not tied to the sense mood.
+//     dust doesn't hang in the void past where the world itself fades). The mote is a
+//     dark fleck wearing the sense's distance fog — near it stays dark, far it
+//     dissolves into the haze colour, so under echo the dust is depth-true. Its
+//     PRESENCE is per-sense too: `u.dustStrength` (a SENSE_PROFILES field) gates the
+//     opacity, so a sense wanting a cleaner image can fade the whole field out.
 //
 // The wrap centers on `atmo.playerPos` (fed from `signals.playerPose`), NOT the TSL
 // `cameraPosition` node. `cameraPosition` is still used for the near-eye fade, where
@@ -34,6 +37,7 @@ import {
   float,
   hash,
   instanceIndex,
+  mix,
   mod,
   sin,
   smoothstep,
@@ -92,8 +96,15 @@ export function createDustMaterial(u: KitUniforms, atmo: AtmosphereUniforms): Sp
   const nearFade = smoothstep(float(1.5), float(6.0), dist); // invisible < 1.5 m
   const farFade = smoothstep(u.viewRadius, u.viewRadius.mul(0.55), dist);
 
-  material.colorNode = vec3(0.0, 0.0, 0.0); // black motes (NormalBlending darkens the backdrop)
-  material.opacityNode = disc.mul(nearFade).mul(farFade).mul(float(0.9));
+  // The mote wears the sense's distance fog, like every world surface: a near speck
+  // stays a dark fleck, a far one dissolves into the haze colour. Under echo this
+  // makes the dust depth-TRUE — a mote at 100 m is exactly as pale as terrain at
+  // 100 m — instead of a fixed black spot punching through the depth map.
+  const fogT = dist.sub(u.fogNear).div(u.fogFar.sub(u.fogNear)).clamp(0.0, 1.0);
+  material.colorNode = mix(vec3(0.0, 0.0, 0.0), u.fogColor, fogT);
+  // `dustStrength` is the per-sense presence the SenseManager lerps — senses that
+  // want a cleaner image can fade the whole field out.
+  material.opacityNode = disc.mul(nearFade).mul(farFade).mul(u.dustStrength).mul(float(0.9));
 
   return material;
 }

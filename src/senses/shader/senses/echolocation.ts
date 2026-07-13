@@ -41,7 +41,9 @@ export function createEcholocation(): ShaderSense {
     opacity: scalarUniform(1.0),
     range: scalarUniform(600.0),
     rangeSoft: scalarUniform(80.0),
-    blendMode: "multiply",
+    // "normal": when echo is up it REPLACES the layers beneath it — the depth map
+    // must stay pure luminance, never tinted by e.g. an active farben layer below.
+    blendMode: "normal",
     params: { near, far, gamma, nearColor, farColor, bands, pingStrength, pingSpeed, pingWidth },
     ui: [
       { key: "near", label: "Nah-Distanz", type: "range", min: 0.5, max: 60, step: 0.5, digits: 1 },
