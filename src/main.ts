@@ -3,6 +3,7 @@ import { createAtmosphere } from "./atmosphere/index.ts";
 import { SoundBus, SoundDirector } from "./audio/index.ts";
 import { createCreatures } from "./creatures/index.ts";
 import { createDevConsole } from "./dev-console/index.ts";
+import { createSaveTuningControls } from "./dev-console/save-tuning.ts";
 import { createSenseControls } from "./dev-console/sense-controls.ts";
 import { createWorldControls } from "./dev-console/world-controls.ts";
 import {
@@ -24,9 +25,11 @@ import { createMagnetfeldSense } from "./senses/magnetfeld/index.ts";
 import { createMotionSense } from "./senses/motion/index.ts";
 import { createNetzwerkSense } from "./senses/netzwerk/index.ts";
 import { createRundumSense } from "./senses/rundum/index.ts";
+import { loadSenseState, savedSenseState, serializeSenseState } from "./senses/state.ts";
 import { bus, signals } from "./signals/index.ts";
 import { createSynthOverlay } from "./synth/index.ts";
 import { createTerrainWorld } from "./terrain/index.ts";
+import { loadTerrainState, savedTerrainState, serializeTerrainState } from "./terrain/state.ts";
 import { initTheatre, pumpAuthored } from "./theatre/index.ts";
 import { Clock } from "./time/clock.ts";
 import { createTransport } from "./time/transport.ts";
@@ -98,6 +101,10 @@ const { world } = createTerrainWorld({
   onChunkDisposed: (cell) => life.onChunkDisposed(cell),
 });
 
+// Restore the committed worldgen tuning (provider / config / param overrides) before
+// chunks stream — the dev-console World panel then opens on these values.
+loadTerrainState(savedTerrainState, world);
+
 // Magnetfeld sense: the sky dome showing the geomagnetic field (9 blendable modes),
 // fading with `signals.sense.magnetfeld` and following the player.
 const magnetfeld = createMagnetfeldSense(renderer.scene, bus);
@@ -129,6 +136,20 @@ window.addEventListener("pagehide", () => motion.dispose());
 // `signals.sense.rundum` is up (skipped in XR — the headset owns projection).
 const rundum = createRundumSense(renderer, bus);
 window.addEventListener("pagehide", () => rundum.dispose());
+
+// The five standalone sense descriptors (the shader senses serialize themselves).
+const senseModules = [
+  magnetfeld.controls,
+  duft.controls,
+  netzwerk.controls,
+  motion.controls,
+  rundum.controls,
+];
+
+// Restore the committed sense look before the panels build: the shader senses'
+// params/blend/order via the SenseSystem, the standalone senses' params over the
+// bus. Applying now means the dev-console Sinne panel opens on these values.
+loadSenseState(savedSenseState, { shader: senses.shader, bus });
 
 // Synth overlay (key M): the vendored Tone.js drone organ in a same-origin iframe.
 // The bridge pushes pose/flight/sense signals each frame and auto-adds the mapped
@@ -260,11 +281,7 @@ if (!useTheatreStudio) {
 // commands — the same channel as keys 1–9 and the Theatre-driven signals.
 const senseControls = createSenseControls(bus, [
   ...senses.shader.controls().map((d) => ({ ...d, movable: true })),
-  magnetfeld.controls,
-  duft.controls,
-  netzwerk.controls,
-  motion.controls,
-  rundum.controls,
+  ...senseModules,
 ]);
 devConsole.addSection(senseControls.element);
 window.addEventListener("pagehide", () => senseControls.dispose());
@@ -274,6 +291,16 @@ window.addEventListener("pagehide", () => senseControls.dispose());
 const worldControls = createWorldControls(world);
 devConsole.addSection(worldControls.element);
 window.addEventListener("pagehide", () => worldControls.dispose());
+
+// Dev-only: export the live sense + world tuning as committed state.json files.
+if (import.meta.env.DEV) {
+  const saveTuning = createSaveTuningControls({
+    serializeSenses: () => serializeSenseState(senses.shader, senseModules),
+    serializeWorld: () => serializeTerrainState(world),
+  });
+  devConsole.addSection(saveTuning.element);
+  window.addEventListener("pagehide", () => saveTuning.dispose());
+}
 
 // Debug controls: WASD / arrows to steer, Shift for 2× speed, Space to hold position.
 const keyboard = createKeyboardControls();

@@ -15,6 +15,7 @@ import { baseHeight01, baseMoisture01, temperature01 } from "../fields.ts";
 import { priorityFlood } from "../hydrology/lakes/BasinDetection.ts";
 import { detectLakes } from "../hydrology/lakes/LakeGenerator.ts";
 import { flowAccumulation } from "../hydrology/rivers/FlowAccumulation.ts";
+import { emptyNetwork } from "../hydrology/rivers/RiverNetwork.ts";
 import { traceRivers } from "../hydrology/rivers/RiverTracing.ts";
 import { type GenParams, MACRO_TILE_COUNT, type RegionData } from "../mapTypes.ts";
 import { deriveSeed, mulberry32, seedToOffset } from "../rng.ts";
@@ -113,16 +114,22 @@ export class MacroWorldGenerator {
     const NB = BW * BW;
     const { filled, receiver } = priorityFlood(blockHeight, BW, BW);
     const accum = flowAccumulation(filled, receiver, NB);
-    const lakes = detectLakes(
-      blockHeight,
-      filled,
-      receiver,
-      NB,
-      seaLevel,
-      params.lakeSpillTolerance,
-      params.lakeFrequency,
-      params.lakeMaxHeight,
-    );
+    // Lakes/rivers can be excluded from generation (params.lakesEnabled /
+    // riversEnabled). When off, their fields stay empty (zero depth, no polylines)
+    // so every downstream stamp is a no-op — the drainage substrate (filled/accum)
+    // is still computed since Pass B relief and biome classification read it.
+    const lakes = params.lakesEnabled
+      ? detectLakes(
+          blockHeight,
+          filled,
+          receiver,
+          NB,
+          seaLevel,
+          params.lakeSpillTolerance,
+          params.lakeFrequency,
+          params.lakeMaxHeight,
+        )
+      : { lakeDepth: new Float32Array(NB), lakeSurface: new Float32Array(NB), spillIdx: [] };
     const lakeMask = new Uint8Array(NB);
     for (let i = 0; i < NB; i++) lakeMask[i] = (lakes.lakeDepth[i] ?? 0) > 0 ? 1 : 0;
 
@@ -130,25 +137,27 @@ export class MacroWorldGenerator {
     const rectMinY = ry * RM * cs;
     const rectMaxX = (rx + 1) * RM * cs;
     const rectMaxY = (ry + 1) * RM * cs;
-    const rivers = traceRivers({
-      filled,
-      receiver,
-      accum,
-      lakeMask,
-      srcAllowed,
-      W: BW,
-      H: BW,
-      blockOriginMx,
-      blockOriginMy,
-      cs,
-      seaLevel,
-      rectMinX,
-      rectMinY,
-      rectMaxX,
-      rectMaxY,
-      params,
-      seed: deriveSeed(params.seed, rx, ry, 0x917) >>> 0,
-    });
+    const rivers = params.riversEnabled
+      ? traceRivers({
+          filled,
+          receiver,
+          accum,
+          lakeMask,
+          srcAllowed,
+          W: BW,
+          H: BW,
+          blockOriginMx,
+          blockOriginMy,
+          cs,
+          seaLevel,
+          rectMinX,
+          rectMinY,
+          rectMaxX,
+          rectMaxY,
+          params,
+          seed: deriveSeed(params.seed, rx, ry, 0x917) >>> 0,
+        })
+      : emptyNetwork();
 
     // Extract interior drainage fields + normalise accumulation (log scale).
     const macroFilled = new Float32Array(n);

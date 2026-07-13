@@ -66,6 +66,7 @@ export interface GenParams {
   biomeScale: number;
 
   // rivers
+  riversEnabled: boolean; // false = rivers excluded from world generation
   riverSourceCount: number; // sources per region
   riverDensity: number; // accumulation threshold scaling
   riverMeanderStrength: number;
@@ -75,6 +76,7 @@ export interface GenParams {
   riverMaxHeight: number; // normalised height above which rivers are not drawn
 
   // lakes
+  lakesEnabled: boolean; // false = lakes excluded from world generation
   lakeFrequency: number;
   lakeSpillTolerance: number;
   lakeMaxHeight: number; // normalised height above which basins are not made lakes
@@ -146,6 +148,7 @@ export const DEFAULT_PARAMS: GenParams = {
   moistureScale: 900,
   biomeScale: 1.0,
 
+  riversEnabled: false, // rivers excluded from world generation
   riverSourceCount: 10,
   riverDensity: 1.0,
   riverMeanderStrength: 0.5,
@@ -154,6 +157,7 @@ export const DEFAULT_PARAMS: GenParams = {
   riverSourceBias: 0.5,
   riverMaxHeight: 0.72,
 
+  lakesEnabled: false, // lakes excluded from world generation
   lakeFrequency: 0.4,
   lakeSpillTolerance: 0.02,
   lakeMaxHeight: 0.74,

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "provider": "worldgen",
+  "config": {
+    "seed": 1337,
+    "amplitude": 1,
+    "frequency": 1,
+    "octaves": 4
+  },
+  "params": {}
+}
