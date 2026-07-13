@@ -11,9 +11,9 @@
  *     terrain + water materials read. The atmosphere can't blend nine ways at once, so it
  *     eases toward the profile of the *dominant* sense (`signals.activeSense`, written by
  *     the director), falling back to the white-out "none" profile when all layers are off;
- *   - the manual key bindings: **1** clears to Luft, **2–9** toggle the keyed sense
- *     layers (SENSE_KEY_ORDER), **0** also clears
- *     all. Keys emit bus commands (`sense:toggle` / `sense:clear`), never write signals —
+ *   - the manual key bindings: **1** clears to Luft, **2–9** and **0** toggle the nine
+ *     keyed sense layers (SENSE_KEY_ORDER slots 2–10). Keys emit bus commands
+ *     (`sense:toggle` / `sense:clear`), never write signals —
  *     the same path the dev UI uses, and the same signals Theatre drives.
  *
  * The per-sense *color* layers (ShaderSinneModul port) live in `senses/shader/` and are
@@ -56,8 +56,9 @@ export interface SenseProfile {
   fogColor: number;
   /** Fresnel edge-glow colour (hex). */
   rimColor: number;
-  /** Presence of the ambient dust motes, 0..1 — 0 for senses that must stay clean
-   *  (echo reads as a pure depth map; fixed black specks would corrupt it). */
+  /** Presence of the ambient dust motes, 0..1 — for senses that want a cleaner
+   *  image. (The motes wear the sense's distance fog, so they are depth-true
+   *  under echo; currently every profile keeps them at 1.) */
   dustStrength: number;
 }
 
@@ -100,7 +101,8 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
   // 2 — bat sonar: a PURE camera depth map — near black, far white, nothing else.
   // The fog is WHITE and tracks the echo layer's near/far ramp, so distance haze,
   // the reveal edge and the empty sky all read as "far" (white) instead of
-  // inverting the map; rim stays 0 and the dust is gone entirely.
+  // inverting the map; rim stays 0. The dust stays: its motes wear the same
+  // distance fog, so each speck is exactly as pale as its distance demands.
   echo: {
     id: "echo",
     label: SENSE_LABELS.echo,
@@ -115,7 +117,7 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
     colorFar: 0xffffff,
     fogColor: 0xffffff,
     rimColor: 0xffffff,
-    dustStrength: 0, // black specks would break the pure depth read
+    dustStrength: 1,
   },
   // 3 — thermal: wide field, heat tint, warm edges.
   infrarot: {
@@ -486,10 +488,11 @@ export function createSenses(bus: Bus, options: SensesOptions = {}): Senses {
     if (event.metaKey || event.ctrlKey || event.altKey || isTyping()) {
       return;
     }
-    // Digit1 → Luft / all off. Digit2..Digit9 → toggle SENSE_KEY_ORDER[1..8].
-    const digit = /^Digit([1-9])$/.exec(event.code);
+    // The digit row walks SENSE_KEY_ORDER: Digit1 → Luft / all off,
+    // Digit2..Digit9 → slots 2–9, Digit0 → slot 10 (ten slots, ten keys).
+    const digit = /^Digit([0-9])$/.exec(event.code);
     if (digit) {
-      const idx = Number(digit[1]) - 1;
+      const idx = (Number(digit[1]) + 9) % 10;
       const id = SENSE_KEY_ORDER[idx];
       if (id === null) {
         bus.emit("sense:clear");
@@ -500,11 +503,6 @@ export function createSenses(bus: Bus, options: SensesOptions = {}): Senses {
         bus.emit("sense:toggle", { id });
         event.preventDefault();
       }
-      return;
-    }
-    if (event.code === "Digit0") {
-      bus.emit("sense:clear");
-      event.preventDefault();
     }
   };
 

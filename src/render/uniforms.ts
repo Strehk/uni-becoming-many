@@ -41,7 +41,7 @@ export interface SenseUniformSeed {
   fogColor: number;
   /** Fresnel edge-glow colour (hex). */
   rimColor: number;
-  /** Presence of the ambient dust motes, 0..1 (echo zeroes it — pure depth map). */
+  /** Presence of the ambient dust motes, 0..1 — per-sense fade of the dust field. */
   dustStrength: number;
 }
 

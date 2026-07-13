@@ -7,10 +7,11 @@
  *   - Space / K    → pause / resume the clock (Space is the primary pause; also halts Theatre)
  *   - J / L        → seek −5s / +5s
  *   - , / .        → timeScale ×0.5 / ×2  (clamped to 0.125 … 8)
- *   - 0            → reset the timeline to t=0
+ *   - Home         → reset the timeline to t=0 (Fn+← on compact Mac keyboards)
  *
  * Self-contained: attaches its own listener and lifts out with `dispose()`. Ignores keystrokes
- * while typing in a field, and stays clear of the sense keys (1–7) handled by the senses module.
+ * while typing in a field, and stays clear of the digit row (0–9), which the senses
+ * module owns entirely (Luft + the nine sense layers).
  */
 import type { Clock } from "./clock.ts";
 
@@ -53,7 +54,7 @@ export function createTransport(clock: Clock, target: Window | HTMLElement = win
       case "Period":
         clock.timeScale = Math.min(SCALE_MAX, clock.timeScale * 2);
         break;
-      case "Digit0":
+      case "Home":
         clock.reset();
         break;
       default:

@@ -143,7 +143,7 @@ Sinnes-Steuerung** (das bisherige exklusive `activeSense` wird abgelöst):
 ```
                     Theatre 'Timeline' (5 min)  ──┐ (authored envelopes, je Sinn 0..1)
                                                   ├─► pumpAuthored ──┐   nur wenn senseAuthority == 'theatre'
-  Sinne-UI / Tasten 1–9 ── bus 'sense:set' ──► SenseDirector ────────┴─► signals.sense[id]  (0..1, EIN Writer)
+  Sinne-UI / Tasten 1–9+0 ── bus 'sense:set' ──► SenseDirector ────────┴─► signals.sense[id]  (0..1, EIN Writer)
                                                                              │ subscribe (coarse)
         ┌──────────────┬──────────────┬───────────────┬────────────────┬────┴─────────┐
    shader-Sinne     duft (Partikel)  netzwerk      motion (Trails)  magnetfeld     synth-Bridge

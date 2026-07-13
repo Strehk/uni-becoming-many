@@ -58,7 +58,7 @@ let experienceConfig: ExperienceConfig = loadExperienceConfig();
 if (!useTheatreStudio) {
   clock.pause();
 }
-// Keyboard transport for authoring/debugging: Space/K pause, J/L seek, ,/. timeScale, 0 reset.
+// Keyboard transport for authoring/debugging: Space/K pause, J/L seek, ,/. timeScale, Home reset.
 const transport = createTransport(clock);
 window.addEventListener("pagehide", () => transport.dispose());
 

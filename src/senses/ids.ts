@@ -39,7 +39,8 @@ export const SENSE_ORDER: readonly SenseId[] = [
 
 export type SenseKeySlot = SenseId | null;
 
-/** Manual performance order. `null` is Luft: all sense layers off, white void. */
+/** Manual performance order. `null` is Luft: all sense layers off, white void.
+ *  Ten slots on the digit row: keys 1–9 map to slots 1–9, key 0 to slot 10. */
 export const SENSE_KEY_ORDER: readonly SenseKeySlot[] = [
   null,
   "echo",
@@ -47,6 +48,7 @@ export const SENSE_KEY_ORDER: readonly SenseKeySlot[] = [
   "infrarot",
   "uv",
   "farben",
+  "duft",
   "magnetfeld",
   "netzwerk",
   "rundum",
