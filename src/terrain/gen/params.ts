@@ -8,9 +8,10 @@
 import type { TerrainConfig } from "../provider.ts";
 import { DEFAULT_PARAMS, type GenParams } from "./mapTypes.ts";
 
-// Retuned for flight (source default is 340). At 100 the worst-case peak is
-// ~566 m — under the 620 m far plane — while typical land sits near cruise height.
-const BASE_HEIGHT_SCALE = 100;
+// Retuned for flight (source default is 340). Lowered from 100 → 70 so mountains
+// read shorter and less dramatic; worst-case peak now sits well under the far plane
+// while typical land stays near cruise height.
+const BASE_HEIGHT_SCALE = 70;
 
 // Continents shrunk from the source's 2200 so hills/valleys/mountains read within
 // a normal flight. The Terrain Frequency slider divides this live.
@@ -24,8 +25,18 @@ export const WORLDGEN_PARAMS: GenParams = {
   // Elevation defaults dialed in for flight (softer contrast, gentler relief
   // curve, lower mountains) — the rest stay at the source DEFAULT_PARAMS.
   heightScale: 0.8,
-  mountainStrength: 0.8,
-  reliefExponent: 1.5,
+  // Less macro mountain mass (0.8 → 0.5) and a gentler relief power (1.5 → 1.25)
+  // so peaks stop towering; softened ridged crests (default 1.0 → 0.6) remove the
+  // sharp, unnatural spikes on the mountain flanks.
+  mountainStrength: 0.5,
+  reliefExponent: 1.25,
+  mountainRidgeStrength: 0.6,
+  // Lower sea level (source 0.42) so oceans cover far less of the world — more
+  // land sits above the waterline.
+  waterLevel: 0.33,
+  // Wider moisture period (source 900) so forest/desert/wetland regions are
+  // larger; pairs with the widened temperature bands in fields.ts.
+  moistureScale: 1800,
 };
 
 /** Fold a flat TerrainConfig onto the full GenParams. */

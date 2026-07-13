@@ -117,9 +117,9 @@ export function temperature01(
   const psx = wx + seedOffset[0] + 9123.5;
   const psy = wy + seedOffset[1] - 4567.5;
   const climate =
-    fbm(psx / (P.continentScale * 1.5), psy / (P.continentScale * 1.5), S_CLIMATE, 3) * 0.5 + 0.5;
+    fbm(psx / (P.continentScale * 3), psy / (P.continentScale * 3), S_CLIMATE, 3) * 0.5 + 0.5;
   const grad =
-    fbm(psx / (P.continentScale * 4), psy / (P.continentScale * 4), S_GRAD, 2) *
+    fbm(psx / (P.continentScale * 8), psy / (P.continentScale * 8), S_GRAD, 2) *
     (P.temperatureGradient * 0.5);
   const height = baseHeight01(wx, wy, seedOffset, P);
   const lapse = clamp(height - P.waterLevel, 0, 1) * 0.85;
