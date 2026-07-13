@@ -18,7 +18,9 @@ export interface InterfaceModeOptions {
 
 const STYLE_ID = "experience-interface-mode-styles";
 
-export function createInterfaceModeController(options: InterfaceModeOptions): InterfaceModeController {
+export function createInterfaceModeController(
+  options: InterfaceModeOptions,
+): InterfaceModeController {
   injectStyles();
 
   let currentMode: ExperienceInterfaceMode = "menu";
@@ -182,7 +184,7 @@ export function createInterfaceModeController(options: InterfaceModeOptions): In
     dispose() {
       document.body.classList.remove("bm-ui-hidden");
       document.body.classList.remove("bm-configure-mode");
-      delete document.body.dataset["experienceMode"];
+      document.body.removeAttribute("data-experience-mode");
       shell.remove();
       offDevOpen();
       offSynthOpen?.();

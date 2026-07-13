@@ -63,7 +63,10 @@ export interface Renderer {
 export async function createRenderer(): Promise<Renderer> {
   // `trackTimestamp` records GPU frame timing (needs the `timestamp-query` feature); the
   // Inspector's Performance tab reads it.
-  const renderer = new THREE.WebGPURenderer({ antialias: true, trackTimestamp: true });
+  const renderer = new THREE.WebGPURenderer({
+    antialias: true,
+    trackTimestamp: true,
+  });
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true; // route the render loop through WebXR when a session starts

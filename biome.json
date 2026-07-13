@@ -30,7 +30,8 @@
         "noImplicitAnyLet": "error"
       },
       "complexity": {
-        "noBannedTypes": "error"
+        "noBannedTypes": "error",
+        "useLiteralKeys": "off"
       }
     }
   },

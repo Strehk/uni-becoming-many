@@ -25,8 +25,8 @@ import {
   vec3,
 } from "three/tsl";
 import { DoubleSide, MeshBasicNodeMaterial, type Node } from "three/webgpu";
+import { viewReveal } from "../../render/tsl-kit.ts";
 import type { TerrainLayerCompositor, TimeNode } from "./terrain-material.ts";
-import { viewReveal } from "./tsl-kit.ts";
 import type { KitUniforms } from "./uniforms.ts";
 
 export interface WaterMaterialHandle {

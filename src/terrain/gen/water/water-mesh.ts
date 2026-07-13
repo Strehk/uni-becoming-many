@@ -32,35 +32,16 @@ export function buildWaterArrays(
   const positions: number[] = [];
   const colors: number[] = [];
 
-  buildStillWater(sampler, params, segments, positions, colors);
-  buildRivers(sampler, detail, params, segments, positions, colors);
+  buildStillWater(sampler, detail, params, segments, positions, colors);
+  if (params.riverWaterVisible > 0) {
+    buildRivers(sampler, detail, params, segments, positions, colors);
+  }
 
   if (positions.length === 0) return null;
   return {
     positions: new Float32Array(positions),
     colors: new Float32Array(colors),
   };
-}
-
-/** Bilinear sample of a row-major size×size array at fractional pixel (fx,fy). */
-function bilinearClamped(arr: Float32Array, size: number, fx: number, fy: number): number {
-  let x0 = Math.floor(fx);
-  let y0 = Math.floor(fy);
-  const tx = fx - x0;
-  const ty = fy - y0;
-  if (x0 < 0) x0 = 0;
-  else if (x0 > size - 1) x0 = size - 1;
-  if (y0 < 0) y0 = 0;
-  else if (y0 > size - 1) y0 = size - 1;
-  const x1 = x0 + 1 < size ? x0 + 1 : size - 1;
-  const y1 = y0 + 1 < size ? y0 + 1 : size - 1;
-  const v00 = arr[y0 * size + x0] ?? 0;
-  const v10 = arr[y0 * size + x1] ?? 0;
-  const v01 = arr[y1 * size + x0] ?? 0;
-  const v11 = arr[y1 * size + x1] ?? 0;
-  const a = v00 + (v10 - v00) * tx;
-  const b = v01 + (v11 - v01) * tx;
-  return a + (b - a) * ty;
 }
 
 /** One vertex of the per-cell water polygon: grid coords + world-space depth. */
@@ -81,6 +62,7 @@ interface WaterVert {
  */
 function buildStillWater(
   sampler: TerrainSampler,
+  detail: TerrainDetailGenerator,
   params: GenParams,
   segments: number,
   positions: number[],
@@ -91,50 +73,86 @@ function buildStillWater(
   const res = Math.min(96, Math.max(24, segments));
   const step = size / res;
   const half = size / 2;
+  const ox = sampler.originX;
+  const oy = sampler.originY;
   const sea = params.waterLevel;
   const { waterSurfaceMap, heightMap, lakeMap } = chunk;
 
   const px = (t: number): number => Math.min(size - 1, Math.max(0, Math.round(t - 0.5)));
 
-  // Per grid-vertex caches over the (res+1)² lattice. `bed` is the bilinear
-  // terrain height (smooth, sub-cell waterline crossings); `surf0` is the flat
-  // STILL-water surface level (ocean = sea, lakes = spill) and 0 on land or on
-  // river-film cells — rivers are drawn as ribbons below, so including them here
-  // rendered broken terraced fragments.
   const n = res + 1;
-  const bed = new Float32Array(n * n);
-  const surf0 = new Float32Array(n * n);
+
+  // Rendered world-space bed (macro + detail + basin clamp) — the SAME field the
+  // terrain mesh builds from, so the waterline lands exactly on the visible
+  // terrain. Evaluated lazily: only vertices the flood below actually visits pay
+  // the fbm cost, so dry chunks stay cheap.
+  const bedY = new Float32Array(n * n);
+  const bedDone = new Uint8Array(n * n);
+  const getBed = (i: number, j: number): number => {
+    const k = j * n + i;
+    if (!bedDone[k]) {
+      bedY[k] = detail.worldY(ox + i * step, oy + j * step, sampler);
+      bedDone[k] = 1;
+    }
+    return bedY[k] ?? 0;
+  };
+
+  // Seeds: lattice vertices the rasterised maps already call still water. `surf` is
+  // the flat surface level (ocean = sea, lakes = spill); rivers stay 0 — they are
+  // drawn as ribbons below, and including them here rendered terraced fragments.
+  // `isLake` tracks provenance so lake levels can be confined to their basin.
+  const surf = new Float32Array(n * n);
+  const isLake = new Uint8Array(n * n);
+  const inBasin = new Uint8Array(n * n); // lakeMap>0: the depression footprint
+  const queue: number[] = [];
   for (let j = 0; j <= res; j++) {
     for (let i = 0; i <= res; i++) {
       const k = j * n + i;
       const idx = px(j * step) * size + px(i * step);
-      bed[k] = bilinearClamped(heightMap, size, i * step - 0.5, j * step - 0.5);
-      surf0[k] =
-        (heightMap[idx] ?? 0) < sea || (lakeMap[idx] ?? 0) > 0.08 ? (waterSurfaceMap[idx] ?? 0) : 0;
+      const h = heightMap[idx] ?? 0;
+      const lk = lakeMap[idx] ?? 0;
+      if (lk > 0) inBasin[k] = 1;
+      const ocean = h < sea;
+      if (!ocean && lk <= 0.08) continue;
+      const level = waterSurfaceMap[idx] ?? 0;
+      if (level <= 0) continue;
+      surf[k] = level;
+      isLake[k] = ocean ? 0 : 1;
+      queue.push(k);
     }
   }
 
-  // Dilate the flat surface outward by one grid cell so a boundary cell just
-  // past the rasterised water mask still carries the water level; the
-  // f = level − bed test below then clips it to the true sub-cell waterline.
-  // Without this the silhouette snapped to the mask raster (square lake edges):
-  // nearest-neighbour gating left edge cells with no wet corner, so marching
-  // squares never fired there.
-  const surf = new Float32Array(n * n);
-  for (let j = 0; j <= res; j++) {
-    for (let i = 0; i <= res; i++) {
-      let m = 0;
-      for (let dj = -1; dj <= 1; dj++) {
-        const jj = j + dj;
-        if (jj < 0 || jj > res) continue;
-        for (let di = -1; di <= 1; di++) {
-          const ii = i + di;
-          if (ii < 0 || ii > res) continue;
-          const v = surf0[jj * n + ii] ?? 0;
-          if (v > m) m = v;
-        }
-      }
-      surf[j * n + i] = m;
+  // Flood the flat surface outward until the BED rises above it. The old code
+  // dilated the raster mask by one 6.4 m cell, so the sheet was cut off by the mask
+  // rather than by the terrain — on gentle slopes (and around lakes, where lakeMap
+  // is the ×8-amplified field and waterSurfaceMap covers only its core) the true
+  // waterline lies many cells further out, leaving a square, too-early edge.
+  // Letting the terrain terminate the flood makes the water meet the shore instead.
+  //
+  // A lake level may only spread inside its own basin (`inBasin`): past the spill
+  // point the bed keeps dropping, so an unconstrained flood would pour the lake
+  // downhill. The ocean needs no such guard — sea level is global, and any
+  // connected submerged vertex genuinely is ocean.
+  const NX4 = [-1, 1, 0, 0];
+  const NY4 = [0, 0, -1, 1];
+  for (let qi = 0; qi < queue.length; qi++) {
+    const k = queue[qi] ?? 0;
+    const level = surf[k] ?? 0;
+    const lake = isLake[k] ?? 0;
+    const levelY = heightToWorldY(level, params);
+    const i = k % n;
+    const j = (k / n) | 0;
+    for (let d = 0; d < 4; d++) {
+      const ni = i + (NX4[d] ?? 0);
+      const nj = j + (NY4[d] ?? 0);
+      if (ni < 0 || nj < 0 || ni > res || nj > res) continue;
+      const nk = nj * n + ni;
+      if ((surf[nk] ?? 0) >= level) continue; // already at least this wet
+      if (lake && !inBasin[nk]) continue; // lakes stay in their depression
+      if (getBed(ni, nj) >= levelY) continue; // bed broke the surface → shoreline
+      surf[nk] = level;
+      isLake[nk] = lake;
+      queue.push(nk);
     }
   }
 
@@ -161,13 +179,16 @@ function buildStillWater(
       }
       if (level <= 0) continue;
 
-      // Signed depth field per corner (water surface − terrain bed); >0 is
-      // submerged. The waterline is the 0-isoline we fit to.
+      // Flat still-water surface Y for this cell (shared by every emitted vertex).
+      const levelY = heightToWorldY(level, params);
+
+      // Signed depth field per corner, in WORLD units (water surface Y − rendered
+      // bed Y); >0 is submerged. The waterline is the 0-isoline we fit to.
       const f = [
-        level - (bed[ks[0] ?? 0] ?? 0),
-        level - (bed[ks[1] ?? 0] ?? 0),
-        level - (bed[ks[2] ?? 0] ?? 0),
-        level - (bed[ks[3] ?? 0] ?? 0),
+        levelY - getBed(i, j),
+        levelY - getBed(i + 1, j),
+        levelY - getBed(i + 1, j + 1),
+        levelY - getBed(i, j + 1),
       ];
 
       // Build the submerged sub-polygon by walking corners + edges.
@@ -189,10 +210,8 @@ function buildStillWater(
       }
       if (poly.length < 3) continue;
 
-      // Convert the normalised depth field to a true world-space water column
-      // so the deep/shallow/foam tint reads correctly.
-      const levelY = heightToWorldY(level, params);
-      for (const v of poly) v.depth = levelY - heightToWorldY(level - v.depth, params);
+      // `f` is already in world units, so each poly vertex's `depth` is the true
+      // water column (corner = f[c], edge crossing = 0) — no re-conversion needed.
 
       // Fan-triangulate the (convex within a cell) polygon.
       for (let t = 1; t < poly.length - 1; t++) {

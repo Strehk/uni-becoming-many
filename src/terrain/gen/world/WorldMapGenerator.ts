@@ -202,8 +202,12 @@ export class WorldMapGenerator {
           // Lake takes priority over ocean; the surface must be perfectly FLAT at
           // the basin's spill level — take the max of the surrounding macro
           // lake-surface cells (constant across a basin) instead of following bed.
+          // Sit it `lakeLevelDrop` below the spill: the sheet floods outward until
+          // the bed rises above it (water-mesh.ts), and on near-flat ground a
+          // spill-exact level pushed the shoreline implausibly far out.
           const surf = maxLocal2x2(locLakeSurf, LW, LH, fmx, fmy);
-          pad.waterSurfaceMap[i] = surf > 0 ? surf : Math.max(h, wl);
+          pad.waterSurfaceMap[i] =
+            surf > 0 ? Math.max(0, surf - params.lakeLevelDrop) : Math.max(h, wl);
           pad.waterMask[i] = 1;
         } else if (h < wl) {
           pad.waterSurfaceMap[i] = wl;

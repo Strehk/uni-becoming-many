@@ -1,14 +1,14 @@
+import { isSenseId } from "../senses/ids.ts";
 import {
   DEFAULT_EXPERIENCE_CONFIG,
+  type ExperienceConfig,
+  type SenseCueConfig,
   formatSenseCueLabel,
   orderedCues,
   parseExperienceConfig,
   resetExperienceConfig,
   saveExperienceConfig,
-  type ExperienceConfig,
-  type SenseCueConfig,
 } from "./config.ts";
-import { isSenseId } from "../senses/ids.ts";
 
 export interface StartMenuOptions {
   config: ExperienceConfig;
@@ -80,7 +80,8 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
 
     const subtitle = document.createElement("p");
     subtitle.className = "exp-menu__lede";
-    subtitle.textContent = "Starten oder Ablauf, Sinn-Freischaltungen und Intensitäten konfigurieren.";
+    subtitle.textContent =
+      "Starten oder Ablauf, Sinn-Freischaltungen und Intensitäten konfigurieren.";
 
     const actions = document.createElement("div");
     actions.className = "exp-menu__actions";
@@ -115,7 +116,8 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     title.textContent = "Experience konfigurieren";
     const subtitle = document.createElement("p");
     subtitle.className = "exp-menu__lede";
-    subtitle.textContent = "Die Sinn-Timeline wird in Theatre.js bearbeitet. Diese Ansicht speichert nur Ablauf-Vorlagen.";
+    subtitle.textContent =
+      "Die Sinn-Timeline wird in Theatre.js bearbeitet. Diese Ansicht speichert nur Ablauf-Vorlagen.";
     titleWrap.append(title, subtitle);
 
     const backButton = button("Zurueck", "ghost");
@@ -363,7 +365,9 @@ function cloneConfig(config: ExperienceConfig): ExperienceConfig {
 }
 
 function trimNumber(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  return Number.isInteger(value)
+    ? String(value)
+    : value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
 function clampNumber(value: number, min: number, max: number, fallback: number): number {

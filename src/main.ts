@@ -1,17 +1,19 @@
 import { time } from "three/tsl";
+import { createAtmosphere } from "./atmosphere/index.ts";
 import { SoundBus, SoundDirector } from "./audio/index.ts";
 import { createCreatures } from "./creatures/index.ts";
 import { createDevConsole } from "./dev-console/index.ts";
 import { createSenseControls } from "./dev-console/sense-controls.ts";
 import { createWorldControls } from "./dev-console/world-controls.ts";
 import {
+  type ExperienceConfig,
   loadExperienceConfig,
   saveExperienceConfig,
-  type ExperienceConfig,
 } from "./experience/config.ts";
 import { createInterfaceModeController } from "./experience/interface-mode.ts";
 import { createStartMenu } from "./experience/start-menu.ts";
 import { type ControlOrientation, connectHost } from "./icaros/index.ts";
+import { createLife } from "./life/index.ts";
 import { createMinimap } from "./minimap/index.ts";
 import { createPlayer } from "./player/index.ts";
 import { createKeyboardControls } from "./player/keyboard-controls.ts";
@@ -70,14 +72,30 @@ window.addEventListener("pagehide", () => senses.dispose());
 // live `fogColor` the SenseManager lerps, so the background transitions with the senses.
 renderer.scene.background = senses.uniforms.fogColor.value;
 
+// Life: instanced flora that streams with the terrain, wired to the sense substrate.
+// It shares the senses' uniforms so it reveals/fades with the world and reads
+// `activeSense` for its bioluminescence. Gated on a sense being active (the void
+// must stay empty) by toggling `life.group.visible` in the frame loop.
+const life = await createLife({ scene: renderer.scene, uniforms: senses.uniforms });
+window.addEventListener("pagehide", () => life.dispose());
+
+// Atmosphere: a field of stationary dust motes hanging in the air. As the player flies
+// through, motion parallax makes self-motion pop. A pure signal consumer (reads
+// playerPose + time); shares the sense uniforms so it fades at the same view edge.
+const atmosphere = createAtmosphere({ scene: renderer.scene, uniforms: senses.uniforms });
+window.addEventListener("pagehide", () => atmosphere.dispose());
+
 // Streaming terrain: a chunked, worker-generated world that loads around the player.
-// It shares the senses' atmosphere uniforms (sense transitions restyle the world live)
-// and composites the four shader-sense colour layers over the biome albedo.
+// It shares the senses' atmosphere uniforms (sense transitions restyle the world live),
+// composites the four shader-sense colour layers over the biome albedo, and fires the
+// chunk hooks that let flora grow on each chunk and be freed with it.
 const { world } = createTerrainWorld({
   scene: renderer.scene,
   uTime: time,
   uniforms: senses.uniforms,
   layers: senses.shader.compositor,
+  onChunkBuilt: (info) => life.onChunkBuilt(info),
+  onChunkDisposed: (cell) => life.onChunkDisposed(cell),
 });
 
 // Magnetfeld sense: the sky dome showing the geomagnetic field (9 blendable modes),
@@ -336,6 +354,11 @@ renderer.start((dtSeconds) => {
   creatures.setBirdsVisible(
     signals.activeSense.peek() !== "none" && signals.sense.motion.peek() <= 0,
   );
+  // Flora + dust are perception-dependent too: the white void must read as an empty
+  // uniform field, so both stay hidden until a sense reveals the world.
+  const worldRevealed = signals.activeSense.peek() !== "none";
+  life.group.visible = worldRevealed;
+  atmosphere.group.visible = worldRevealed;
   netzwerk.update(clock.delta); // swarm web + mycelium (fade, rebuild, pulse)
   motion.update(clock.delta); // vertex-motion trails (spawn/fade ring buffer)
   synth.update(dtSeconds); // push the signal packet into the synth iframe
@@ -345,6 +368,8 @@ renderer.start((dtSeconds) => {
 
   // ── CONSUME ──
   world.update(pose.x, pose.z); // 6. stream chunks around the player
+  life.update(dtSeconds); // 7. pump time / unrest / intensity / sense into the flora uniforms
+  atmosphere.update(dtSeconds); // 8. pump player pose + virtual clock into the dust uniforms
 });
 
 // Release worker + GPU resources when the page goes away.

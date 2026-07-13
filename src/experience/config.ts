@@ -1,4 +1,10 @@
-import { SENSE_KEY_ORDER, SENSE_LABELS, SENSE_ORDER, isSenseId, type SenseId } from "../senses/ids.ts";
+import {
+  SENSE_KEY_ORDER,
+  SENSE_LABELS,
+  SENSE_ORDER,
+  type SenseId,
+  isSenseId,
+} from "../senses/ids.ts";
 
 export interface SenseCueConfig {
   id: SenseId;
@@ -18,7 +24,10 @@ const DEFAULT_DURATION = 300;
 const SCHEDULE_ORDER = SENSE_KEY_ORDER.filter((id): id is SenseId => id !== null);
 
 const DEFAULT_STARTS = new Map<SenseId, number>(
-  SCHEDULE_ORDER.map((id, index) => [id, ((index + 1) * DEFAULT_DURATION) / (SCHEDULE_ORDER.length + 1)]),
+  SCHEDULE_ORDER.map((id, index) => [
+    id,
+    ((index + 1) * DEFAULT_DURATION) / (SCHEDULE_ORDER.length + 1),
+  ]),
 );
 
 export const DEFAULT_EXPERIENCE_CONFIG: ExperienceConfig = {
@@ -95,7 +104,8 @@ function normalizeConfig(input: unknown): ExperienceConfig {
       const rawCue = byId.get(id);
       return {
         id,
-        enabled: typeof rawCue?.enabled === "boolean" ? rawCue.enabled : (fallback?.enabled ?? false),
+        enabled:
+          typeof rawCue?.enabled === "boolean" ? rawCue.enabled : (fallback?.enabled ?? false),
         start: clampNumber(rawCue?.start, 0, duration, fallback?.start ?? duration),
         intensity: clampNumber(rawCue?.intensity, 0, 1, fallback?.intensity ?? 1),
       };

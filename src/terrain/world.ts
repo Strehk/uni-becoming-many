@@ -28,6 +28,7 @@ import { type WaterMaterialHandle, createWaterMaterial } from "./render/water-ma
 import { ChunkScheduler, type StreamingConfig } from "./scheduler.ts";
 import { TerrainWorkerPool } from "./worker/pool.ts";
 import { WorldgenClient } from "./worker/worldgen-client.ts";
+import type { ChunkFields } from "./worker/worldgen-protocol.ts";
 
 // Streaming defaults, tuned for smooth streaming over raw coverage: big 256 m
 // chunks (rare build events, fewer draws), buildRadius 2 ≈ 640 m coverage, 40
@@ -64,6 +65,25 @@ export interface BiomeChunkSource {
   chunks(): Iterable<BiomeChunkView>;
 }
 
+/** Everything a scatter consumer (e.g. `src/life/`) needs to populate one chunk.
+ *  Emitted on build for chunk providers only — pointwise providers bake neither a
+ *  height grid nor placement fields, so they simply never fire the hook. */
+export interface ChunkBuiltInfo {
+  readonly gridX: number;
+  readonly gridZ: number;
+  readonly chunkSize: number;
+  /** (segments+1)² world-Y — the EXACT surface the mesh was built from, so anything
+   *  placed against it sits on the rendered ground with no drift. */
+  readonly heightGrid: Float32Array;
+  readonly fields: ChunkFields;
+}
+
+/** The cell a chunk occupied, on dispose — enough to free whatever was placed on it. */
+export interface ChunkCell {
+  readonly gridX: number;
+  readonly gridZ: number;
+}
+
 export interface TerrainWorldOptions {
   scene: THREE.Scene;
   /** Live sense uniforms (shared with the rest of the experience). */
@@ -80,6 +100,11 @@ export interface TerrainWorldOptions {
   senses?: SenseSource;
   /** Optional sense-layer compositor (ShaderSinne port) layered over the biome albedo. */
   layers?: TerrainLayerCompositor;
+  /** Fired after a chunk enters the active set, for consumers that place things on
+   *  it (flora, creatures). Chunk providers only. */
+  onChunkBuilt?: (info: ChunkBuiltInfo) => void;
+  /** Fired after a chunk leaves the keep set, so those consumers can free it. */
+  onChunkDisposed?: (cell: ChunkCell) => void;
 }
 
 export class TerrainWorld {
@@ -92,6 +117,8 @@ export class TerrainWorld {
   /** Live sense uniforms — modulated per frame when a SenseSource is wired. */
   private readonly uniforms: KitUniforms;
   private readonly senses?: SenseSource;
+  private readonly onChunkBuilt?: (info: ChunkBuiltInfo) => void;
+  private readonly onChunkDisposed?: (cell: ChunkCell) => void;
   private readonly scheduler: ChunkScheduler<TerrainChunk>;
   private readonly chunkSize: number;
   private readonly segments: number;
@@ -140,6 +167,8 @@ export class TerrainWorld {
     }
     this.uniforms = opts.uniforms;
     if (opts.senses) this.senses = opts.senses;
+    if (opts.onChunkBuilt) this.onChunkBuilt = opts.onChunkBuilt;
+    if (opts.onChunkDisposed) this.onChunkDisposed = opts.onChunkDisposed;
     this.provider = opts.provider;
     this.cfg = { ...opts.provider.defaultConfig, ...opts.config };
 
@@ -157,8 +186,21 @@ export class TerrainWorld {
       onChunkBuilt: (chunk) => {
         this.group.add(chunk.mesh);
         if (chunk.heightGrid) this.heightCache.add(chunk.gridX, chunk.gridZ, chunk.heightGrid);
+        // Only chunk providers bake both; pointwise ones place nothing.
+        if (chunk.heightGrid && chunk.fields) {
+          this.onChunkBuilt?.({
+            gridX: chunk.gridX,
+            gridZ: chunk.gridZ,
+            chunkSize: this.chunkSize,
+            heightGrid: chunk.heightGrid,
+            fields: chunk.fields,
+          });
+        }
       },
-      onChunkDisposed: (chunk) => this.heightCache.remove(chunk.gridX, chunk.gridZ),
+      onChunkDisposed: (chunk) => {
+        this.heightCache.remove(chunk.gridX, chunk.gridZ);
+        this.onChunkDisposed?.({ gridX: chunk.gridX, gridZ: chunk.gridZ });
+      },
     });
   }
 
@@ -295,6 +337,7 @@ export class TerrainWorld {
         heightGrid: r.heightGrid,
         biome: r.biome,
         colors: r.colors,
+        fields: r.fields,
         index: this.indexArray,
         material: this.material,
         waterMaterial: this.waterMaterial,
