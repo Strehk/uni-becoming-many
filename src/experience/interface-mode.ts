@@ -118,13 +118,17 @@ export function createInterfaceModeController(
     }
   };
 
-  const setAppToolsVisible = (visible: boolean): void => {
+  const setVrButtonVisible = (visible: boolean): void => {
     options.vrButton.style.display = visible ? "" : "none";
     for (const el of document.querySelectorAll<HTMLElement>("#VRButton")) {
       el.hidden = !visible;
       el.toggleAttribute("inert", !visible);
       el.setAttribute("aria-hidden", String(!visible));
     }
+  };
+
+  const setAppToolsVisible = (visible: boolean): void => {
+    setVrButtonVisible(visible);
     setElementHidden(".devc-tab, .synth-tab", !visible);
     setPanelAvailable(".devc-drawer, .synth-drawer", visible);
   };
@@ -166,6 +170,9 @@ export function createInterfaceModeController(
     options.devConsole.setOpen(false);
     options.setSynthOpen?.(false);
     setAppToolsVisible(false);
+    // The "Enter VR" button is the one app tool that belongs in playback — the
+    // audience-facing experience — while dev/synth tabs stay hidden. Menu keeps it hidden.
+    setVrButtonVisible(mode === "playback");
     setInspectorVisible(false);
     updateActiveButton();
   };
@@ -213,8 +220,7 @@ function injectStyles(): void {
     .bm-ui-hidden .devc-tab,
     .bm-ui-hidden .devc-drawer,
     .bm-ui-hidden .synth-tab,
-    .bm-ui-hidden .synth-drawer,
-    .bm-ui-hidden #VRButton {
+    .bm-ui-hidden .synth-drawer {
       display: none !important;
     }
 
