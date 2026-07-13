@@ -27,16 +27,11 @@ const h = (tag, cls, html) => {
 
 const RASTER = ["16n", "8n", "4n", "2n", "1n"];
 
+/* Die Layer, die Becoming Many beim ersten Start anlegt. KEINE Kabel mehr —
+   die Verbindungen (sinn → pegel, flug → pad …) steckt man von Hand. */
 const BM_DEFAULT_SYNTHS = [
-  { synth: "luft", source: "sinn_farben" },
-  { synth: "echo", source: "sinn_echo" },
-  { synth: "motion", source: "sinn_motion" },
-  { synth: "infrarot", source: "sinn_infrarot" },
-  { synth: "licht", source: "sinn_uv" },
-  { synth: "magnet", source: "sinn_magnetfeld" },
-  { synth: "rhythmus", source: "sinn_netzwerk" },
-  { synth: "sicht", source: "sinn_rundum" },
-  { synth: "chemie", source: "sinn_duft" },
+  "luft", "echo", "motion", "infrarot", "licht",
+  "magnet", "rhythmus", "sicht", "chemie",
 ];
 
 export class App {
@@ -180,9 +175,9 @@ export class App {
     if (this._bmDefaultsReady) return;
     this._bmDefaultsReady = true;
 
-    for (const spec of BM_DEFAULT_SYNTHS) {
-      if (!this.layers.some(info => info.layer.sense.id === spec.synth)) {
-        this.addLayer(spec.synth);
+    for (const synth of BM_DEFAULT_SYNTHS) {
+      if (!this.layers.some(info => info.layer.sense.id === synth)) {
+        this.addLayer(synth);
       }
     }
 
@@ -191,12 +186,6 @@ export class App {
       layer.setVolume(0.68);
       layer.setRoom(0.34);
       layer.setCut(0.9);
-      const spec = BM_DEFAULT_SYNTHS.find(s => s.synth === layer.sense.id);
-      if (spec) {
-        this.flightMap.add(`${layer.id}|pegel`, spec.source);
-        this.flightMap.add(`${layer.id}|pady`, "hoehe");
-        this.flightMap.add(`${layer.id}|padx`, layer.sense.id === "motion" ? "kurve" : "tempo");
-      }
       this.setLayerMuted(info, true);
     }
 
