@@ -18,7 +18,6 @@
 
 import {
   Fn,
-  cameraPosition,
   clamp,
   cross,
   float,
@@ -42,6 +41,7 @@ import {
 } from "three/tsl";
 import * as THREE from "three/webgpu";
 import { MeshBasicNodeMaterial, type Node } from "three/webgpu";
+import { cameraPos } from "../render/camera-pos.ts";
 import { distanceFog, viewReveal } from "../render/tsl-kit.ts";
 import type { KitUniforms, TerrainLayerCompositor } from "../terrain/index.ts";
 import type { GrassMaterialUniforms, GrassSharedUniforms } from "./config.ts";
@@ -112,7 +112,7 @@ export function createGrassMaterial(
       vec2(v.x.mul(rotCos).sub(v.y.mul(rotSin)), v.x.mul(rotSin).add(v.y.mul(rotCos)));
 
     const worldXZ = vec2(instancePos.x, instancePos.z);
-    const dist = length(cameraPosition.sub(instancePos));
+    const dist = length(cameraPos.sub(instancePos));
     const windFalloff = select(
       um.uWindDistanceEnd.greaterThan(float(0)),
       oneMinus(smoothstep(um.uWindDistanceStart, um.uWindDistanceEnd, dist)),
@@ -166,7 +166,7 @@ export function createGrassMaterial(
     applySlopeAlignment(tn, lpos, tangentRotated, sideRotated, normalRotated);
 
     const worldPos = instancePos.add(lpos);
-    const camDirW = normalize(cameraPosition.sub(worldPos));
+    const camDirW = normalize(cameraPos.sub(worldPos));
     const tilted = applyViewDependentTilt(
       lpos,
       sideRotated,
@@ -216,7 +216,7 @@ export function createGrassMaterial(
     const fogged = distanceFog(base, u.fogColor, u.fogNear, u.fogFar);
 
     // Fresnel rim from the blade normal (normalWorld would read the flat plane).
-    const viewDir = normalize(cameraPosition.sub(vWorldPos));
+    const viewDir = normalize(cameraPos.sub(vWorldPos));
     const fresnel = oneMinus(nWorld.dot(viewDir).clamp(0, 1)).pow(u.rimPower);
     const rim = fresnel.mul(u.rimStrength).mul(reveal);
     const styled = mix(u.fogColor, fogged, reveal).add(u.rimColor.mul(rim));

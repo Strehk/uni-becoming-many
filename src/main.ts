@@ -124,7 +124,6 @@ const { world } = createTerrainWorld({
 grass = createGrass({
   scene: renderer.scene,
   renderer: renderer.instance,
-  camera: renderer.camera,
   uniforms: senses.uniforms,
   layers: senses.shader.compositor,
   groundHeightAt: (x, z) => world.groundHeightAt(x, z),

@@ -12,7 +12,6 @@
 
 import {
   attribute,
-  cameraPosition,
   clamp,
   dot,
   float,
@@ -25,6 +24,7 @@ import {
   vec3,
 } from "three/tsl";
 import { DoubleSide, MeshBasicNodeMaterial, type Node } from "three/webgpu";
+import { cameraPos } from "../../render/camera-pos.ts";
 import { distanceFog, viewReveal } from "../../render/tsl-kit.ts";
 import type { TerrainLayerCompositor, TimeNode } from "./terrain-material.ts";
 import type { KitUniforms } from "./uniforms.ts";
@@ -65,12 +65,8 @@ export function createWaterMaterial(
         .mul(0.06)
         .add(sin(pw.z.sub(pw.x).mul(0.045).add(uTime)).mul(0.04));
       const N = normalize(vec3(nx, float(1), nz));
-      const viewDir = normalize(cameraPosition.sub(pw));
-      const viewT = cameraPosition
-        .distance(pw)
-        .sub(u.fogNear)
-        .div(u.fogFar.sub(u.fogNear))
-        .clamp(0, 1);
+      const viewDir = normalize(cameraPos.sub(pw));
+      const viewT = cameraPos.distance(pw).sub(u.fogNear).div(u.fogFar.sub(u.fogNear)).clamp(0, 1);
       const senseTint = mix(u.colorNear, u.colorFar, viewT);
       const waterLuma = dot(base, vec3(0.299, 0.587, 0.114)).clamp(0.65, 1.0);
       const tinted = senseTint.mul(waterLuma);

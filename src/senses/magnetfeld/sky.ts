@@ -19,7 +19,6 @@ import {
   abs,
   acos,
   atan,
-  cameraPosition,
   clamp,
   cos,
   cross,
@@ -42,6 +41,7 @@ import {
 } from "three/tsl";
 import * as THREE from "three/webgpu";
 import type { Node } from "three/webgpu";
+import { cameraPos } from "../../render/camera-pos.ts";
 import {
   type ColorUniform,
   type ScalarUniform,
@@ -730,7 +730,7 @@ export function createSkyMaterial(): THREE.MeshBasicNodeMaterial {
   const mat = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, depthWrite: false });
   mat.transparent = true;
   mat.fog = false;
-  const dir = normalize(positionWorld.sub(cameraPosition));
+  const dir = normalize(positionWorld.sub(cameraPos));
   mat.colorNode = auroraSky(dir)
     .mul(weights.aurora)
     .add(fieldlineSky(dir).mul(weights.lines))

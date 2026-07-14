@@ -16,6 +16,7 @@
 // `three/webgpu`. No GLSL.
 
 import * as THREE from "three/webgpu";
+import { cameraPos, cameraViewProjection } from "../render/camera-pos.ts";
 import { AIR_ONLY_SENSES, SENSE_ORDER } from "../senses/ids.ts";
 import { signals } from "../signals/index.ts";
 import type {
@@ -27,7 +28,10 @@ import type {
 import {
   BLADE_SPACING,
   BLADE_STEPS_PER_CELL,
+  GRASS_AREA_SIZE,
   TOTAL_BLADES,
+  VR_KEEP_FRACTION,
+  VR_RENDER_RADIUS,
   createGrassUniforms,
 } from "./config.ts";
 import { GrassFieldTexture } from "./field-texture.ts";
@@ -42,10 +46,9 @@ const WIND_GAIN = 0.5;
 
 export interface CreateGrassOptions {
   scene: THREE.Scene;
-  /** The WebGPU renderer (dispatches the compute passes). */
+  /** The WebGPU renderer (dispatches the compute passes; `.xr.isPresenting` picks the
+   *  VR density profile). Eye position + cull frustum come from `camera-pos.ts`. */
   renderer: THREE.WebGPURenderer;
-  /** The render camera (world position + VP drive culling/snapping). */
-  camera: THREE.Camera;
   /** Live sense uniforms — the same set terrain + flora wear. */
   uniforms: KitUniforms;
   /** The shader-sense compositor (same object terrain/flora get). */
@@ -66,7 +69,7 @@ export interface Grass {
 }
 
 export function createGrass(opts: CreateGrassOptions): Grass {
-  const { scene, renderer, camera } = opts;
+  const { scene, renderer } = opts;
 
   const group = new THREE.Group();
   scene.add(group);
@@ -145,8 +148,20 @@ export function createGrass(opts: CreateGrassOptions): Grass {
       group.visible = revealed;
       if (!revealed) return;
 
-      camera.updateMatrixWorld();
-      camera.getWorldPosition(camPos);
+      // Eye position + cull frustum come from the shared observer (`camera-pos.ts`),
+      // NOT the mono app camera: under the WebGPU/WebXR path the mono camera does not
+      // track the head, so centring the patch and culling against it would drop nearly
+      // every blade in VR (only the 3 m `isClose` bypass would survive → no grass).
+      // `syncCameraPos` publishes the presenting camera's pose once per frame (main.ts).
+      camPos.copy(cameraPos.value);
+
+      // VR density reduction: stereo pays the blade cost twice, so while presenting we
+      // draw a smaller circle and thin the broad field. The near-camera bypass keeps you
+      // standing in full-density grass regardless (see config.ts). This is the only bit of
+      // grass that still needs the VR flag — a density choice, not eye-position math.
+      const presenting = renderer.xr.isPresenting;
+      uniforms.compute.uRenderRadius.value = presenting ? VR_RENDER_RADIUS : GRASS_AREA_SIZE * 0.5;
+      uniforms.compute.uKeepFraction.value = presenting ? VR_KEEP_FRACTION : 1;
 
       // Grid-snap the patch to the camera (blade-spacing grid → world-stable seed).
       const cellX = Math.floor(camPos.x / gridCellSize);
@@ -172,10 +187,7 @@ export function createGrass(opts: CreateGrassOptions): Grass {
       uniforms.shared.uTime.value = signals.time.peek();
       uniforms.compute.uWindStrength.value = WIND_BASE + signals.unrest.peek() * WIND_GAIN;
       uniforms.compute.uCameraPosition.value.copy(camPos);
-      uniforms.compute.uViewProjectionMatrix.value.multiplyMatrices(
-        camera.projectionMatrix,
-        camera.matrixWorldInverse,
-      );
+      uniforms.compute.uViewProjectionMatrix.value.copy(cameraViewProjection);
 
       // Reset the draw counters, then place + route this frame's blades.
       renderer.compute(reset);

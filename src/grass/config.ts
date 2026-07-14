@@ -35,6 +35,19 @@ export const BLADES_PER_AXIS = 768;
 export const TOTAL_BLADES = BLADES_PER_AXIS * BLADES_PER_AXIS;
 /** World size of the square the blades tile (render circle radius = half this). */
 export const GRASS_AREA_SIZE = 96;
+
+// ── VR density reduction ───────────────────────────────────────
+// `BLADES_PER_AXIS` is compile-time (it sizes the buffers + the compute dispatch), so
+// VR can't shrink the grid — it dials down the *drawn* set at runtime instead, via two
+// compute uniforms driven by `renderer.xr.isPresenting` (see index.ts). Stereo rendering
+// pays the blade cost twice, so Quest wants far fewer blades on screen.
+/** VR draw-circle radius (m). Smaller than the 48 m desktop radius so far fewer blades
+ *  draw per eye; the distance fog + tiny far LOD blades soften the closer edge. */
+export const VR_RENDER_RADIUS = 34;
+/** VR keep-fraction: world-stable hash thinning of the broad field (blades/m² cut). The
+ *  near-camera 3 m `isClose` bypass stays full density regardless, so you always stand in
+ *  lush grass. 1 = no thinning (desktop default). */
+export const VR_KEEP_FRACTION = 0.6;
 /** World units between adjacent blades before jitter. */
 export const BLADE_SPACING = GRASS_AREA_SIZE / BLADES_PER_AXIS;
 /** Blade spacings per grid-snap step. gridCellSize = BLADE_SPACING * this. Kept at 1 so
@@ -93,6 +106,12 @@ export function createGrassUniforms() {
       uWindFacing: uniform(0.6),
 
       // Culling / LOD
+      /** Draw-circle radius (m). Half of GRASS_AREA_SIZE on desktop; VR shrinks it live
+       *  (VR_RENDER_RADIUS) to cut the drawn blade count. */
+      uRenderRadius: uniform(GRASS_AREA_SIZE * 0.5),
+      /** Fraction of the broad field kept (world-stable hash thinning). 1 on desktop; VR
+       *  lowers it (VR_KEEP_FRACTION). The 3 m near bypass ignores this. */
+      uKeepFraction: uniform(1),
       uLODNoiseScale: uniform(0.1),
       /** Blades on ground with grass-mask below this are never drawn. Low: grassland
        *  vegetation × affinity × slopeGate lands ~0.1–0.4, so keep the floor small. */

@@ -78,8 +78,6 @@ export function createGrassCompute(
   fieldTex: THREE.Texture,
   texRes: number,
 ): { compute: THREE.ComputeNode; reset: THREE.ComputeNode } {
-  const HALF = GRASS_AREA_SIZE * 0.5;
-
   const compute = Fn(() => {
     // ── World position: grid cell + PCG jitter, keyed on the GLOBAL index ──
     const uIdx = uint(instanceIndex);
@@ -97,11 +95,18 @@ export function createGrassCompute(
     const worldXZ = vec2(worldPos.x, worldPos.z);
 
     // ── Cull stage 1: cheap XZ circle around the patch centre (no height needed) ──
+    // Radius is a live uniform (VR shrinks it). `keep` is world-stable hash thinning of
+    // the broad field (VR lowers uKeepFraction); the 3 m `isClose` bypass ignores both so
+    // the immediate surround always stays full density. Seed is offset off the jitter hash
+    // to decorrelate thinning from blade placement.
     const diff = worldPos.sub(uc.uCameraPosition);
     const isClose = abs(diff.x).add(abs(diff.z)).lessThan(float(3));
-    const inCircle = length(worldPos.sub(uc.uGroupOffset)).lessThan(float(HALF));
+    const inCircle = length(worldPos.sub(uc.uGroupOffset)).lessThan(uc.uRenderRadius);
+    const keep = hash2to1(globalGridX.add(int(31337)), globalGridZ.add(int(70001))).lessThan(
+      uc.uKeepFraction,
+    );
 
-    If(isClose.or(inCircle), () => {
+    If(isClose.or(inCircle.and(keep)), () => {
       const field = sampleField(fieldTex, worldXZ, uc.uFieldTexOrigin, uc.uFieldTexSize, texRes);
 
       // ── Mask gate: no grass off fitting ground (never routed → zero draw cost) ──

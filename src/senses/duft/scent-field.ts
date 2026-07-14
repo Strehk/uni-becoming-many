@@ -24,7 +24,6 @@ import {
   Loop,
   atomicAdd,
   atomicStore,
-  cameraPosition,
   cos,
   exp,
   float,
@@ -45,6 +44,7 @@ import {
   vec4,
 } from "three/tsl";
 import * as THREE from "three/webgpu";
+import { cameraPos } from "../../render/camera-pos.ts";
 import { SCENT_TYPES, u } from "./params.ts";
 
 export interface ScentZone {
@@ -310,7 +310,7 @@ export class ScentField {
     // Angular-size cap: particles near the camera would cover huge screen areas
     // (fill-rate crater when flying through a cloud) — cap world size at a fraction
     // of the distance.
-    const camDist = posAttr.add(center).sub(cameraPosition).length();
+    const camDist = posAttr.add(center).sub(cameraPos).length();
 
     material.scaleNode = u.size
       .mul(amount.mul(0.9).add(0.55)) // scented particles look fuller
@@ -370,7 +370,7 @@ export class ScentField {
     const cAmount = cScent.w.clamp(0, 1);
 
     cMat.positionNode = cPos.add(center);
-    const cDist = cPos.add(center).sub(cameraPosition).length();
+    const cDist = cPos.add(center).sub(cameraPos).length();
     cMat.scaleNode = u.size
       .mul(cAmount.mul(0.9).add(0.55))
       .mul(cRnd.mul(0.5).add(0.75))
