@@ -19,6 +19,7 @@ import { createLife } from "./life/index.ts";
 import { createMinimap } from "./minimap/index.ts";
 import { createPlayer } from "./player/index.ts";
 import { createKeyboardControls } from "./player/keyboard-controls.ts";
+import { syncCameraPos } from "./render/camera-pos.ts";
 import { createRenderer } from "./renderer/index.ts";
 import { createDuftSense } from "./senses/duft/index.ts";
 import { SCENT_TYPES } from "./senses/duft/params.ts";
@@ -432,6 +433,10 @@ renderer.start((dtSeconds) => {
   pose.x = player.rig.position.x;
   pose.y = player.rig.position.y;
   pose.z = player.rig.position.z;
+  // Publish the presenting camera's world position for the camera-relative look math
+  // (view reveal / distance fog / rim / dust fades). In VR this reads the headset rig,
+  // not the TSL `cameraPosition` node (which the WebGPU WebXR path leaves unresolved).
+  syncCameraPos(renderer.instance, renderer.camera);
 
   senses.update(dtSeconds); // writes senseProgress; eases the view uniforms
   magnetfeld.update(dtSeconds); // sky dome fade + follow player + spine time

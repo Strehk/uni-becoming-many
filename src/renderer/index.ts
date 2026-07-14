@@ -13,7 +13,8 @@
 //
 // VR: WebGPU drives WebXR through the same `renderer.xr` manager as the WebGL backend
 // (supported since r167; uses an internal `XRGPUBinding`). We flip `renderer.xr.enabled`
-// on and expose a `VRButton` overlay; entering VR needs HTTPS (we already serve it).
+// on and expose a `VRButton` overlay whose session requests the "webgpu" feature (required
+// by the WebGPU backend — see below). Entering VR needs HTTPS (we already serve it).
 
 // `three/addons/*` maps to `three/examples/jsm/*`; types ship with @types/three.
 import { Inspector } from "three/addons/inspector/Inspector.js";
@@ -82,7 +83,11 @@ export async function createRenderer(): Promise<Renderer> {
   await renderer.init();
 
   // "Enter VR" button; three handles the session + per-eye cameras once it's clicked.
-  const vrButton = VRButton.createButton(renderer);
+  // The WebGPU backend's XRManager rejects any immersive session that wasn't granted the
+  // "webgpu" session feature (it drives the headset through an XRGPUBinding projection
+  // layer, not a WebGL layer) — so we request it as a *required* feature. Without this the
+  // session throws on start: `WebGPU XR sessions require the "webgpu" session feature`.
+  const vrButton = VRButton.createButton(renderer, { requiredFeatures: ["webgpu"] });
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);

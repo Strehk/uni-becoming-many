@@ -17,8 +17,12 @@
 // IMPORTANT — see AGENT.md "WebGPU rendering": node fns from `three/tsl`, types
 // from `three/webgpu`. No GLSL.
 
-import { cameraPosition, float, mix, normalWorld, positionWorld, smoothstep } from "three/tsl";
+import { float, mix, normalWorld, positionWorld, smoothstep } from "three/tsl";
 import type { Node } from "three/webgpu";
+// The eye position comes from a CPU-fed uniform, NOT the TSL `cameraPosition` node:
+// that node doesn't resolve to the per-eye headset camera under the WebGPU WebXR
+// path, which collapses every camera-relative effect below in VR. See camera-pos.ts.
+import { cameraPos } from "./camera-pos.ts";
 
 /** A scalar node in [0, 1] (or a plain number the callers may pass through). */
 type Scalar = Node<"float">;
@@ -38,7 +42,7 @@ export function depthBands(t: Scalar, levels: Scalar): Scalar {
  * sharpens the falloff (higher = thinner, crisper rim).
  */
 export function fresnelEdge(power: Scalar): Scalar {
-  const viewDir = cameraPosition.sub(positionWorld).normalize();
+  const viewDir = cameraPos.sub(positionWorld).normalize();
   const facing = normalWorld.dot(viewDir).clamp(0, 1);
   return float(1).sub(facing).pow(power);
 }
@@ -49,7 +53,7 @@ export function fresnelEdge(power: Scalar): Scalar {
  * geometry fades in at the bubble's edge.
  */
 export function viewReveal(radius: Scalar, softness: Scalar): Scalar {
-  const dist = cameraPosition.distance(positionWorld);
+  const dist = cameraPos.distance(positionWorld);
   return float(1).sub(smoothstep(radius.sub(softness), radius, dist));
 }
 
@@ -62,7 +66,7 @@ export function distanceFog(
   near: Scalar,
   far: Scalar,
 ): Node<"vec3"> {
-  const dist = cameraPosition.distance(positionWorld);
+  const dist = cameraPos.distance(positionWorld);
   const f = dist.sub(near).div(far.sub(near)).clamp(0, 1);
   return mix(baseColor, fogColor, f);
 }
