@@ -142,6 +142,7 @@ grass = createGrass({
   layers: senses.shader.compositor,
   groundHeightAt: (x, z) => world.groundHeightAt(x, z),
 });
+grass.applyConfig(floraFaunaConfig.flora); // committed blade height / biome density
 window.addEventListener("pagehide", () => grass?.dispose());
 
 // Restore the committed worldgen tuning (provider / config / param overrides) before
@@ -233,7 +234,13 @@ window.addEventListener("pagehide", () => creatures.dispose());
 
 // Flora & Fauna coordinator: owns the live config, applies `flora-fauna:param` bus
 // edits (density → re-scatter, counts → flock/mushroom rebuild), serializes for export.
-const floraFauna = createFloraFaunaController({ life, creatures, bus, config: floraFaunaConfig });
+const floraFauna = createFloraFaunaController({
+  life,
+  creatures,
+  grass,
+  bus,
+  config: floraFaunaConfig,
+});
 window.addEventListener("pagehide", () => floraFauna.dispose());
 
 // Netzwerk sense: swarm communication web between the birds + pulsing mycelium

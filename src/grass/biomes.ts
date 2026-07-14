@@ -24,9 +24,9 @@ const AFFINITY: Partial<Record<Biome, number>> = {
   [Biome.Wetland]: 0.15,
 };
 
-/** Dense affinity table indexed by biome id (avoids indexing a numeric-enum Record
- *  with a runtime number, which strict TS rightly rejects). */
-export const GRASS_AFFINITY = ((): Float32Array => {
+/** Dense BASE affinity table indexed by biome id (avoids indexing a numeric-enum
+ *  Record with a runtime number, which strict TS rightly rejects). */
+const BASE_AFFINITY = ((): Float32Array => {
   const table = new Float32Array(BIOME_COUNT);
   for (const [key, value] of Object.entries(AFFINITY)) {
     const index = Number(key);
@@ -36,6 +36,29 @@ export const GRASS_AFFINITY = ((): Float32Array => {
   }
   return table;
 })();
+
+/** The LIVE affinity table `grassMask` reads — base × the flora config's
+ *  per-biome grass multipliers (see `setGrassBiomeConfig`). */
+export const GRASS_AFFINITY = new Float32Array(BASE_AFFINITY);
+
+/** Apply the flora config's per-biome grass density multipliers (1 = authored,
+ *  clamped ≥ 0). The field texture repaints from `grassMask`, so callers should
+ *  invalidate it for an instant refresh (see grass/index.ts `applyConfig`). */
+export function setGrassBiomeConfig(mul: {
+  meadow: number;
+  forest: number;
+  taiga: number;
+  hills: number;
+}): void {
+  GRASS_AFFINITY.set(BASE_AFFINITY);
+  const scale = (biome: Biome, m: number): void => {
+    GRASS_AFFINITY[biome] = (BASE_AFFINITY[biome] ?? 0) * Math.max(0, m);
+  };
+  scale(Biome.Grassland, mul.meadow);
+  scale(Biome.Forest, mul.forest);
+  scale(Biome.Taiga, mul.taiga);
+  scale(Biome.Hills, mul.hills);
+}
 
 /** Grass suitability 0..1 for one field cell. `biome`/`vegetation`/`slope`/`water`
  *  are the per-cell values from a chunk's `ChunkFields`. */

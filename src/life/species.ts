@@ -39,7 +39,7 @@
 //   stump-birch 126 · shrub 120 · mushroom-* ~105 · stump 90 · flower-* 80 · moss-rock 70
 
 import { Biome } from "../terrain/index.ts";
-import { laubWeight, lichtung, nadelWeight } from "./woodland.ts";
+import { clearingLoveScale, laubWeight, lichtung, nadelWeight } from "./woodland.ts";
 
 export type SpeciesId =
   | "pine"
@@ -150,7 +150,7 @@ const birchStand = (x: number, z: number, biome: Biome): number =>
 const clearingLover =
   (gain: number) =>
   (x: number, z: number): number =>
-    1 + lichtung(x, z) * gain;
+    1 + lichtung(x, z) * gain * clearingLoveScale();
 
 /** Forest-floor life that hides from open sky, leaning to one woodland type. */
 const forestFloor =

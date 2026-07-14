@@ -20,7 +20,7 @@ import { SPECIES, type SpeciesId } from "../life/species.ts";
  *  factor. Raising it costs VRAM (buffers scale with it), notably on Quest VR. */
 export const MAX_DENSITY = 2;
 
-export type FloraCategory = "tree" | "undergrowth" | "flower" | "mushroom" | "rock";
+export type FloraCategory = "tree" | "undergrowth" | "flower" | "mushroom" | "rock" | "deadwood";
 
 /** Which species each category scales. Every SpeciesId appears exactly once. */
 export const CATEGORY_SPECIES: Readonly<Record<FloraCategory, readonly SpeciesId[]>> = {
@@ -41,16 +41,9 @@ export const CATEGORY_SPECIES: Readonly<Record<FloraCategory, readonly SpeciesId
   undergrowth: ["bush", "bush-2", "berry-bush", "shrub", "cactus"],
   flower: ["flower", "flower-2", "wheat", "reeds"],
   mushroom: ["mushroom-brown", "mushroom-red", "mushroom-white", "mushroom-cluster"],
-  rock: [
-    "rock",
-    "rock-small",
-    "rock-huge",
-    "moss-rock",
-    "stump",
-    "stump-birch",
-    "branch-pine",
-    "branch-birch",
-  ],
+  rock: ["rock", "rock-small", "rock-huge", "moss-rock"],
+  // The forest floor: fallen branches and cut stumps ("Zeug auf dem Boden").
+  deadwood: ["stump", "stump-birch", "branch-pine", "branch-birch"],
 };
 
 /** Reverse lookup: species → its category. */
@@ -74,11 +67,51 @@ export interface FloraConfig {
   readonly flowerDensity: number;
   readonly mushroomDensity: number;
   readonly rockDensity: number;
+  /** Forest-floor litter (stumps + fallen branches), separate from rocks. */
+  readonly deadwoodDensity: number;
+
+  // ── Wald-Zusammensetzung ──
+  /** Conifer share of the Forest biome, 0..1 — 0 = pure Laubwald, 1 = pure
+   *  Tannenwald; 0.5 is the hand-tuned balance. */
+  readonly nadelAnteil: number;
+  /** Width of the Mischwald transition band, 0..0.6 (0.3 = original). Wider =
+   *  more mixed forest; 0 = hard conifer/deciduous borders. */
+  readonly mischBreite: number;
   /** Clearing amount 0..1 — higher = more/larger Lichtungen (opener forest);
    *  0.5 is neutral (the hand-tuned original). */
   readonly forestClearing: number;
   /** Scales the conifer↔deciduous zone size (× on the woodland type wavelength). */
   readonly forestZoneScale: number;
+
+  // ── Bäume ──
+  /** Multiplier on every tree's size (scale range), 1 = authored. */
+  readonly treeScale: number;
+  /** 0..1 — skews the per-instance scale roll toward the small end, so forests
+   *  read younger (many small trees between the tall ones). 0 = uniform. */
+  readonly youngTrees: number;
+
+  // ── Wiesen & Lichtungen ──
+  /** Extra flower density on MEADOWS (multiplies the flower category's
+   *  Grassland affinity), 1 = neutral. */
+  readonly flowerMeadow: number;
+  /** How strongly clearing-loving species (flowers, bushes) bloom ON clearings —
+   *  scales every `clearingLover` gain, 1 = authored. */
+  readonly flowerClearing: number;
+
+  // ── Steine ──
+  /** 0..1 — rocks prefer steep ground ("an Abhängen"): 0 = as authored,
+   *  1 = strongly concentrated on slopes, thinned on flats. */
+  readonly rockSlopeBias: number;
+
+  // ── Gras (the GPU grass field) ──
+  /** Blade height multiplier (scales uBladeHeightMin/Max), 1 = authored. */
+  readonly grassHeight: number;
+  /** Per-biome grass density multipliers, 1 = authored affinity. */
+  readonly grassMeadow: number;
+  readonly grassForest: number;
+  readonly grassTaiga: number;
+  readonly grassHills: number;
+
   /** Baseline wind sway (was the SWAY_BASE constant). */
   readonly swayStrength: number;
   /** Advanced: per-species absolute cap overrides (bypass the category maths). */
@@ -116,8 +149,21 @@ export const DEFAULT_CONFIG: FloraFaunaConfig = {
     flowerDensity: 1,
     mushroomDensity: 1,
     rockDensity: 1,
+    deadwoodDensity: 1,
+    nadelAnteil: 0.5,
+    mischBreite: 0.3,
     forestClearing: 0.5,
     forestZoneScale: 1,
+    treeScale: 1,
+    youngTrees: 0,
+    flowerMeadow: 1,
+    flowerClearing: 1,
+    rockSlopeBias: 0,
+    grassHeight: 1,
+    grassMeadow: 1,
+    grassForest: 1,
+    grassTaiga: 1,
+    grassHills: 1,
     swayStrength: 0.5,
     speciesCap: {},
   },
@@ -137,6 +183,7 @@ const CATEGORY_KEY: Record<FloraCategory, keyof FloraConfig> = {
   flower: "flowerDensity",
   mushroom: "mushroomDensity",
   rock: "rockDensity",
+  deadwood: "deadwoodDensity",
 };
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));

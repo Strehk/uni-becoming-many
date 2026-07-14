@@ -17,6 +17,7 @@ import * as THREE from "three/webgpu";
 import {
   DEFAULT_CONFIG,
   type FloraConfig,
+  SPECIES_CATEGORY,
   effectiveCap,
   reserveCap,
 } from "../flora-fauna/config.ts";
@@ -24,11 +25,11 @@ import type { KitUniforms } from "../render/uniforms.ts";
 import type { SenseId } from "../senses/index.ts";
 import { signals } from "../signals/index.ts";
 import type { ChunkBuiltInfo, ChunkCell } from "../terrain/index.ts";
-import { makeHeightEntry } from "../terrain/index.ts";
+import { Biome, makeHeightEntry } from "../terrain/index.ts";
 import { disposeFloraParts, loadFloraParts, loadFoliageAtlas } from "./assets.ts";
 import { SpeciesInstances } from "./instancing.ts";
 import type { FloraLayerCompositor } from "./material.ts";
-import { biomeAffinityTable, scatterChunk } from "./scatter.ts";
+import { type ScatterMods, biomeAffinityTable, scatterChunk } from "./scatter.ts";
 import { SPECIES, SPECIES_IDS, type ScentKey, type SpeciesId } from "./species.ts";
 import { BIOLUMINESCENCE_BY_SENSE, createLifeUniforms } from "./uniforms.ts";
 import { setWoodlandConfig } from "./woodland.ts";
@@ -111,6 +112,25 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
   setWoodlandConfig(config);
   const capOf = new Map<SpeciesId, number>(SPECIES_IDS.map((id) => [id, effectiveCap(id, config)]));
 
+  /** The species' biome-affinity table with the config's biome-specific extras
+   *  folded in (flowerMeadow multiplies the flower category's Grassland entry). */
+  const affinityFor = (id: SpeciesId): Float32Array => {
+    const table = biomeAffinityTable(SPECIES[id]);
+    if (SPECIES_CATEGORY[id] === "flower") {
+      table[Biome.Grassland] = (table[Biome.Grassland] ?? 0) * config.flowerMeadow;
+    }
+    return table;
+  };
+
+  /** Config-driven scatter modifiers per species category: trees get size/young
+   *  skew, rocks get the slope preference. */
+  const modsFor = (id: SpeciesId): ScatterMods => {
+    const category = SPECIES_CATEGORY[id];
+    if (category === "tree") return { scaleMul: config.treeScale, youngBias: config.youngTrees };
+    if (category === "rock") return { slopeBias: config.rockSlopeBias };
+    return {};
+  };
+
   const life = createLifeUniforms();
   const [parts, foliageAtlas] = await Promise.all([loadFloraParts(), loadFoliageAtlas()]);
 
@@ -133,7 +153,7 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       reserveCap(id),
     );
     for (const mesh of instances.meshes) group.add(mesh);
-    return { id, def, instances, affinity: biomeAffinityTable(def) };
+    return { id, def, instances, affinity: affinityFor(id), mods: modsFor(id) };
   });
 
   const liveChunks = new Set<string>();
@@ -153,7 +173,7 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
     const spots: ScentSpot[] = [];
     for (const [index, s] of species.entries()) {
       const cap = capOf.get(s.id) ?? s.def.perChunkCap;
-      const block = scatterChunk(info, entry, s.def, s.affinity, index, cap);
+      const block = scatterChunk(info, entry, s.def, s.affinity, index, cap, s.mods);
       s.instances.addChunk(k, block);
 
       // Record the placed instances' scent emissions (matrix column 3 is the
@@ -250,6 +270,10 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       config = next;
       setWoodlandConfig(config);
       for (const id of SPECIES_IDS) capOf.set(id, effectiveCap(id, config));
+      for (const s of species) {
+        s.affinity = affinityFor(s.id);
+        s.mods = modsFor(s.id);
+      }
       // Re-scatter every live chunk with the new caps. Clear packing first, then
       // replay in the retained chunk order — deterministic, no buffer realloc.
       for (const s of species) s.instances.clear();

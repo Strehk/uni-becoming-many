@@ -27,16 +27,39 @@ const CLEARING_EDGE_LO = 0.62;
 const CLEARING_EDGE_HI = 0.72;
 
 /** Live woodland tuning (the flora config drives this via `setWoodlandConfig`).
- *  `clearingBias` shifts the threshold (positive = fewer clearings, denser
- *  forest); `typeWavelengthScale` scales the conifer↔deciduous zone size. */
-const config = { clearingBias: 0, typeWavelengthScale: 1 };
+ *  `clearingBias` shifts the clearing threshold (positive = fewer clearings,
+ *  denser forest); `typeWavelengthScale` scales the conifer↔deciduous zone size;
+ *  `typeCentre`/`typeWidth` shape the Nadel↔Laub split (centre = conifer share,
+ *  width = the Mischwald transition band); `clearingLoveScale` scales how hard
+ *  clearing-loving species bloom on Lichtungen. */
+const config = {
+  clearingBias: 0,
+  typeWavelengthScale: 1,
+  typeCentre: 0.5,
+  typeWidth: 0.3,
+  clearingLoveScale: 1,
+};
 
-/** Map the config's `forestClearing` (0..1, higher = more open) + `forestZoneScale`
- *  onto the live woodland state. `forestClearing = 0.5` is neutral. */
-export function setWoodlandConfig(opts: { forestClearing: number; forestZoneScale: number }): void {
+/** Map the flora config onto the live woodland state. Neutral values:
+ *  `forestClearing 0.5`, `nadelAnteil 0.5`, `mischBreite 0.3`, scales 1. */
+export function setWoodlandConfig(opts: {
+  forestClearing: number;
+  forestZoneScale: number;
+  nadelAnteil?: number;
+  mischBreite?: number;
+  flowerClearing?: number;
+}): void {
   // More clearings ⇒ lower threshold. Range ±0.3 keeps the smoothstep valid.
   config.clearingBias = (0.5 - opts.forestClearing) * 0.6;
   config.typeWavelengthScale = Math.max(0.1, opts.forestZoneScale);
+  config.typeCentre = Math.min(1, Math.max(0, opts.nadelAnteil ?? 0.5));
+  config.typeWidth = Math.min(0.6, Math.max(0.02, opts.mischBreite ?? 0.3));
+  config.clearingLoveScale = Math.max(0, opts.flowerClearing ?? 1);
+}
+
+/** How hard clearing-loving species bloom on Lichtungen (scales their gain). */
+export function clearingLoveScale(): number {
+  return config.clearingLoveScale;
 }
 
 /** Integer-lattice hash → [0, 1). Splitmix-style avalanche, cheap and stable. */
@@ -77,7 +100,10 @@ function fbm2(x: number, z: number, seed: number): number {
 export function nadelWeight(x: number, z: number): number {
   const wavelength = TYPE_WAVELENGTH * config.typeWavelengthScale;
   const n = fbm2(x / wavelength, z / wavelength, TYPE_SEED);
-  return 1 - smoothstep(0.35, 0.65, n);
+  // `typeCentre` is the conifer share (n below centre → Nadelwald), `typeWidth`
+  // the Mischwald transition band. Neutral 0.5/0.3 = the original 0.35..0.65.
+  const half = config.typeWidth / 2;
+  return 1 - smoothstep(config.typeCentre - half, config.typeCentre + half, n);
 }
 
 /** Deciduous share — the complement of {@link nadelWeight}. */

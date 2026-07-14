@@ -13,6 +13,7 @@
 // the "⤓ Flora & Fauna" export.
 
 import type { Creatures } from "../creatures/index.ts";
+import type { Grass } from "../grass/index.ts";
 import type { Life } from "../life/index.ts";
 import type { SpeciesId } from "../life/species.ts";
 import type { Bus } from "../signals/index.ts";
@@ -41,13 +42,15 @@ type MutableConfig = Mutable<FloraFaunaConfig>;
 export interface CreateFloraFaunaOptions {
   life: Life;
   creatures: Creatures;
+  /** The GPU grass field — receives the `flora.grass*` knobs (height / biome density). */
+  grass?: Grass;
   bus: Bus;
   /** Initial config (from the loaded state, or DEFAULT_CONFIG). */
   config?: FloraFaunaConfig;
 }
 
 export function createFloraFaunaController(opts: CreateFloraFaunaOptions): FloraFaunaController {
-  const { life, creatures, bus } = opts;
+  const { life, creatures, grass, bus } = opts;
 
   // Deep, mutable copy so bus edits never alias the caller's config / defaults.
   const cfg: MutableConfig = structuredClone(opts.config ?? DEFAULT_CONFIG) as MutableConfig;
@@ -55,6 +58,7 @@ export function createFloraFaunaController(opts: CreateFloraFaunaOptions): Flora
   // ── debounced apply, one timer per subsystem ──
   let floraTimer: ReturnType<typeof setTimeout> | undefined;
   let faunaTimer: ReturnType<typeof setTimeout> | undefined;
+  let grassTimer: ReturnType<typeof setTimeout> | undefined;
   const scheduleFlora = (): void => {
     clearTimeout(floraTimer);
     floraTimer = setTimeout(() => life.applyConfig(cfg.flora), FLUSH_MS);
@@ -62,6 +66,10 @@ export function createFloraFaunaController(opts: CreateFloraFaunaOptions): Flora
   const scheduleFauna = (): void => {
     clearTimeout(faunaTimer);
     faunaTimer = setTimeout(() => creatures.reconfigure(cfg.fauna), FLUSH_MS);
+  };
+  const scheduleGrass = (): void => {
+    clearTimeout(grassTimer);
+    grassTimer = setTimeout(() => grass?.applyConfig(cfg.flora), FLUSH_MS);
   };
 
   /** Route one dotted-key param onto the mutable config + its apply schedule. */
@@ -75,7 +83,10 @@ export function createFloraFaunaController(opts: CreateFloraFaunaOptions): Flora
     const [domain, field] = key.split(".");
     if (domain === "flora" && field && field in cfg.flora) {
       (cfg.flora as Record<string, unknown>)[field] = value;
-      scheduleFlora();
+      // The grass knobs live under flora.* but only touch the grass field —
+      // no need to re-scatter every chunk for a blade-height tweak.
+      if (field.startsWith("grass")) scheduleGrass();
+      else scheduleFlora();
     } else if (domain === "fauna" && field && field in cfg.fauna) {
       (cfg.fauna as Record<string, unknown>)[field] = value;
       scheduleFauna();
@@ -96,6 +107,7 @@ export function createFloraFaunaController(opts: CreateFloraFaunaOptions): Flora
     dispose(): void {
       clearTimeout(floraTimer);
       clearTimeout(faunaTimer);
+      clearTimeout(grassTimer);
       off();
     },
   };

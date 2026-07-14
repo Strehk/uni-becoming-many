@@ -50,10 +50,11 @@ const GROUPS: Group[] = [
         step: 0.05,
       },
       { kind: "slider", key: "flora.mushroomDensity", label: "Pilze", min: 0, max: 2, step: 0.05 },
+      { kind: "slider", key: "flora.rockDensity", label: "Steine", min: 0, max: 2, step: 0.05 },
       {
         kind: "slider",
-        key: "flora.rockDensity",
-        label: "Steine & Totholz",
+        key: "flora.deadwoodDensity",
+        label: "Totholz & Äste",
         min: 0,
         max: 2,
         step: 0.05,
@@ -61,9 +62,25 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    title: "Flora · Wald & Wind",
+    title: "Wald · Zusammensetzung",
     open: true,
     specs: [
+      {
+        kind: "slider",
+        key: "flora.nadelAnteil",
+        label: "Nadelwald-Anteil",
+        min: 0,
+        max: 1,
+        step: 0.02,
+      },
+      {
+        kind: "slider",
+        key: "flora.mischBreite",
+        label: "Mischwald-Breite",
+        min: 0.02,
+        max: 0.6,
+        step: 0.02,
+      },
       {
         kind: "slider",
         key: "flora.forestClearing",
@@ -80,6 +97,81 @@ const GROUPS: Group[] = [
         max: 3,
         step: 0.05,
       },
+    ],
+  },
+  {
+    title: "Bäume · Größe",
+    open: false,
+    specs: [
+      {
+        kind: "slider",
+        key: "flora.treeScale",
+        label: "Baumgröße ×",
+        min: 0.5,
+        max: 1.6,
+        step: 0.05,
+      },
+      {
+        kind: "slider",
+        key: "flora.youngTrees",
+        label: "Kleine Bäume (Anteil)",
+        min: 0,
+        max: 1,
+        step: 0.05,
+      },
+    ],
+  },
+  {
+    title: "Wiesen & Lichtungen",
+    open: false,
+    specs: [
+      {
+        kind: "slider",
+        key: "flora.flowerMeadow",
+        label: "Blumen auf Wiesen ×",
+        min: 0,
+        max: 3,
+        step: 0.05,
+      },
+      {
+        kind: "slider",
+        key: "flora.flowerClearing",
+        label: "Blüte auf Lichtungen ×",
+        min: 0,
+        max: 3,
+        step: 0.05,
+      },
+    ],
+  },
+  {
+    title: "Steine",
+    open: false,
+    specs: [
+      {
+        kind: "slider",
+        key: "flora.rockSlopeBias",
+        label: "Hang-Vorliebe",
+        min: 0,
+        max: 1,
+        step: 0.05,
+      },
+    ],
+  },
+  {
+    title: "Gras",
+    open: false,
+    specs: [
+      { kind: "slider", key: "flora.grassHeight", label: "Höhe ×", min: 0.2, max: 3, step: 0.05 },
+      { kind: "slider", key: "flora.grassMeadow", label: "Wiese ×", min: 0, max: 2, step: 0.05 },
+      { kind: "slider", key: "flora.grassForest", label: "Wald ×", min: 0, max: 3, step: 0.05 },
+      { kind: "slider", key: "flora.grassTaiga", label: "Taiga ×", min: 0, max: 3, step: 0.05 },
+      { kind: "slider", key: "flora.grassHills", label: "Hügel ×", min: 0, max: 3, step: 0.05 },
+    ],
+  },
+  {
+    title: "Wind",
+    open: false,
+    specs: [
       {
         kind: "slider",
         key: "flora.swayStrength",

@@ -55,6 +55,16 @@ export function biomeAffinityTable(def: SpeciesDef): Float32Array {
   return table;
 }
 
+/** Config-driven per-species scatter modifiers (all neutral by default). */
+export interface ScatterMods {
+  /** Multiplier on the instance scale range (Baumgröße ×). */
+  readonly scaleMul?: number;
+  /** 0..1 — skew the scale roll toward the small end (kleine Bäume). */
+  readonly youngBias?: number;
+  /** 0..1 — concentrate placement on steep ground (Steine an Abhängen). */
+  readonly slopeBias?: number;
+}
+
 export function scatterChunk(
   info: ChunkBuiltInfo,
   entry: HeightEntry,
@@ -64,6 +74,7 @@ export function scatterChunk(
   /** Effective per-chunk cap (density config × base cap). Defaults to the base
    *  cap; the flora config passes the live effective value. */
   cap: number = def.perChunkCap,
+  mods: ScatterMods = {},
 ): ScatterBlock {
   const matrices = new Float32Array(cap * 16);
   const jitter = new Float32Array(cap);
@@ -74,7 +85,12 @@ export function scatterChunk(
   const originZ = info.gridZ * chunkSize;
 
   const rand = mulberry32(chunkSeed(info.gridX, info.gridZ, speciesIndex));
-  const [scaleMin, scaleMax] = def.scale;
+  const scaleMul = mods.scaleMul ?? 1;
+  const scaleMin = def.scale[0] * scaleMul;
+  const scaleMax = def.scale[1] * scaleMul;
+  // youngBias skews the scale roll toward the small end: rand^(1+2b).
+  const scaleExponent = 1 + (mods.youngBias ?? 0) * 2;
+  const slopeBias = mods.slopeBias ?? 0;
 
   let count = 0;
   const attempts = cap * ATTEMPTS_PER_SLOT;
@@ -107,12 +123,16 @@ export function scatterChunk(
     const density = fields.vegetation[cell] ?? 0;
     // Taper toward the slope limit so tree lines thin out rather than stopping dead.
     const slopeGate = 1 - slope / def.maxSlope;
-    const probability = density * affinityHere * slopeGate * modulator;
+    // Slope preference ("an Abhängen"): blend from neutral toward a curve that
+    // rewards steep candidates (up to ~2.7×) and thins flats (×0.25).
+    const slopeRatio = slope / def.maxSlope;
+    const slopeAffinity = 1 - slopeBias + slopeBias * (0.25 + 2.5 * slopeRatio);
+    const probability = density * affinityHere * slopeGate * modulator * slopeAffinity;
     if (rand() > probability) continue;
 
     const worldY = sampleEntry(entry, worldX, worldZ);
 
-    const scale = scaleMin + (scaleMax - scaleMin) * rand();
+    const scale = scaleMin + (scaleMax - scaleMin) * rand() ** scaleExponent;
     const yaw = rand() * TAU;
     const tiltX = (rand() - 0.5) * 2 * MAX_TILT;
     const tiltZ = (rand() - 0.5) * 2 * MAX_TILT;

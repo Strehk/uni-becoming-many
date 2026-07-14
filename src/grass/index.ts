@@ -25,6 +25,7 @@ import type {
   KitUniforms,
   TerrainLayerCompositor,
 } from "../terrain/index.ts";
+import { setGrassBiomeConfig } from "./biomes.ts";
 import {
   BLADE_SPACING,
   BLADE_STEPS_PER_CELL,
@@ -44,6 +45,11 @@ import { type GrassMaterialHandle, createGrassMaterial } from "./grass-material.
 const WIND_BASE = 0.35;
 const WIND_GAIN = 0.5;
 
+/** The authored blade-height range (matches createGrassUniforms' defaults) —
+ *  the flora config's `grassHeight` multiplies these. */
+const BASE_BLADE_HEIGHT_MIN = 0.4;
+const BASE_BLADE_HEIGHT_MAX = 0.85;
+
 export interface CreateGrassOptions {
   scene: THREE.Scene;
   /** The WebGPU renderer (dispatches the compute passes; `.xr.isPresenting` picks the
@@ -57,12 +63,26 @@ export interface CreateGrassOptions {
   groundHeightAt: (x: number, z: number) => number | null;
 }
 
+/** The grass slice of the flora config (see src/flora-fauna/config.ts). */
+export interface GrassTuning {
+  /** Blade height multiplier (scales the authored min/max). */
+  readonly grassHeight: number;
+  /** Per-biome density multipliers over the authored affinities. */
+  readonly grassMeadow: number;
+  readonly grassForest: number;
+  readonly grassTaiga: number;
+  readonly grassHills: number;
+}
+
 export interface Grass {
   readonly group: THREE.Group;
   /** Hand to `createTerrainWorld({ onChunkBuilt })`. */
   onChunkBuilt(info: ChunkBuiltInfo): void;
   /** Hand to `createTerrainWorld({ onChunkDisposed })`. */
   onChunkDisposed(cell: ChunkCell): void;
+  /** Apply the flora config's grass knobs: blade height (live uniforms) and
+   *  per-biome density (affinity table + field-texture repaint). */
+  applyConfig(tuning: GrassTuning): void;
   /** Advance one frame (after `world.update`). Skips all GPU work in the void. */
   update(dt: number): void;
   dispose(): void;
@@ -136,6 +156,21 @@ export function createGrass(opts: CreateGrassOptions): Grass {
 
     onChunkDisposed(cell: ChunkCell): void {
       fieldsCache?.remove(cell.gridX, cell.gridZ);
+      fieldTex.invalidate();
+    },
+
+    applyConfig(tuning: GrassTuning): void {
+      // Blade height: live uniforms the per-frame compute reads.
+      const h = Math.max(0.05, tuning.grassHeight);
+      uniforms.compute.uBladeHeightMin.value = BASE_BLADE_HEIGHT_MIN * h;
+      uniforms.compute.uBladeHeightMax.value = BASE_BLADE_HEIGHT_MAX * h;
+      // Per-biome density: rewrite the affinity table + repaint the mask texture.
+      setGrassBiomeConfig({
+        meadow: tuning.grassMeadow,
+        forest: tuning.grassForest,
+        taiga: tuning.grassTaiga,
+        hills: tuning.grassHills,
+      });
       fieldTex.invalidate();
     },
 
