@@ -218,6 +218,8 @@ window.addEventListener("pagehide", () => synth.dispose());
 // dive through the terrain; it returns null over not-yet-loaded chunks (no clamp).
 const player = createPlayer(renderer.camera, {
   speed: 6,
+  climbRate: 14,
+  maxAltitude: 100,
   clearance: 4,
   floor: (x, z) => world.groundHeightAt(x, z),
 });
@@ -364,6 +366,12 @@ const hostOrigin =
   import.meta.env.VITE_ICAROS_HOST ??
   "https://localhost:5183";
 
+// Bias subtracted from the controller's pitch before it drives altitude. Positive pitch climbs,
+// so a positive bias shifts the neutral point downward: the rig gently sinks at rest, making
+// pitch-down easy and pitch-up harder (the controller ergonomics make climbing the easy default,
+// so we counterweight it here). ~0.2 of the -1..1 range.
+const PITCH_BIAS = 0.2;
+
 // Latest validated controller orientation; steers the player each frame.
 const orientation: { pitch: number; roll: number; quality: number } = {
   pitch: 0,
@@ -427,7 +435,7 @@ renderer.start((dtSeconds) => {
   const { locomotion } = keyboard;
   player.look(locomotion.pitch);
   player.update(dtSeconds, {
-    pitch: keyboard.steering ? 0 : orientation.pitch,
+    pitch: keyboard.steering ? 0 : orientation.pitch - PITCH_BIAS,
     roll: keyboard.steering ? locomotion.turn : orientation.roll,
     throttle: locomotion.throttle,
     paused: locomotion.paused,
