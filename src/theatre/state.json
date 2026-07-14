@@ -34,7 +34,12 @@
                     "id": "kf-unrest-1",
                     "position": 0,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
+                    "handles": [
+                      0.5,
+                      0,
+                      0.5,
+                      1
+                    ],
                     "type": "bezier",
                     "value": 0
                   },
@@ -42,7 +47,12 @@
                     "id": "kf-unrest-2",
                     "position": 300,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
+                    "handles": [
+                      0.5,
+                      0,
+                      0.5,
+                      1
+                    ],
                     "type": "bezier",
                     "value": 1
                   }
@@ -56,7 +66,12 @@
                     "id": "kf-intensity-3",
                     "position": 0,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
+                    "handles": [
+                      0.5,
+                      0,
+                      0.5,
+                      1
+                    ],
                     "type": "bezier",
                     "value": 0
                   },
@@ -64,7 +79,12 @@
                     "id": "kf-intensity-4",
                     "position": 300,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
+                    "handles": [
+                      0.5,
+                      0,
+                      0.5,
+                      1
+                    ],
                     "type": "bezier",
                     "value": 1
                   }
@@ -78,17 +98,14 @@
                     "id": "kf-farben-5",
                     "position": 0,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
+                    "handles": [
+                      0.5,
+                      0,
+                      0.5,
+                      1
+                    ],
                     "type": "hold",
                     "value": 0
-                  },
-                  {
-                    "id": "kf-farben-6",
-                    "position": 166.666667,
-                    "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
-                    "type": "hold",
-                    "value": 1
                   }
                 ]
               },
@@ -100,17 +117,40 @@
                     "id": "kf-echo-7",
                     "position": 0,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
+                    "handles": [
+                      0.5,
+                      0,
+                      0.5,
+                      1
+                    ],
                     "type": "hold",
                     "value": 0
                   },
                   {
-                    "id": "kf-echo-8",
-                    "position": 33.333333,
+                    "id": "2zMNHqy1Hv",
+                    "position": 32.533,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
-                    "type": "hold",
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
                     "value": 1
+                  },
+                  {
+                    "id": "qXE2ZZjLf1",
+                    "position": 228.9,
+                    "connectedRight": false,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
+                    "value": 0
                   }
                 ]
               },
@@ -122,17 +162,40 @@
                     "id": "kf-infrarot-9",
                     "position": 0,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
+                    "handles": [
+                      0.5,
+                      0,
+                      0.5,
+                      1
+                    ],
                     "type": "hold",
                     "value": 0
                   },
                   {
-                    "id": "kf-infrarot-10",
-                    "position": 100,
+                    "id": "WAikGkGTe0",
+                    "position": 97.8,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
-                    "type": "hold",
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
                     "value": 1
+                  },
+                  {
+                    "id": "nqlKaj5Ooq",
+                    "position": 228.9,
+                    "connectedRight": false,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
+                    "value": 0
                   }
                 ]
               },
@@ -144,17 +207,14 @@
                     "id": "kf-uv-11",
                     "position": 0,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
+                    "handles": [
+                      0.5,
+                      0,
+                      0.5,
+                      1
+                    ],
                     "type": "hold",
                     "value": 0
-                  },
-                  {
-                    "id": "kf-uv-12",
-                    "position": 133.333333,
-                    "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
-                    "type": "hold",
-                    "value": 1
                   }
                 ]
               },
@@ -166,8 +226,39 @@
                     "id": "kf-duft-13",
                     "position": 0,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
+                    "handles": [
+                      0.5,
+                      0,
+                      0.5,
+                      1
+                    ],
                     "type": "hold",
+                    "value": 0
+                  },
+                  {
+                    "id": "F91Ea2tHfE",
+                    "position": 15.267,
+                    "connectedRight": false,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
+                    "value": 1
+                  },
+                  {
+                    "id": "0eEFrugCkR",
+                    "position": 228.9,
+                    "connectedRight": false,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
                     "value": 0
                   }
                 ]
@@ -180,17 +271,40 @@
                     "id": "kf-netzwerk-14",
                     "position": 0,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
+                    "handles": [
+                      0.5,
+                      0,
+                      0.5,
+                      1
+                    ],
                     "type": "hold",
                     "value": 0
                   },
                   {
-                    "id": "kf-netzwerk-15",
-                    "position": 233.333333,
+                    "id": "UduJ-R0Mrs",
+                    "position": 164.767,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
-                    "type": "hold",
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
                     "value": 1
+                  },
+                  {
+                    "id": "9yQQjCSdHL",
+                    "position": 228.9,
+                    "connectedRight": false,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
+                    "value": 0
                   }
                 ]
               },
@@ -202,17 +316,40 @@
                     "id": "kf-motion-16",
                     "position": 0,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
+                    "handles": [
+                      0.5,
+                      0,
+                      0.5,
+                      1
+                    ],
                     "type": "hold",
                     "value": 0
                   },
                   {
-                    "id": "kf-motion-17",
-                    "position": 66.666667,
+                    "id": "Jq5v-SNZaW",
+                    "position": 65.733,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
-                    "type": "hold",
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
                     "value": 1
+                  },
+                  {
+                    "id": "H-NE4y0Pdc",
+                    "position": 228.9,
+                    "connectedRight": false,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
+                    "value": 0
                   }
                 ]
               },
@@ -224,17 +361,40 @@
                     "id": "kf-magnetfeld-18",
                     "position": 0,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
+                    "handles": [
+                      0.5,
+                      0,
+                      0.5,
+                      1
+                    ],
                     "type": "hold",
                     "value": 0
                   },
                   {
-                    "id": "kf-magnetfeld-19",
-                    "position": 200,
+                    "id": "Ei6-MTowWk",
+                    "position": 132.167,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
-                    "type": "hold",
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
                     "value": 1
+                  },
+                  {
+                    "id": "0EQRu5MXO_",
+                    "position": 228.9,
+                    "connectedRight": false,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
+                    "value": 0
                   }
                 ]
               },
@@ -246,17 +406,40 @@
                     "id": "kf-rundum-20",
                     "position": 0,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
+                    "handles": [
+                      0.5,
+                      0,
+                      0.5,
+                      1
+                    ],
                     "type": "hold",
                     "value": 0
                   },
                   {
-                    "id": "kf-rundum-21",
-                    "position": 266.666667,
+                    "id": "ztk4mONLbe",
+                    "position": 198.233,
                     "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
-                    "type": "hold",
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
                     "value": 1
+                  },
+                  {
+                    "id": "wJQ7e8rYku",
+                    "position": 225.567,
+                    "connectedRight": false,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
+                    "value": 0
                   }
                 ]
               }
@@ -267,5 +450,9 @@
     }
   },
   "definitionVersion": "0.4.0",
-  "revisionHistory": []
+  "revisionHistory": [
+    "IOBWtrNfRdFVnQFr",
+    "ZKRgS8zqF7RuVAUf",
+    null
+  ]
 }

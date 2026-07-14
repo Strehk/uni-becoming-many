@@ -23,8 +23,9 @@
  *
  * Dev vs prod: in dev, `@theatre/studio` is dynamically imported (so it tree-shakes out of the
  * production bundle). The committed `state.json` is passed as the base state in both modes.
- * In Studio mode we disable Theatre's browser-persistent draft cache so the editor opens on
- * the committed disk state instead of an old localStorage snapshot.
+ * In Studio mode we keep Theatre's browser-persistent storage on so the sequence-editor zoom (the
+ * ~300 s view) survives reloads; the cost is that after committing new keyframes Studio may open on
+ * a stale browser draft and prompt "Use browser's state / Use disk state" (choose disk to reload).
  */
 import { getProject, onChange, types } from "@theatre/core";
 import type { ISheet, ISheetObject } from "@theatre/core";
@@ -97,7 +98,13 @@ export async function initTheatre(): Promise<Theatre> {
   if (import.meta.env.DEV && new URLSearchParams(window.location.search).get("studio") === "1") {
     // Dynamic import ⇒ @theatre/studio is excluded from the production bundle.
     const studio = (await import("@theatre/studio")).default;
-    studio.initialize({ usePersistentStorage: false });
+    // Persistent storage on: Theatre remembers the sequence-editor zoom (its clipped-space range)
+    // across reloads, so the timeline opens where you left it (e.g. the full ~300 s view) instead
+    // of resetting to Theatre's built-in 0..10 s default every time. Trade-off: Studio also keeps a
+    // browser draft of the authored state, so after committing new keyframes to state.json it may
+    // open on the stale browser snapshot and prompt "Use browser's state / Use disk state" — pick
+    // "Use disk state" to reload the committed file.
+    studio.initialize({ usePersistentStorage: true });
     studio.setSelection([timeline, arc]);
     // Tip: `studio.createContentOfSaveFile("Becoming Many")` returns the state object to write
     // into src/theatre/state.json — the production save file — without the Studio export button.
