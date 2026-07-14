@@ -33,6 +33,7 @@ import { signals } from "../signals/index.ts";
 // almost always answers.
 const FLOCK_RINGS: readonly { min: number; max: number }[] = [
   { min: 35, max: 130 }, // the near flock — the one you meet
+  { min: 50, max: 160 }, // a second near-ish flock so encounters stay frequent
   { min: 90, max: 200 },
   { min: 150, max: 280 }, // the far wanderers
 ];

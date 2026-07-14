@@ -16,7 +16,7 @@
 // upload stops after the initial one, which left every trail particle at the
 // zeroed first upload (invisible) while the CPU arrays were perfectly correct.
 
-import { instancedBufferAttribute, smoothstep, uniform, uv, vec3 } from "three/tsl";
+import { instancedBufferAttribute, mix, smoothstep, uniform, uv, vec3 } from "three/tsl";
 import * as THREE from "three/webgpu";
 import type { AnimatedVertexSampler } from "./sampler.ts";
 import type { MotionTarget } from "./target-adapters.ts";
@@ -79,15 +79,21 @@ export class ParticleTrailBuffer {
     this.colorAttribute.setUsage(THREE.DynamicDrawUsage);
 
     const material = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false });
-    material.blending = THREE.AdditiveBlending;
+    // NORMAL blending, not additive: the motion trails must read against the
+    // white void ground as much as against the dark sky. Additive white-ish
+    // particles are mathematically invisible over white — the buffer's intensity
+    // channel instead drives an indigo→pale-cyan ramp with real opacity, which
+    // contrasts both backdrops.
+    material.blending = THREE.NormalBlending;
     material.toneMapped = false;
     material.positionNode = instancedBufferAttribute<"vec3">(this.positionAttribute, "vec3");
     const color = vec3(instancedBufferAttribute<"vec3">(this.colorAttribute, "vec3"));
-    material.colorNode = color;
+    const intensity = color.z.clamp(0, 1); // blue channel = raw intensity × fade
+    material.colorNode = mix(vec3(0.16, 0.2, 0.55), vec3(0.62, 0.9, 1.0), intensity);
     // Soft round particle; fully faded particles collapse (no fill-rate waste).
     const d = uv().sub(0.5).length();
     const disc = smoothstep(0.5, 0.12, d);
-    material.opacityNode = disc;
+    material.opacityNode = disc.mul(intensity.pow(0.7).mul(0.9));
     const luma = color.dot(vec3(0.4, 0.4, 0.4));
     // Live size uniform — the UI writes `.value`, no rebuild.
     const uSize = uniform(options.particleSize ?? 0.055);
