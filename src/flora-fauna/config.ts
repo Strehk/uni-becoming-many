@@ -17,8 +17,9 @@
 import { SPECIES, type SpeciesId } from "../life/species.ts";
 
 /** Hard ceiling on any density multiplier — also the flora buffer head-room
- *  factor. Raising it costs VRAM (buffers scale with it), notably on Quest VR. */
-export const MAX_DENSITY = 2;
+ *  factor. Raising it costs VRAM (buffers scale with it), notably on Quest VR.
+ *  3 gives typed-in values real headroom past the slider ranges. */
+export const MAX_DENSITY = 3;
 
 export type FloraCategory = "tree" | "undergrowth" | "flower" | "mushroom" | "rock" | "deadwood";
 
@@ -84,8 +85,11 @@ export interface FloraConfig {
   readonly forestZoneScale: number;
 
   // ── Bäume ──
-  /** Multiplier on every tree's size (scale range), 1 = authored. */
+  /** Multiplier on every tree's MEAN size, 1 = authored. */
   readonly treeScale: number;
+  /** Spread of the size roll around that mean, 1 = authored jitter. 0 = every
+   *  tree the same size; 2-3 = a real mix from saplings to giants. */
+  readonly treeScaleVariance: number;
   /** 0..1 — skews the per-instance scale roll toward the small end, so forests
    *  read younger (many small trees between the tall ones). 0 = uniform. */
   readonly youngTrees: number;
@@ -94,9 +98,21 @@ export interface FloraConfig {
   /** Extra flower density on MEADOWS (multiplies the flower category's
    *  Grassland affinity), 1 = neutral. */
   readonly flowerMeadow: number;
+  /** Extra bush/shrub density on MEADOWS (undergrowth category × Grassland). */
+  readonly bushMeadow: number;
   /** How strongly clearing-loving species (flowers, bushes) bloom ON clearings —
    *  scales every `clearingLover` gain, 1 = authored. */
   readonly flowerClearing: number;
+
+  // ── Gruppierung (clumped spawning) ──
+  // Strength 0..1 pulls a category out of uniform scatter into clumps (0 = as
+  // authored, 1 = only inside clumps, denser there); size = clump wavelength (m).
+  readonly bushCluster: number;
+  readonly bushClusterSize: number;
+  readonly flowerCluster: number;
+  readonly flowerClusterSize: number;
+  readonly mushroomCluster: number;
+  readonly mushroomClusterSize: number;
 
   // ── Steine ──
   /** 0..1 — rocks prefer steep ground ("an Abhängen"): 0 = as authored,
@@ -155,9 +171,17 @@ export const DEFAULT_CONFIG: FloraFaunaConfig = {
     forestClearing: 0.5,
     forestZoneScale: 1,
     treeScale: 1,
+    treeScaleVariance: 1,
     youngTrees: 0,
     flowerMeadow: 1,
+    bushMeadow: 1,
     flowerClearing: 1,
+    bushCluster: 0,
+    bushClusterSize: 24,
+    flowerCluster: 0,
+    flowerClusterSize: 18,
+    mushroomCluster: 0,
+    mushroomClusterSize: 14,
     rockSlopeBias: 0,
     grassHeight: 1,
     grassMeadow: 1,

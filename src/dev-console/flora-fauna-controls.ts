@@ -113,6 +113,14 @@ const GROUPS: Group[] = [
       },
       {
         kind: "slider",
+        key: "flora.treeScaleVariance",
+        label: "Größen-Streuung ×",
+        min: 0,
+        max: 3,
+        step: 0.05,
+      },
+      {
+        kind: "slider",
         key: "flora.youngTrees",
         label: "Kleine Bäume (Anteil)",
         min: 0,
@@ -135,11 +143,75 @@ const GROUPS: Group[] = [
       },
       {
         kind: "slider",
+        key: "flora.bushMeadow",
+        label: "Büsche auf Wiesen ×",
+        min: 0,
+        max: 3,
+        step: 0.05,
+      },
+      {
+        kind: "slider",
         key: "flora.flowerClearing",
         label: "Blüte auf Lichtungen ×",
         min: 0,
         max: 3,
         step: 0.05,
+      },
+    ],
+  },
+  {
+    // Clumped spawning: Stärke pulls the category into clumps, Größe is the
+    // clump wavelength in metres (a number field — type any size).
+    title: "Gruppierung",
+    open: false,
+    specs: [
+      {
+        kind: "slider",
+        key: "flora.bushCluster",
+        label: "Büsche · Stärke",
+        min: 0,
+        max: 1,
+        step: 0.05,
+      },
+      {
+        kind: "number",
+        key: "flora.bushClusterSize",
+        label: "Büsche · Gruppengröße (m)",
+        min: 4,
+        max: 120,
+        step: 1,
+      },
+      {
+        kind: "slider",
+        key: "flora.flowerCluster",
+        label: "Blumen · Stärke",
+        min: 0,
+        max: 1,
+        step: 0.05,
+      },
+      {
+        kind: "number",
+        key: "flora.flowerClusterSize",
+        label: "Blumen · Gruppengröße (m)",
+        min: 4,
+        max: 120,
+        step: 1,
+      },
+      {
+        kind: "slider",
+        key: "flora.mushroomCluster",
+        label: "Pilze · Stärke",
+        min: 0,
+        max: 1,
+        step: 0.05,
+      },
+      {
+        kind: "number",
+        key: "flora.mushroomClusterSize",
+        label: "Pilze · Gruppengröße (m)",
+        min: 4,
+        max: 120,
+        step: 1,
       },
     ],
   },
@@ -295,26 +367,37 @@ export function createFloraFaunaControls(bus: Bus, config: FloraFaunaConfig): Fl
     const start = startValue(config, spec.key);
 
     if (spec.kind === "slider") {
-      const value = document.createElement("b");
-      value.className = "ff-val";
+      // The readout is an EDITABLE number field: typing commits unclamped, so
+      // the slider range is a convenience, never a limit.
+      const value = document.createElement("input");
+      value.type = "number";
+      value.className = "ff-valnum";
+      value.step = String(spec.step);
       const input = document.createElement("input");
       input.type = "range";
       input.min = String(spec.min);
       input.max = String(spec.max);
       input.step = String(spec.step);
       input.value = String(clamp(start, spec.min, spec.max));
-      value.textContent = fmt(start, spec.step);
+      value.value = fmt(start, spec.step);
       input.addEventListener("input", () => {
         const v = Number.parseFloat(input.value);
-        value.textContent = fmt(v, spec.step);
+        if (document.activeElement !== value) value.value = fmt(v, spec.step);
         emit(spec.key, v);
       });
+      value.addEventListener("change", () => {
+        const v = Number.parseFloat(value.value);
+        if (!Number.isFinite(v)) return;
+        input.value = String(clamp(v, spec.min, spec.max)); // slider display only
+        emit(spec.key, v);
+      });
+      value.addEventListener("keydown", (e) => e.stopPropagation()); // digits ≠ sense hotkeys
       row.append(label, value, input);
       widgets.push({
         spec,
         set: (v) => {
           input.value = String(clamp(v, spec.min, spec.max));
-          value.textContent = fmt(v, spec.step);
+          value.value = fmt(v, spec.step);
         },
       });
     } else {
@@ -404,4 +487,12 @@ const CSS = `
   padding: 2px 6px; text-align: right; font-variant-numeric: tabular-nums;
 }
 .ff-num:focus { outline: none; border-color: #38bdf8; }
+.ff-valnum {
+  width: 72px; background: transparent; border: none; color: #38bdf8;
+  font-family: inherit; font-size: 11px; font-weight: 600; text-align: right;
+  font-variant-numeric: tabular-nums; padding: 0; outline: none;
+  appearance: textfield; -moz-appearance: textfield;
+}
+.ff-valnum::-webkit-outer-spin-button, .ff-valnum::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.ff-valnum:focus { border-bottom: 1px solid #38bdf8; }
 `;

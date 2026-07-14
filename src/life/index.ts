@@ -113,21 +113,54 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
   const capOf = new Map<SpeciesId, number>(SPECIES_IDS.map((id) => [id, effectiveCap(id, config)]));
 
   /** The species' biome-affinity table with the config's biome-specific extras
-   *  folded in (flowerMeadow multiplies the flower category's Grassland entry). */
+   *  folded in (flowerMeadow/bushMeadow multiply the category's Grassland entry). */
   const affinityFor = (id: SpeciesId): Float32Array => {
     const table = biomeAffinityTable(SPECIES[id]);
-    if (SPECIES_CATEGORY[id] === "flower") {
-      table[Biome.Grassland] = (table[Biome.Grassland] ?? 0) * config.flowerMeadow;
+    const category = SPECIES_CATEGORY[id];
+    const meadowMul =
+      category === "flower"
+        ? config.flowerMeadow
+        : category === "undergrowth"
+          ? config.bushMeadow
+          : 1;
+    if (meadowMul !== 1) {
+      table[Biome.Grassland] = (table[Biome.Grassland] ?? 0) * meadowMul;
     }
     return table;
   };
 
-  /** Config-driven scatter modifiers per species category: trees get size/young
-   *  skew, rocks get the slope preference. */
+  /** Config-driven scatter modifiers per species category: trees get size mean /
+   *  variance / young skew, rocks the slope preference, understorey categories
+   *  their clump fields (independent seeds so thickets ≠ flower patches ≠ rings). */
   const modsFor = (id: SpeciesId): ScatterMods => {
     const category = SPECIES_CATEGORY[id];
-    if (category === "tree") return { scaleMul: config.treeScale, youngBias: config.youngTrees };
+    if (category === "tree") {
+      return {
+        scaleMul: config.treeScale,
+        scaleSpread: config.treeScaleVariance,
+        youngBias: config.youngTrees,
+      };
+    }
     if (category === "rock") return { slopeBias: config.rockSlopeBias };
+    if (category === "undergrowth" && config.bushCluster > 0) {
+      return {
+        cluster: { strength: config.bushCluster, size: config.bushClusterSize, seed: 0x7a11 },
+      };
+    }
+    if (category === "flower" && config.flowerCluster > 0) {
+      return {
+        cluster: { strength: config.flowerCluster, size: config.flowerClusterSize, seed: 0x3b29 },
+      };
+    }
+    if (category === "mushroom" && config.mushroomCluster > 0) {
+      return {
+        cluster: {
+          strength: config.mushroomCluster,
+          size: config.mushroomClusterSize,
+          seed: 0x59c3,
+        },
+      };
+    }
     return {};
   };
 

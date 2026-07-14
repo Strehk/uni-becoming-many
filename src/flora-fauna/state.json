@@ -24,7 +24,15 @@
       "grassTaiga": 1,
       "grassHills": 1,
       "swayStrength": 0.5,
-      "speciesCap": {}
+      "speciesCap": {},
+      "treeScaleVariance": 1,
+      "bushMeadow": 1,
+      "bushCluster": 0,
+      "bushClusterSize": 24,
+      "flowerCluster": 0,
+      "flowerClusterSize": 18,
+      "mushroomCluster": 0,
+      "mushroomClusterSize": 14
     },
     "fauna": {
       "flockCount": 4,

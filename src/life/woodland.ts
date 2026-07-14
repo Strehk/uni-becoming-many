@@ -111,6 +111,15 @@ export function laubWeight(x: number, z: number): number {
   return 1 - nadelWeight(x, z);
 }
 
+/** Generic clump noise 0..1 over world XZ — the scatter uses it for GROUPED
+ *  spawning (bushes in thickets, mushroom rings, flower patches). `wavelength`
+ *  is the clump size in metres; `seed` keeps categories independent. Same
+ *  deterministic fbm as the woodland fields. */
+export function clumpNoise(x: number, z: number, wavelength: number, seed: number): number {
+  const w = Math.max(2, wavelength);
+  return fbm2(x / w, z / w, seed);
+}
+
 /** Clearing factor 0..1 — 0 under closed canopy, rising to 1 in occasional open
  *  pockets. Trees multiply by `1 - lichtung`, flowers/bushes by `1 + lichtung·k`. */
 export function lichtung(x: number, z: number): number {

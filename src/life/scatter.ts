@@ -21,6 +21,13 @@ import {
 } from "../terrain/index.ts";
 import { TAU, chunkSeed, composeMatrix, mulberry32 } from "./matrix.ts";
 import type { SpeciesDef } from "./species.ts";
+import { clumpNoise } from "./woodland.ts";
+
+/** Plain smoothstep (the TSL one lives in shaders; the scatter runs on the CPU). */
+function smoothstepValue(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
 
 /**
  * How many candidates we test per slot before giving up. The loop breaks the moment
@@ -57,12 +64,17 @@ export function biomeAffinityTable(def: SpeciesDef): Float32Array {
 
 /** Config-driven per-species scatter modifiers (all neutral by default). */
 export interface ScatterMods {
-  /** Multiplier on the instance scale range (Baumgröße ×). */
+  /** Multiplier on the instance MEAN scale (Baumgröße ×). */
   readonly scaleMul?: number;
+  /** Spread of the scale roll around the mean, 1 = authored jitter (Streuung). */
+  readonly scaleSpread?: number;
   /** 0..1 — skew the scale roll toward the small end (kleine Bäume). */
   readonly youngBias?: number;
   /** 0..1 — concentrate placement on steep ground (Steine an Abhängen). */
   readonly slopeBias?: number;
+  /** Clumped spawning: `strength` 0..1 pulls placement into clumps of `size`
+   *  metres (denser inside, sparse outside); `seed` decorrelates categories. */
+  readonly cluster?: { readonly strength: number; readonly size: number; readonly seed: number };
 }
 
 export function scatterChunk(
@@ -85,12 +97,18 @@ export function scatterChunk(
   const originZ = info.gridZ * chunkSize;
 
   const rand = mulberry32(chunkSeed(info.gridX, info.gridZ, speciesIndex));
+  // Scale roll = authored range, re-centred by `scaleMul` and widened/narrowed
+  // by `scaleSpread` (0 = uniform size, >1 = saplings-to-giants variance).
   const scaleMul = mods.scaleMul ?? 1;
-  const scaleMin = def.scale[0] * scaleMul;
-  const scaleMax = def.scale[1] * scaleMul;
+  const spread = mods.scaleSpread ?? 1;
+  const centre = ((def.scale[0] + def.scale[1]) / 2) * scaleMul;
+  const halfRange = ((def.scale[1] - def.scale[0]) / 2) * scaleMul * spread;
+  const scaleMin = Math.max(0.05, centre - halfRange);
+  const scaleMax = Math.max(scaleMin, centre + halfRange);
   // youngBias skews the scale roll toward the small end: rand^(1+2b).
   const scaleExponent = 1 + (mods.youngBias ?? 0) * 2;
   const slopeBias = mods.slopeBias ?? 0;
+  const cluster = mods.cluster;
 
   let count = 0;
   const attempts = cap * ATTEMPTS_PER_SLOT;
@@ -127,7 +145,18 @@ export function scatterChunk(
     // rewards steep candidates (up to ~2.7×) and thins flats (×0.25).
     const slopeRatio = slope / def.maxSlope;
     const slopeAffinity = 1 - slopeBias + slopeBias * (0.25 + 2.5 * slopeRatio);
-    const probability = density * affinityHere * slopeGate * modulator * slopeAffinity;
+
+    // Clumped spawning ("gruppiert"): inside a clump the roll is boosted (×3),
+    // outside it starves — blended by strength so 0 stays uniform scatter.
+    let clumpFactor = 1;
+    if (cluster && cluster.strength > 0) {
+      const n = clumpNoise(worldX, worldZ, cluster.size, cluster.seed);
+      const inClump = smoothstepValue(0.5, 0.66, n) * 3;
+      clumpFactor = 1 - cluster.strength + cluster.strength * inClump;
+    }
+
+    const probability =
+      density * affinityHere * slopeGate * modulator * slopeAffinity * clumpFactor;
     if (rand() > probability) continue;
 
     const worldY = sampleEntry(entry, worldX, worldZ);
