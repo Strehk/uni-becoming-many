@@ -167,7 +167,10 @@ window.addEventListener("pagehide", () => duft.dispose());
 
 // Creatures substrate: the boids bird swarm + mushroom spawn points that the
 // netzwerk / motion senses perceive. Plain world state, no sense logic.
-const creatures = createCreatures(renderer.scene, bus, (x, z) => world.groundHeightAt(x, z));
+const creatures = createCreatures(renderer.scene, bus, (x, z) => world.groundHeightAt(x, z), {
+  uniforms: senses.uniforms,
+  layers: senses.shader.compositor,
+});
 window.addEventListener("pagehide", () => creatures.dispose());
 
 // Netzwerk sense: swarm communication web between the birds + pulsing mycelium
@@ -451,13 +454,16 @@ renderer.start((dtSeconds) => {
     (id) => !AIR_ONLY_SENSES.has(id) && signals.sense[id].peek() > 0,
   );
   life.group.visible = worldRevealed;
-  // The bird MESHES follow the same reveal — flocks are part of the visible world
-  // under the colour-spectrum senses. EXCEPT under motion: there the meshes vanish
-  // and only their vertex trails remain (the sense's "only movement is visible"
-  // contract). The boids keep flying while hidden, so motion/netzwerk read live
-  // positions either way.
-  const motionUp = signals.sense.motion.peek() > 0.5;
-  creatures.setBirdsVisible(worldRevealed && !motionUp);
+  // The bird MESHES are revealed by the colour-spectrum senses like everything
+  // else. Senses are LAYERS: motion itself reveals no meshes (it contributes
+  // only the vertex trails), but it never suppresses what another active sense
+  // shows — motion+infrarot shows warm bodies AND their trails; motion alone
+  // shows trails through the void. The boids keep flying while hidden, so
+  // motion/netzwerk read live positions either way.
+  const birdsRevealed = SENSE_ORDER.some(
+    (id) => id !== "motion" && !AIR_ONLY_SENSES.has(id) && signals.sense[id].peek() > 0,
+  );
+  creatures.setBirdsVisible(birdsRevealed);
   netzwerk.update(clock.delta); // swarm web + mycelium (fade, rebuild, pulse)
   motion.update(clock.delta); // vertex-motion trails (spawn/fade ring buffer)
   synth.update(dtSeconds); // push the signal packet into the synth iframe

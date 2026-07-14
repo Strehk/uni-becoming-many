@@ -21,7 +21,12 @@
 // Everything here is plain world state — no sense logic, no signal writes except
 // the mushroom-change event. Visual senses subscribe to what they need.
 
+import { float, mix, normalWorld, positionView, vec3 } from "three/tsl";
 import * as THREE from "three/webgpu";
+import type { Node } from "three/webgpu";
+import type { FloraLayerCompositor } from "../life/material.ts";
+import { distanceFog, viewReveal } from "../render/tsl-kit.ts";
+import type { KitUniforms } from "../render/uniforms.ts";
 import type { Bus } from "../signals/index.ts";
 import { signals } from "../signals/index.ts";
 
@@ -129,7 +134,20 @@ function buildBird(material: THREE.Material): {
   return { root, leftWing, rightWing };
 }
 
-export function createCreatures(scene: THREE.Scene, bus: Bus, ground: GroundSource): Creatures {
+export interface CreatureSenseOptions {
+  /** The live sense uniforms (the same set terrain/flora wear). */
+  uniforms?: KitUniforms;
+  /** The shader-sense compositor — birds run through the SAME sense layers, so
+   *  infrarot reads them as WARM BODIES, echo as depth, uv as faint signal. */
+  layers?: FloraLayerCompositor;
+}
+
+export function createCreatures(
+  scene: THREE.Scene,
+  bus: Bus,
+  ground: GroundSource,
+  senseOpts: CreatureSenseOptions = {},
+): Creatures {
   const group = new THREE.Group();
   group.name = "creatures";
   // Creatures are perception-dependent: hidden in the white void by default, revealed
@@ -137,13 +155,36 @@ export function createCreatures(scene: THREE.Scene, bus: Bus, ground: GroundSour
   group.visible = false;
   scene.add(group);
 
-  // UNLIT (the scene has no lights — a standard material would render black,
-  // see src/life/material.ts). Mid grey-blue plumage: light enough to read
-  // against the dark sense skies from below, dark enough against the pale
-  // ground from above.
+  // UNLIT (the scene has no lights — a standard material would render black, see
+  // src/life/material.ts), composited through the sense layers like flora: the
+  // grey-blue plumage is the `farben` albedo, while `infrarot` reads a warm
+  // METABOLIC body temperature (~311 K — near the thermal window's hot end, so
+  // living birds glow against the cool ground and sky).
   const material = new THREE.MeshBasicNodeMaterial();
-  material.color = new THREE.Color(0x8e98a8);
   material.side = THREE.DoubleSide;
+  const rewireMaterial = (): void => {
+    const { uniforms: u, layers } = senseOpts;
+    const albedo = vec3(0.29, 0.33, 0.4); // ~#8e98a8 in linear space
+    let base: Node<"vec3"> | Node<"color"> = albedo;
+    if (layers) {
+      const facing = normalWorld.dot(vec3(0.4, 0.75, 0.3).normalize()).clamp(0, 1);
+      base = layers.buildColorNode({
+        albedo,
+        tempK: float(310).add(facing.mul(2)),
+        uvSignal: float(0.4),
+        distance: positionView.z.negate(),
+        light: facing.mul(0.65).add(0.35),
+      });
+    }
+    if (u) {
+      const fogged = distanceFog(base, u.fogColor, u.fogNear, u.fogFar);
+      base = mix(u.fogColor, fogged, viewReveal(u.viewRadius, u.revealSoftness));
+    }
+    material.colorNode = base;
+    material.needsUpdate = true;
+  };
+  rewireMaterial();
+  const unsubscribeLayers = senseOpts.layers?.onStructureChange(rewireMaterial);
 
   const pose = signals.playerPose.peek();
 
@@ -375,6 +416,7 @@ export function createCreatures(scene: THREE.Scene, bus: Bus, ground: GroundSour
       }
     },
     dispose(): void {
+      unsubscribeLayers?.();
       group.removeFromParent();
       material.dispose();
       for (const b of birds) {
