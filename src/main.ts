@@ -462,14 +462,15 @@ renderer.start((dtSeconds) => {
     (id) => !AIR_ONLY_SENSES.has(id) && signals.sense[id].peek() > 0,
   );
   life.group.visible = worldRevealed;
-  // The bird MESHES are revealed by the colour-spectrum senses like everything
-  // else. Senses are LAYERS: motion itself reveals no meshes (it contributes
-  // only the vertex trails), but it never suppresses what another active sense
-  // shows — motion+infrarot shows warm bodies AND their trails; motion alone
-  // shows trails through the void. The boids keep flying while hidden, so
+  // The bird MESHES are revealed by the COLOUR-spectrum senses. Senses are
+  // LAYERS: a sense that doesn't reveal the meshes never suppresses another
+  // that does — motion+infrarot shows warm bodies AND their trails. Non-revealers:
+  // motion contributes only the vertex trails, echo keeps its pure depth map
+  // bird-free, duft is air-only. The boids keep flying while hidden, so
   // motion/netzwerk read live positions either way.
   const birdsRevealed = SENSE_ORDER.some(
-    (id) => id !== "motion" && !AIR_ONLY_SENSES.has(id) && signals.sense[id].peek() > 0,
+    (id) =>
+      id !== "motion" && id !== "echo" && !AIR_ONLY_SENSES.has(id) && signals.sense[id].peek() > 0,
   );
   creatures.setBirdsVisible(birdsRevealed);
   netzwerk.update(clock.delta); // swarm web + mycelium (fade, rebuild, pulse)
