@@ -9,41 +9,44 @@ export interface ScentType {
   key: string;
   name: string;
   color: number;
+  /** Default per-type intensity (the dev-console "Duft · <name>" slider). */
+  intensity: number;
 }
 
 export const SCENT_TYPES: readonly ScentType[] = [
-  { key: "blume", name: "Wiesenblume (blumig)", color: 0xff4f9a },
-  { key: "lavendel", name: "Lavendel", color: 0x8a5cff },
-  { key: "baum", name: "Laubbaum (honigartig)", color: 0xffb340 },
-  { key: "kiefer", name: "Kiefer (harzig)", color: 0x2fd6a3 },
-  { key: "kraut", name: "Kräuterbusch (frisch)", color: 0xb8e02e },
-  { key: "pilz", name: "Pilz (erdig)", color: 0x8a6f4d },
+  { key: "blume", name: "Wiesenblume (blumig)", color: 0xff4f9a, intensity: 0.95 },
+  { key: "lavendel", name: "Lavendel", color: 0x8a5cff, intensity: 1.0 },
+  { key: "baum", name: "Laubbaum (honigartig)", color: 0xffb340, intensity: 1.05 },
+  { key: "kiefer", name: "Kiefer (harzig)", color: 0x2fd6a3, intensity: 1.0 },
+  { key: "kraut", name: "Kräuterbusch (frisch)", color: 0xb8e02e, intensity: 1.05 },
+  { key: "pilz", name: "Pilz (erdig)", color: 0x8a6f4d, intensity: 1.05 },
 ];
 
-const typeIntensityArr = new Float32Array(SCENT_TYPES.map(() => 1.0));
+const typeIntensityArr = new Float32Array(SCENT_TYPES.map((t) => t.intensity));
 
 // Shared GPU uniforms — the sense UI writes into `.value` via `sense:param` commands.
+// Defaults are the hand-tuned baseline (dev-console session, 2026-07).
 export const u = {
   // Wind
-  windSpeed: uniform(1.6),
+  windSpeed: uniform(0.65),
   windDirRad: uniform(0.7),
   turbulence: uniform(1.6),
   noiseScale: uniform(0.28),
   noiseSpeed: uniform(0.3),
   rise: uniform(0.12),
-  gust: uniform(0.5),
+  gust: uniform(0.25),
   gustFreq: uniform(0.25),
-  spread: uniform(0.55),
+  spread: uniform(0.48),
 
   // Particles / scent
-  size: uniform(0.3),
-  intensity: uniform(0.55),
-  pickup: uniform(6.0), // how fast air picks up scent
-  evaporate: uniform(7.0), // evaporation (seconds)
-  spawnRadius: uniform(1.0), // multiplier on the scent-zone radii
+  size: uniform(0.14),
+  intensity: uniform(1.5),
+  pickup: uniform(8.3), // how fast air picks up scent
+  evaporate: uniform(5.5), // evaporation (seconds)
+  spawnRadius: uniform(0.9), // multiplier on the scent-zone radii
   airOpacity: uniform(0.0), // make unscented air visible
-  airHeight: uniform(9.0), // height of the air layer above ground (m)
-  airGround: uniform(2.0), // ground-affinity exponent (1 = uniform, higher = low)
+  airHeight: uniform(12.0), // height of the air layer above ground (m) — covers tree crowns
+  airGround: uniform(6.0), // ground-affinity exponent (1 = uniform, higher = low)
 
   // Simulation
   timeScale: uniform(1.0),

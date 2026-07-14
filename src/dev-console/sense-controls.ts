@@ -65,6 +65,32 @@ export interface SenseControlsPanel {
 
 const fmt = (v: number, digits: number): string => v.toFixed(digits);
 
+/** The value readout as a directly editable number field. Typing commits on
+ *  change/Enter and is NOT clamped to the slider's range — the slider is a
+ *  convenience, the field is the escape hatch past its preset maximum. */
+function numberValue(
+  step: number,
+  digits: number,
+  onCommit: (v: number) => void,
+): { input: HTMLInputElement; show: (v: number) => void } {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.className = "sc-val";
+  input.step = String(step);
+  input.addEventListener("change", () => {
+    const v = Number.parseFloat(input.value);
+    if (Number.isFinite(v)) onCommit(v);
+  });
+  input.addEventListener("keydown", (e) => e.stopPropagation()); // digits ≠ sense hotkeys
+  return {
+    input,
+    show(v: number): void {
+      // Never fight the user's cursor: only mirror while not being edited.
+      if (document.activeElement !== input) input.value = fmt(v, digits);
+    },
+  };
+}
+
 export function createSenseControls(
   bus: Bus,
   initial: SensePanelDescriptor[] = [],
@@ -161,14 +187,13 @@ export function createSenseControls(
     row.append(toggleBtn, soloBtn);
     card.append(row);
 
-    // intensity slider — the layer's signal value
+    // intensity slider — the layer's signal value (number field commits too)
     const intensityRow = document.createElement("div");
     intensityRow.className = "sc-row";
     const label = document.createElement("label");
     label.className = "sc-label";
     label.textContent = "Intensität";
-    const value = document.createElement("b");
-    value.className = "sc-val";
+    const value = numberValue(0.01, 2, (v) => bus.emit("sense:set", { id, value: v }));
     const slider = document.createElement("input");
     slider.type = "range";
     slider.min = "0";
@@ -177,7 +202,7 @@ export function createSenseControls(
     slider.addEventListener("input", () => {
       bus.emit("sense:set", { id, value: Number.parseFloat(slider.value) });
     });
-    intensityRow.append(label, value, slider);
+    intensityRow.append(label, value.input, slider);
     card.append(intensityRow);
 
     // parameter mount point (filled by descriptors)
@@ -190,7 +215,7 @@ export function createSenseControls(
       dot.classList.toggle("on", v > 0);
       pct.textContent = `${Math.round(v * 100)}%`;
       slider.value = String(v);
-      value.textContent = v.toFixed(2);
+      value.show(v);
     };
     reflect(signals.sense[id].peek());
     unsubscribes.push(signals.sense[id].subscribe(reflect));
@@ -248,23 +273,27 @@ export function createSenseControls(
         const l = document.createElement("label");
         l.className = "sc-label";
         l.textContent = control.label;
-        const val = document.createElement("b");
-        val.className = "sc-val";
         const digits = control.digits ?? 2;
         const input = document.createElement("input");
         input.type = "range";
         input.min = String(control.min);
         input.max = String(control.max);
         input.step = String(control.step);
-        const start = control.get();
-        input.value = String(start);
-        val.textContent = fmt(start, digits);
-        input.addEventListener("input", () => {
-          const v = Number.parseFloat(input.value);
-          val.textContent = fmt(v, digits);
+        // Typed values pass through UNCLAMPED — the slider covers the curated
+        // range, the number field goes past its preset maximum when needed.
+        const val = numberValue(control.step, digits, (v) => {
+          input.value = String(v); // browser clamps the slider display; the value stands
           bus.emit("sense:param", { id: descriptor.key, key: control.key, value: v });
         });
-        row.append(l, val, input);
+        const start = control.get();
+        input.value = String(start);
+        val.show(start);
+        input.addEventListener("input", () => {
+          const v = Number.parseFloat(input.value);
+          val.show(v);
+          bus.emit("sense:param", { id: descriptor.key, key: control.key, value: v });
+        });
+        row.append(l, val.input, input);
         mount.append(row);
       } else if (control.type === "color") {
         const row = document.createElement("label");
@@ -382,7 +411,14 @@ const CSS = `
 .sc-actions { display: flex; gap: 4px; margin: 4px 0; }
 .sc-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 8px; margin: 5px 0; }
 .sc-label { font-size: 11px; color: #a1a1aa; }
-.sc-val { font-size: 11px; color: #38bdf8; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.sc-val {
+  font-size: 11px; color: #38bdf8; font-weight: 600; text-align: right;
+  font-variant-numeric: tabular-nums; background: transparent; border: none;
+  font-family: inherit; width: 72px; padding: 0; outline: none; appearance: textfield;
+  -moz-appearance: textfield;
+}
+.sc-val::-webkit-outer-spin-button, .sc-val::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.sc-val:focus { border-bottom: 1px solid #38bdf8; }
 .sc-row input[type="range"] { grid-column: 1 / -1; width: 100%; height: 14px; accent-color: #38bdf8; cursor: pointer; }
 
 .sc-desc { margin: 4px 0; font-size: 10px; color: #71717a; line-height: 1.4; }

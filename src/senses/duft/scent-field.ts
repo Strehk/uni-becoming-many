@@ -69,6 +69,12 @@ export interface ScentFieldOptions {
 const CELL = 4; // spatial grid cell size (m)
 const CAP = 32; // max zones per cell
 
+/** Fraction of the air spread UNIFORMLY up to `airHeight` (the rest hugs the
+ *  ground via the `airGround` exponent). Without this canopy share, a high
+ *  Bodennähe setting leaves virtually no particles at tree-crown height, so
+ *  crown scent zones had nothing to colour and treetops read scentless. */
+const CANOPY_AIR = 0.25;
+
 /** The attribute type behind an `instancedArray` storage buffer. */
 type StorageAttr = THREE.StorageInstancedBufferAttribute | THREE.StorageBufferAttribute;
 
@@ -122,8 +128,9 @@ export class ScentField {
     for (let i = 0; i < this.maxCount; i++) {
       const a = Math.random() * Math.PI * 2;
       const r = Math.sqrt(Math.random()) * bound;
+      const yFrac = Math.random() < CANOPY_AIR ? Math.random() : Math.random() ** u.airGround.value;
       posArr[i * 3 + 0] = Math.cos(a) * r;
-      posArr[i * 3 + 1] = Math.random() ** u.airGround.value * u.airHeight.value + 0.03;
+      posArr[i * 3 + 1] = yFrac * u.airHeight.value + 0.03;
       posArr[i * 3 + 2] = Math.sin(a) * r;
     }
     const posBuf = instancedArray(posArr, "vec3");
@@ -210,14 +217,13 @@ export class ScentField {
             const h1 = hash(sd.add(t));
             const h2 = hash(sd.add(t).add(17.17));
             const h3 = hash(sd.add(t).add(43.7));
+            const h4 = hash(sd.add(t).add(91.3));
             const ang = h1.mul(6.2832);
             const rad = sqrt(h2).mul(bound);
+            // Canopy share: a fixed fraction respawns uniformly high (see CANOPY_AIR).
+            const yFrac = mix(h3.pow(u.airGround), h3, step(h4, float(CANOPY_AIR)));
             pos.assign(
-              vec3(
-                cos(ang).mul(rad),
-                h3.pow(u.airGround).mul(u.airHeight).add(0.03),
-                sin(ang).mul(rad),
-              ),
+              vec3(cos(ang).mul(rad), yFrac.mul(u.airHeight).add(0.03), sin(ang).mul(rad)),
             );
             scent.w.assign(0);
           },
@@ -281,11 +287,11 @@ export class ScentField {
       const h1 = hash(sd.add(1.71));
       const h2 = hash(sd.add(23.19));
       const h3 = hash(sd.add(57.31));
+      const h4 = hash(sd.add(77.7));
       const ang = h1.mul(6.2832);
       const rad = sqrt(h2).mul(bound);
-      pos.assign(
-        vec3(cos(ang).mul(rad), h3.pow(u.airGround).mul(u.airHeight).add(0.03), sin(ang).mul(rad)),
-      );
+      const yFrac = mix(h3.pow(u.airGround), h3, step(h4, float(CANOPY_AIR)));
+      pos.assign(vec3(cos(ang).mul(rad), yFrac.mul(u.airHeight).add(0.03), sin(ang).mul(rad)));
       scent.w.assign(0);
     })().compute(this.maxCount);
 

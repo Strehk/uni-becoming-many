@@ -13,7 +13,7 @@
 //   - `sense:param {id:"duft", key, value}` bus commands write every prototype
 //     dev-tool parameter (wind, particles, per-type intensity, performance).
 
-import type * as THREE from "three/webgpu";
+import * as THREE from "three/webgpu";
 import type { SensePanelDescriptor } from "../../dev-console/sense-controls.ts";
 import type { Bus } from "../../signals/index.ts";
 import { signals } from "../../signals/index.ts";
@@ -345,13 +345,53 @@ export function createDuftSense(
   ground: GroundSource,
   zoneSource?: ZoneSource,
 ): DuftSense {
-  const field = new ScentField({ fieldRadius: FIELD_RADIUS });
+  const field = new ScentField({ fieldRadius: FIELD_RADIUS, initialCount: 400_000 });
   scene.add(field.object);
   field.object.visible = false;
 
   let anchor: { x: number; y: number; z: number } | null = null;
   let target = signals.sense.duft.peek();
   let frame = 0;
+
+  // ── Duftzonen-Debugansicht: one wireframe sphere per zone, type-coloured. ──
+  let showZones = false;
+  let zoneViz: THREE.InstancedMesh | null = null;
+  let lastZones: readonly ScentZone[] = [];
+
+  const disposeZoneViz = (): void => {
+    if (!zoneViz) return;
+    zoneViz.removeFromParent();
+    zoneViz.geometry.dispose();
+    (zoneViz.material as THREE.Material).dispose();
+    zoneViz = null;
+  };
+
+  const rebuildZoneViz = (): void => {
+    disposeZoneViz();
+    if (!showZones || !anchor || lastZones.length === 0) return;
+
+    const geometry = new THREE.SphereGeometry(1, 12, 8);
+    const material = new THREE.MeshBasicNodeMaterial();
+    material.wireframe = true;
+    material.transparent = true;
+    material.opacity = 0.3;
+    material.depthWrite = false;
+
+    const mesh = new THREE.InstancedMesh(geometry, material, lastZones.length);
+    mesh.frustumCulled = false;
+    const m = new THREE.Matrix4();
+    const c = new THREE.Color();
+    const spawnRadius = typeof u.spawnRadius.value === "number" ? u.spawnRadius.value : 1;
+    for (const [i, zone] of lastZones.entries()) {
+      const r = Math.max(0.1, zone.radius * spawnRadius);
+      m.makeScale(r, r, r);
+      m.setPosition(anchor.x + zone.x, anchor.y + zone.y, anchor.z + zone.z);
+      mesh.setMatrixAt(i, m);
+      mesh.setColorAt(i, c.setHex(SCENT_TYPES[zone.type]?.color ?? 0xffffff));
+    }
+    scene.add(mesh);
+    zoneViz = mesh;
+  };
 
   const offSignal = signals.sense.duft.subscribe((v) => {
     target = v;
@@ -367,8 +407,10 @@ export function createDuftSense(
     // Real flora first: zones from the actually-placed plants around the anchor.
     // Falls back to the procedural guesser while the flora is still streaming in.
     const grown = zoneSource?.(px, gy, pz, FIELD_RADIUS - 6) ?? [];
-    field.setZones(grown.length > 0 ? grown : generateZones(px, gy, pz, ground));
+    lastZones = grown.length > 0 ? grown : generateZones(px, gy, pz, ground);
+    field.setZones(lastZones);
     field.requestReseed();
+    rebuildZoneViz();
     return true;
   };
 
@@ -401,6 +443,11 @@ export function createDuftSense(
       field.setCompaction(value);
       return;
     }
+    if (key === "showZones" && typeof value === "boolean") {
+      showZones = value;
+      rebuildZoneViz();
+      return;
+    }
     if (key.startsWith("typeIntensity.") && typeof value === "number") {
       setTypeIntensity(Number.parseInt(key.slice("typeIntensity.".length), 10), value);
       return;
@@ -419,8 +466,16 @@ export function createDuftSense(
 
   const pose = signals.playerPose.peek();
 
+  const controls = buildControls(field);
+  controls.controls.push({
+    type: "check",
+    key: "showZones",
+    label: "Duftzonen anzeigen",
+    get: () => showZones,
+  });
+
   return {
-    controls: buildControls(field),
+    controls,
     update(dt: number): void {
       // Ease the layer fade.
       const current = typeof u.fade.value === "number" ? u.fade.value : 0;
@@ -432,6 +487,7 @@ export function createDuftSense(
       const fade = typeof u.fade.value === "number" ? u.fade.value : 0;
       const active = fade > 0.001;
       field.object.visible = active;
+      if (zoneViz) zoneViz.visible = active && showZones;
       if (!active) {
         return; // no compute while fully faded out — the field costs nothing
       }
@@ -474,6 +530,7 @@ export function createDuftSense(
     dispose(): void {
       offSignal();
       offParams();
+      disposeZoneViz();
       field.dispose();
     },
   };

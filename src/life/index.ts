@@ -61,8 +61,14 @@ export interface ScentSpot {
 }
 
 /** Cap on how many spots one query returns — matches the scent field's zone
- *  buffer scale; nearest spots win so the plume field stays centred on the player. */
-const MAX_SCENT_SPOTS = 160;
+ *  buffer capacity (maxZones 192); nearest spots win so the plume field stays
+ *  centred on the player. */
+const MAX_SCENT_SPOTS = 192;
+
+/** Species at least this tall (metres, before scale jitter) get a SECOND scent
+ *  spot high in the crown — one zone at `heightOffset` can't span a 9 m pine,
+ *  and without it the treetops read scentless. */
+const CROWN_SPOT_MIN_HEIGHT = 4;
 
 export interface Life {
   /** Parent of every species mesh; added to the scene on creation. */
@@ -143,17 +149,39 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
         s.instances.addChunk(k, block);
 
         // Record the placed instances' scent emissions (matrix column 3 is the
-        // instance translation — the plant's foot on the ground).
+        // instance translation — the plant's foot on the ground). Offsets and
+        // radii scale with the instance (column 0's norm — scatter scales are
+        // uniform), and tall species emit a second spot high in the crown so a
+        // 9 m pine smells at the top, not only at the trunk.
         const scent = s.def.senses?.scent;
         if (scent) {
           for (let i = 0; i < block.count; i++) {
+            const m = i * 16;
+            const x = block.matrices[m + 12] ?? 0;
+            const base = block.matrices[m + 13] ?? 0;
+            const z = block.matrices[m + 14] ?? 0;
+            const c0 = block.matrices[m] ?? 1;
+            const c1 = block.matrices[m + 1] ?? 0;
+            const c2 = block.matrices[m + 2] ?? 0;
+            const scale = Math.sqrt(c0 * c0 + c1 * c1 + c2 * c2) || 1;
+
             spots.push({
-              x: block.matrices[i * 16 + 12] ?? 0,
-              y: (block.matrices[i * 16 + 13] ?? 0) + scent.heightOffset,
-              z: block.matrices[i * 16 + 14] ?? 0,
-              radius: scent.radius,
+              x,
+              y: base + scent.heightOffset * scale,
+              z,
+              radius: scent.radius * scale,
               type: scent.type,
             });
+            const height = s.def.targetHeight * scale;
+            if (s.def.targetHeight >= CROWN_SPOT_MIN_HEIGHT) {
+              spots.push({
+                x,
+                y: base + height * 0.8,
+                z,
+                radius: scent.radius * scale * 0.9,
+                type: scent.type,
+              });
+            }
           }
         }
       }
