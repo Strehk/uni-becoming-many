@@ -47,8 +47,8 @@
         "rangeSoft": 80,
         "blendMode": "normal",
         "params": {
-          "tempMin": 285,
-          "tempMax": 330,
+          "tempMin": 283,
+          "tempMax": 312,
           "gamma": 1,
           "c0": "#000005",
           "c1": "#4a0d67",

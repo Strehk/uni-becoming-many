@@ -14,8 +14,13 @@ const GRAU = { c0: "#000000", c1: "#565656", c2: "#ababab", c3: "#ffffff" };
 const ARKTIS = { c0: "#03045e", c1: "#0077b6", c2: "#90e0ef", c3: "#ffffff" };
 
 export function createInfrared(): ShaderSense {
-  const tempMin = scalarUniform(285.0);
-  const tempMax = scalarUniform(330.0);
+  // Window defaults hug the scene's ACTUAL span (~283-312 K: water 285, ground
+  // 287±10 facing, grass 293, flora 293-297, sun-baked rock up to ~305) so the
+  // full palette is used — a thermal camera's auto-range, hand-tuned. The old
+  // [285, 330] left the top half of the palette (the hot whites) unused and
+  // everything mushed into violet.
+  const tempMin = scalarUniform(283.0);
+  const tempMax = scalarUniform(312.0);
   const gamma = scalarUniform(1.0);
   const c0 = colorUniform(IRONBOW.c0);
   const c1 = colorUniform(IRONBOW.c1);

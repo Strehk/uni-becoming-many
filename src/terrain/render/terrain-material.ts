@@ -97,10 +97,12 @@ export function createTerrainMaterial(
     let base: Node<"vec3"> | Node<"color"> = albedo;
     if (layers) {
       // The terrain as SenseSurface. tempK: ~287 K base, sun-facing slopes warm by up
-      // to +16 K, altitude cools (−0.1 K/m). uvSignal: fluorescent lichen on steep
-      // rock faces + a faint foliage sheen on the rest.
+      // to +10 K, altitude cools (−0.1 K/m). Facing is kept BELOW the flora's
+      // metabolic offsets (+6..10 K over ground) so under infrarot the living
+      // things read warmer than the hillsides — temperature, not slope lighting.
+      // uvSignal: fluorescent lichen on steep rock faces + a faint foliage sheen.
       const altitude = positionWorld.y.max(0.0);
-      const tempK = float(287).add(facing.mul(16)).sub(altitude.mul(0.1));
+      const tempK = float(287).add(facing.mul(10)).sub(altitude.mul(0.1));
 
       const slope = float(1).sub(normalWorld.y.clamp(0, 1));
       const lichen = lichenSignal(slope);

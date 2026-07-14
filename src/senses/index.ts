@@ -126,7 +126,8 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
     rimColor: 0xffffff,
     dustStrength: 1,
   },
-  // 3 — thermal: wide field, heat tint, warm edges.
+  // 3 — thermal: wide field, heat tint. Rim kept LOW: a strong warm fresnel edge
+  // reads as sunset lighting, not as a temperature measurement.
   infrarot: {
     id: "infrarot",
     label: SENSE_LABELS.infrarot,
@@ -136,7 +137,7 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
     fogNear: 80,
     fogFar: 600,
     rimPower: 2.2,
-    rimStrength: 0.6,
+    rimStrength: 0.2,
     colorNear: 0xffb14e,
     colorFar: 0x3a0d52,
     fogColor: 0x180a14,
