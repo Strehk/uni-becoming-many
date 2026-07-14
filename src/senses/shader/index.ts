@@ -50,7 +50,7 @@ export {
   createDefaultSenses,
   createEcholocation,
   createFarben,
-  createInfrared,
+  createThermalSicht,
   createUV,
 } from "./senses/index.ts";
 

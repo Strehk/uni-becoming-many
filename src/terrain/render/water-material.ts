@@ -54,6 +54,7 @@ export function createWaterMaterial(
         uvSignal: float(0),
         distance: positionView.z.negate(),
         light: float(1),
+        thermalWater: float(1),
       });
     } else {
       const sunDir = vec3(0.4, 0.7, 0.4);

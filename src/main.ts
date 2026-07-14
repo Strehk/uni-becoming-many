@@ -36,6 +36,7 @@ import { createMotionSense } from "./senses/motion/index.ts";
 import { createNetzwerkSense } from "./senses/netzwerk/index.ts";
 import { createRundumSense } from "./senses/rundum/index.ts";
 import { loadSenseState, savedSenseState, serializeSenseState } from "./senses/state.ts";
+import { createThermalSky } from "./senses/thermal_sicht/sky.js";
 import { bus, signals } from "./signals/index.ts";
 import { createSynthOverlay } from "./synth/index.ts";
 import { createTerrainWorld } from "./terrain/index.ts";
@@ -84,6 +85,8 @@ window.addEventListener("pagehide", () => senses.dispose());
 // as one uniform white world), near-black under echo, violet under UV, etc. This is the
 // live `fogColor` the SenseManager lerps, so the background transitions with the senses.
 renderer.scene.background = senses.uniforms.fogColor.value;
+const thermalSky = createThermalSky(renderer.scene, senses.uniforms.fogColor.value);
+window.addEventListener("pagehide", () => thermalSky.dispose());
 
 // Flora & Fauna tuning (density / forest shape / flocks / mushrooms), committed to
 // src/flora-fauna/state.json. Read once here and fed straight into flora + fauna so
@@ -516,6 +519,7 @@ renderer.start((dtSeconds) => {
   syncCameraPos(renderer.instance, renderer.camera);
 
   senses.update(dtSeconds); // writes senseProgress; eases the view uniforms
+  thermalSky.update(dtSeconds); // cold false-color sky, gated only by infrarot
   magnetfeld.update(dtSeconds); // sky dome fade + follow player + spine time
   duft.update(clock.delta); // scent field: fade, re-anchor, GPU sim (spine-scaled dt)
   creatures.update(clock.delta); // boids swarm + mushroom anchors (obey pause/timeScale)

@@ -55,6 +55,7 @@ import { distanceFog, fresnelEdge, viewReveal } from "../render/tsl-kit.ts";
 import type { KitUniforms } from "../render/uniforms.ts";
 import { TAU } from "./matrix.ts";
 import type { SpeciesDef } from "./species.ts";
+import { isThermalFlora } from "./species.ts";
 import type { LifeUniforms } from "./uniforms.ts";
 
 /** Radians per second of the wind's fundamental. */
@@ -69,6 +70,14 @@ export interface FloraSurfaceNodes {
   uvSignal: Node<"float">;
   distance: Node<"float">;
   light: Node<"float">;
+  thermalBird?: Node<"float">;
+  thermalTree?: Node<"float">;
+  thermalGround?: Node<"float">;
+  thermalGrass?: Node<"float">;
+  thermalWater?: Node<"float">;
+  thermalObjectVariation?: Node<"float">;
+  thermalCenter?: Node<"vec3">;
+  thermalRadius?: Node<"float">;
 }
 
 /** The sense-layer compositor flora consumes (implemented by
@@ -146,6 +155,10 @@ export function createFloraMaterial(
         uvSignal: float(uvSignal),
         distance: positionView.z.negate(),
         light: facing.mul(0.65).add(0.35),
+        thermalTree: float(isThermalFlora(def) ? 1 : 0),
+        thermalObjectVariation: attribute<"float">("instanceThermalVariation", "float"),
+        thermalCenter: attribute<"vec3">("instanceThermalCenter", "vec3"),
+        thermalRadius: attribute<"float">("instanceThermalRadius", "float"),
       });
     }
     const fogged = distanceFog(base, u.fogColor, u.fogNear, u.fogFar);

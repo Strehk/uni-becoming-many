@@ -131,6 +131,25 @@ export interface SpeciesDef {
   readonly senses?: SpeciesSenseProps;
 }
 
+/** Species whose geometry is dead wood or mineral matter. Everything else in the
+ * flora registry is living vegetation/fungi and participates in thermalTree. */
+const THERMALLY_INERT_SPECIES: ReadonlySet<SpeciesId> = new Set([
+  "dead-tree",
+  "dead-pine",
+  "stump",
+  "stump-birch",
+  "branch-pine",
+  "branch-birch",
+  "rock",
+  "rock-small",
+  "rock-huge",
+  "moss-rock",
+]);
+
+export function isThermalFlora(def: SpeciesDef): boolean {
+  return !THERMALLY_INERT_SPECIES.has(def.id);
+}
+
 // ── Woodland placement helpers (shared shapes, one closure per species) ──────
 
 /** Conifers: full strength in Nadelwald zones of Forest, thinned on clearings.

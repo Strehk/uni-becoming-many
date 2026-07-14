@@ -83,6 +83,9 @@ export function createGrassMaterial(
   const vWorldPos = varying(vec3(0));
   const vClumpSeed = varying(float(0));
   const vBladeSeed = varying(float(0));
+  const vThermalCenter = varying(vec3(0));
+  const vThermalRadius = varying(float(1));
+  const vThermalVariation = varying(float(0));
 
   // ── Vertex: reconstruct the blade in world space ──
   const grassVertex = Fn(() => {
@@ -183,6 +186,9 @@ export function createGrassMaterial(
     vWorldPos.assign(worldPosFinal);
     vClumpSeed.assign(clumpSeed01);
     vBladeSeed.assign(perBladeHash01);
+    vThermalCenter.assign(instancePos.add(vec3(0, height.mul(0.5), 0)));
+    vThermalRadius.assign(height.mul(0.55));
+    vThermalVariation.assign(perBladeHash01.mul(2).sub(1));
     return worldPosFinal;
   });
 
@@ -210,6 +216,10 @@ export function createGrassMaterial(
         uvSignal: float(0.3),
         distance: positionView.z.negate(),
         light: facing.mul(0.65).add(0.35),
+        thermalGrass: float(1),
+        thermalObjectVariation: vThermalVariation,
+        thermalCenter: vThermalCenter,
+        thermalRadius: vThermalRadius,
       });
     }
 

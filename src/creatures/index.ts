@@ -23,7 +23,16 @@
 
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js";
-import { float, mix, normalWorld, positionView, vec3 } from "three/tsl";
+import {
+  float,
+  mix,
+  modelPosition,
+  modelRadius,
+  normalWorld,
+  positionView,
+  uniform,
+  vec3,
+} from "three/tsl";
 import * as THREE from "three/webgpu";
 import type { Node } from "three/webgpu";
 import { DEFAULT_CONFIG, type FaunaConfig } from "../flora-fauna/config.ts";
@@ -151,8 +160,24 @@ export async function createCreatures(
   // ── the bird asset ──
   const gltf = await new GLTFLoader().loadAsync(BIRD_MODEL_URL);
   const flapClip = gltf.animations[0];
-  const span = new THREE.Box3().setFromObject(gltf.scene).getSize(new THREE.Vector3()).x;
+  const birdBounds = new THREE.Box3().setFromObject(gltf.scene);
+  const span = birdBounds.getSize(new THREE.Vector3()).x;
+  const sharedModelRadius = Math.hypot(
+    Math.max(Math.abs(birdBounds.min.x), Math.abs(birdBounds.max.x)),
+    Math.max(Math.abs(birdBounds.min.y), Math.abs(birdBounds.max.y)),
+    Math.max(Math.abs(birdBounds.min.z), Math.abs(birdBounds.max.z)),
+  );
   const modelScale = BIRD_WINGSPAN / Math.max(span, 1e-4);
+
+  // All four bird parts sit at the same model origin, but their individual geometry
+  // spheres have different radii. modelPosition is therefore already shared; give
+  // every part the full-bird radius so modelRadius also describes the whole bird and
+  // the screen-space thermal gradient cannot restart at a material/mesh boundary.
+  gltf.scene.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      child.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), sharedModelRadius);
+    }
+  });
 
   // UNLIT (the scene has no lights — a standard material would render black, see
   // src/life/material.ts), composited through the sense layers like flora: the
@@ -171,6 +196,10 @@ export async function createCreatures(
 
     const material = new THREE.MeshBasicNodeMaterial();
     material.side = THREE.DoubleSide;
+    const thermalVariation = uniform(0).onObjectUpdate(({ object }) => {
+      const value: unknown = object?.userData["thermalVariation"];
+      return typeof value === "number" ? value : 0;
+    });
     const rewire = (): void => {
       const { uniforms: u, layers } = senseOpts;
       const albedo = vec3(color.r, color.g, color.b);
@@ -183,6 +212,10 @@ export async function createCreatures(
           uvSignal: float(0.4),
           distance: positionView.z.negate(),
           light: facing.mul(0.65).add(0.35),
+          thermalBird: float(1),
+          thermalObjectVariation: thermalVariation,
+          thermalCenter: modelPosition,
+          thermalRadius: modelRadius,
         });
       }
       if (u) {
@@ -204,12 +237,14 @@ export async function createCreatures(
    *  flap phase/tempo. The wrapper turns the file's −Z head to our +Z forward. */
   const buildBird = (): { root: THREE.Group; mixer: THREE.AnimationMixer } => {
     const model = cloneSkeleton(gltf.scene);
+    const thermalVariation = Math.random() * 2 - 1;
     model.rotation.y = Math.PI;
     model.scale.setScalar(modelScale);
     model.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return;
       const source = Array.isArray(child.material) ? child.material[0] : child.material;
       if (source) child.material = materialFor(source);
+      child.userData["thermalVariation"] = thermalVariation;
       child.frustumCulled = false; // skinned bounds drift; the flock streams anyway
     });
     const root = new THREE.Group();

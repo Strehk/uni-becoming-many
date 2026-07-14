@@ -49,6 +49,9 @@ interface PartMesh {
   readonly mesh: THREE.InstancedMesh;
   readonly matrix: THREE.StorageInstancedBufferAttribute;
   readonly tint: THREE.InstancedBufferAttribute;
+  readonly thermalCenter: THREE.InstancedBufferAttribute;
+  readonly thermalRadius: THREE.InstancedBufferAttribute;
+  readonly thermalVariation: THREE.InstancedBufferAttribute;
   /** The part's material colour — the base every instance tint is jittered around. */
   readonly baseColor: THREE.Color;
 }
@@ -109,7 +112,19 @@ export class SpeciesInstances {
         MAT4,
       );
       const tint = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity * VEC3), VEC3);
+      const thermalCenter = new THREE.InstancedBufferAttribute(
+        new Float32Array(this.capacity * VEC3),
+        VEC3,
+      );
+      const thermalRadius = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity), 1);
+      const thermalVariation = new THREE.InstancedBufferAttribute(
+        new Float32Array(this.capacity),
+        1,
+      );
       geometry.setAttribute("instanceTint", tint);
+      geometry.setAttribute("instanceThermalCenter", thermalCenter);
+      geometry.setAttribute("instanceThermalRadius", thermalRadius);
+      geometry.setAttribute("instanceThermalVariation", thermalVariation);
 
       const handle = materialFor(part);
       if (!this.materials.includes(handle)) this.materials.push(handle);
@@ -119,8 +134,19 @@ export class SpeciesInstances {
       mesh.count = 0; // packed total; grows as chunks stream in
       matrix.setUsage(THREE.DynamicDrawUsage);
       tint.setUsage(THREE.DynamicDrawUsage);
+      thermalCenter.setUsage(THREE.DynamicDrawUsage);
+      thermalRadius.setUsage(THREE.DynamicDrawUsage);
+      thermalVariation.setUsage(THREE.DynamicDrawUsage);
 
-      this.parts.push({ mesh, matrix, tint, baseColor: part.baseColor });
+      this.parts.push({
+        mesh,
+        matrix,
+        tint,
+        thermalCenter,
+        thermalRadius,
+        thermalVariation,
+        baseColor: part.baseColor,
+      });
     }
   }
 
@@ -158,12 +184,30 @@ export class SpeciesInstances {
       part.matrix.array.set(block.matrices.subarray(0, used * MAT4), offset * MAT4);
 
       const tints = part.tint.array;
+      const centers = part.thermalCenter.array;
+      const radii = part.thermalRadius.array;
+      const variations = part.thermalVariation.array;
       for (let i = 0; i < used; i++) {
         const j = (offset + i) * VEC3;
+        const matrixOffset = i * MAT4;
         const jitter = block.jitter[i] ?? 1;
         tints[j] = part.baseColor.r * jitter;
         tints[j + 1] = part.baseColor.g * jitter;
         tints[j + 2] = part.baseColor.b * jitter;
+
+        const x = block.matrices[matrixOffset + 12] ?? 0;
+        const y = block.matrices[matrixOffset + 13] ?? 0;
+        const z = block.matrices[matrixOffset + 14] ?? 0;
+        const sx = block.matrices[matrixOffset] ?? 1;
+        const sy = block.matrices[matrixOffset + 1] ?? 0;
+        const sz = block.matrices[matrixOffset + 2] ?? 0;
+        const scale = Math.hypot(sx, sy, sz);
+        const height = this.def.targetHeight * scale;
+        centers[j] = x;
+        centers[j + 1] = y + height * 0.5;
+        centers[j + 2] = z;
+        radii[offset + i] = height * 0.55;
+        variations[offset + i] = stableThermalVariation(x, z);
       }
 
       this.markDirty(part);
@@ -194,6 +238,13 @@ export class SpeciesInstances {
             this.liveCount * MAT4,
           );
           part.tint.array.copyWithin(block.offset * VEC3, tailStart * VEC3, this.liveCount * VEC3);
+          part.thermalCenter.array.copyWithin(
+            block.offset * VEC3,
+            tailStart * VEC3,
+            this.liveCount * VEC3,
+          );
+          part.thermalRadius.array.copyWithin(block.offset, tailStart, this.liveCount);
+          part.thermalVariation.array.copyWithin(block.offset, tailStart, this.liveCount);
         }
       }
       this.liveCount -= block.length;
@@ -231,6 +282,9 @@ export class SpeciesInstances {
   private markDirty(part: PartMesh): void {
     part.matrix.needsUpdate = true;
     part.tint.needsUpdate = true;
+    part.thermalCenter.needsUpdate = true;
+    part.thermalRadius.needsUpdate = true;
+    part.thermalVariation.needsUpdate = true;
   }
 
   dispose(): void {
@@ -246,4 +300,10 @@ export class SpeciesInstances {
     for (const handle of this.materials) handle.material.dispose();
     this.materials.length = 0;
   }
+}
+
+/** Deterministic per-plant variation from its fixed world position, in [-1, 1]. */
+function stableThermalVariation(x: number, z: number): number {
+  const value = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+  return (value - Math.floor(value)) * 2 - 1;
 }
