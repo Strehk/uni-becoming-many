@@ -17,6 +17,7 @@ import type { Creatures } from "../../creatures/index.ts";
 import type { SensePanelDescriptor } from "../../dev-console/sense-controls.ts";
 import type { Bus } from "../../signals/index.ts";
 import { signals } from "../../signals/index.ts";
+import { type EmissionProfile, createDefaultEmissionProfile } from "./emission-profiles.ts";
 import { AnimatedVertexSampler } from "./sampler.ts";
 import { type MotionTarget, type MotionTargetGroup, normalizeTargets } from "./target-adapters.ts";
 import { ParticleTrailBuffer } from "./trail-buffer.ts";
@@ -42,13 +43,13 @@ export interface MotionSense {
 export function createMotionSense(scene: THREE.Scene, bus: Bus, creatures: Creatures): MotionSense {
   const group = new THREE.Group();
   group.name = "motion-particle-effect";
-  // maxParticles covers the whole flock set at the LONGEST trail setting:
-  // 4 flocks × 24 birds × ~28 verts × 40 lifetime frames ≈ 108 k (plain float
-  // buffers, ~6 MB). particleSize 0.18: flocks roam far rings (35-280 m) — the
-  // ink-dark trails must read clearly when a swarm passes at a hundred metres.
+  // maxParticles covers the whole flock set: 4 flocks × 24 birds × ~100 strided
+  // verts of the rigged model × up to 40 lifetime frames (plain float buffers,
+  // ~10 MB). particleSize 0.18: flocks roam far rings (35-280 m) — the ink-dark
+  // trails must read clearly when a swarm passes at a hundred metres.
   const trail = new ParticleTrailBuffer(
     { lifetimeFrames: 14, particleSize: 0.18, motionGain: 8 },
-    128_000,
+    192_000,
   );
   group.add(trail.points);
   group.visible = false;
@@ -72,9 +73,24 @@ export function createMotionSense(scene: THREE.Scene, bus: Bus, creatures: Creat
     trail.resize(totalVertexCount);
   };
 
-  // The birds are the initial (and currently only) target class.
+  // The birds are the initial (and currently only) target class. The rigged
+  // model carries ~300 vertices per bird (96 birds ≈ 28.5 k) — far denser than
+  // the trail budget needs, so a stride keeps every third vertex before the
+  // body-centre thinning applies. Trails stay per-bird continuous either way.
+  const base = createDefaultEmissionProfile();
+  const strided: EmissionProfile = {
+    reset: () => base.reset?.(),
+    evaluate(vertex, bounds, context) {
+      if (context.vertexIndex % 3 !== 0) return { emits: false };
+      return base.evaluate(vertex, bounds, context);
+    },
+  };
   rebuildTargets([
-    { className: "birds", objects: creatures.birds.map((b) => ({ object: b.object })) },
+    {
+      className: "birds",
+      emissionProfile: strided,
+      objects: creatures.birds.map((b) => ({ object: b.object })),
+    },
   ]);
 
   const setEnabled = (next: boolean): void => {

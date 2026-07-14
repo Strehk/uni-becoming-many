@@ -167,7 +167,7 @@ window.addEventListener("pagehide", () => duft.dispose());
 
 // Creatures substrate: the boids bird swarm + mushroom spawn points that the
 // netzwerk / motion senses perceive. Plain world state, no sense logic.
-const creatures = createCreatures(renderer.scene, bus, (x, z) => world.groundHeightAt(x, z), {
+const creatures = await createCreatures(renderer.scene, bus, (x, z) => world.groundHeightAt(x, z), {
   uniforms: senses.uniforms,
   layers: senses.shader.compositor,
 });

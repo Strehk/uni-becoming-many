@@ -21,6 +21,8 @@
 // Everything here is plain world state — no sense logic, no signal writes except
 // the mushroom-change event. Visual senses subscribe to what they need.
 
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js";
 import { float, mix, normalWorld, positionView, vec3 } from "three/tsl";
 import * as THREE from "three/webgpu";
 import type { Node } from "three/webgpu";
@@ -63,6 +65,13 @@ const MAX_FORCE = 30;
 
 const MIN_ALTITUDE = 8; // metres above ground
 const MAX_ALTITUDE = 60;
+
+/** The rigged bird asset (Erasmus' model). Head faces −Z in the file — the
+ *  wrapper is turned 180° so our +Z flight forward matches; the armature's
+ *  single clip (flap cycle) plays per bird with jittered phase/tempo. */
+const BIRD_MODEL_URL = "/creatures/bird_erasmus.glb";
+/** Target wingspan in metres (the file spans ~17.4 units). */
+const BIRD_WINGSPAN = 1.05;
 const MUSHROOM_COUNT = 24;
 const MUSHROOM_RADIUS = 90;
 /** Re-scatter the mushrooms when the player is farther than this from their anchor. */
@@ -91,10 +100,10 @@ export interface Creatures {
 }
 
 interface Bird extends BirdActor {
-  readonly leftWing: THREE.Mesh;
-  readonly rightWing: THREE.Mesh;
+  /** Drives the per-bird wander jitter (a stable random phase). */
   readonly flapPhase: number;
-  readonly flapSpeed: number;
+  /** The armature's flap-cycle mixer — advanced with the virtual clock. */
+  readonly mixer: THREE.AnimationMixer;
   /** Which flock this bird belongs to — neighbours are flock-internal. */
   readonly flock: number;
 }
@@ -106,34 +115,6 @@ interface Flock {
   age: number;
 }
 
-/** Low-poly bird: a body cone + two hinged wing plates (procedural flap = the
- *  local vertex motion the motion-particle sense feeds on). */
-function buildBird(material: THREE.Material): {
-  root: THREE.Group;
-  leftWing: THREE.Mesh;
-  rightWing: THREE.Mesh;
-} {
-  const root = new THREE.Group();
-
-  const body = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.9, 5), material);
-  body.geometry.rotateX(Math.PI / 2); // point forward (−z → +z flight axis)
-  root.add(body);
-
-  const wingGeo = new THREE.PlaneGeometry(0.9, 0.34, 2, 1);
-  wingGeo.translate(0.45, 0, 0); // hinge at the body edge
-
-  const leftWing = new THREE.Mesh(wingGeo, material);
-  leftWing.position.set(0.08, 0.02, 0);
-  root.add(leftWing);
-
-  const rightWing = new THREE.Mesh(wingGeo, material);
-  rightWing.position.set(-0.08, 0.02, 0);
-  rightWing.rotation.y = Math.PI; // mirror
-  root.add(rightWing);
-
-  return { root, leftWing, rightWing };
-}
-
 export interface CreatureSenseOptions {
   /** The live sense uniforms (the same set terrain/flora wear). */
   uniforms?: KitUniforms;
@@ -142,12 +123,12 @@ export interface CreatureSenseOptions {
   layers?: FloraLayerCompositor;
 }
 
-export function createCreatures(
+export async function createCreatures(
   scene: THREE.Scene,
   bus: Bus,
   ground: GroundSource,
   senseOpts: CreatureSenseOptions = {},
-): Creatures {
+): Promise<Creatures> {
   const group = new THREE.Group();
   group.name = "creatures";
   // Creatures are perception-dependent: hidden in the white void by default, revealed
@@ -155,36 +136,82 @@ export function createCreatures(
   group.visible = false;
   scene.add(group);
 
+  // ── the bird asset ──
+  const gltf = await new GLTFLoader().loadAsync(BIRD_MODEL_URL);
+  const flapClip = gltf.animations[0];
+  const span = new THREE.Box3().setFromObject(gltf.scene).getSize(new THREE.Vector3()).x;
+  const modelScale = BIRD_WINGSPAN / Math.max(span, 1e-4);
+
   // UNLIT (the scene has no lights — a standard material would render black, see
   // src/life/material.ts), composited through the sense layers like flora: the
-  // grey-blue plumage is the `farben` albedo, while `infrarot` reads a warm
-  // METABOLIC body temperature (~311 K — near the thermal window's hot end, so
-  // living birds glow against the cool ground and sky).
-  const material = new THREE.MeshBasicNodeMaterial();
-  material.side = THREE.DoubleSide;
-  const rewireMaterial = (): void => {
-    const { uniforms: u, layers } = senseOpts;
-    const albedo = vec3(0.29, 0.33, 0.4); // ~#8e98a8 in linear space
-    let base: Node<"vec3"> | Node<"color"> = albedo;
-    if (layers) {
-      const facing = normalWorld.dot(vec3(0.4, 0.75, 0.3).normalize()).clamp(0, 1);
-      base = layers.buildColorNode({
-        albedo,
-        tempK: float(310).add(facing.mul(2)),
-        uvSignal: float(0.4),
-        distance: positionView.z.negate(),
-        light: facing.mul(0.65).add(0.35),
-      });
-    }
-    if (u) {
-      const fogged = distanceFog(base, u.fogColor, u.fogNear, u.fogFar);
-      base = mix(u.fogColor, fogged, viewReveal(u.viewRadius, u.revealSoftness));
-    }
-    material.colorNode = base;
-    material.needsUpdate = true;
+  // model's own part colours (plumage, belly, beak) are the `farben` albedo,
+  // while `infrarot` reads a warm METABOLIC body temperature (~311 K — near the
+  // thermal window's hot end, so living birds glow against ground and sky).
+  const materials = new Map<string, { material: THREE.MeshBasicNodeMaterial; rewire(): void }>();
+  const materialFor = (source: THREE.Material): THREE.MeshBasicNodeMaterial => {
+    const color =
+      "color" in source && source.color instanceof THREE.Color
+        ? source.color
+        : new THREE.Color(0x8e98a8);
+    const key = color.getHexString();
+    const cached = materials.get(key);
+    if (cached) return cached.material;
+
+    const material = new THREE.MeshBasicNodeMaterial();
+    material.side = THREE.DoubleSide;
+    const rewire = (): void => {
+      const { uniforms: u, layers } = senseOpts;
+      const albedo = vec3(color.r, color.g, color.b);
+      let base: Node<"vec3"> | Node<"color"> = albedo;
+      if (layers) {
+        const facing = normalWorld.dot(vec3(0.4, 0.75, 0.3).normalize()).clamp(0, 1);
+        base = layers.buildColorNode({
+          albedo,
+          tempK: float(310).add(facing.mul(2)),
+          uvSignal: float(0.4),
+          distance: positionView.z.negate(),
+          light: facing.mul(0.65).add(0.35),
+        });
+      }
+      if (u) {
+        const fogged = distanceFog(base, u.fogColor, u.fogNear, u.fogFar);
+        base = mix(u.fogColor, fogged, viewReveal(u.viewRadius, u.revealSoftness));
+      }
+      material.colorNode = base;
+      material.needsUpdate = true;
+    };
+    rewire();
+    materials.set(key, { material, rewire });
+    return material;
   };
-  rewireMaterial();
-  const unsubscribeLayers = senseOpts.layers?.onStructureChange(rewireMaterial);
+  const unsubscribeLayers = senseOpts.layers?.onStructureChange(() => {
+    for (const entry of materials.values()) entry.rewire();
+  });
+
+  /** One skinned bird instance: cloned armature, our sense materials, jittered
+   *  flap phase/tempo. The wrapper turns the file's −Z head to our +Z forward. */
+  const buildBird = (): { root: THREE.Group; mixer: THREE.AnimationMixer } => {
+    const model = cloneSkeleton(gltf.scene);
+    model.rotation.y = Math.PI;
+    model.scale.setScalar(modelScale);
+    model.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return;
+      const source = Array.isArray(child.material) ? child.material[0] : child.material;
+      if (source) child.material = materialFor(source);
+      child.frustumCulled = false; // skinned bounds drift; the flock streams anyway
+    });
+    const root = new THREE.Group();
+    root.add(model);
+
+    const mixer = new THREE.AnimationMixer(model);
+    if (flapClip) {
+      const action = mixer.clipAction(flapClip);
+      action.play();
+      action.time = Math.random() * flapClip.duration;
+      action.timeScale = 0.9 + Math.random() * 0.4;
+    }
+    return { root, mixer };
+  };
 
   const pose = signals.playerPose.peek();
 
@@ -215,7 +242,7 @@ export function createCreatures(
     const cx = pose.x + Math.cos(a) * r;
     const cz = pose.z + Math.sin(a) * r;
     for (let i = 0; i < BIRDS_PER_FLOCK; i++) {
-      const { root, leftWing, rightWing } = buildBird(material);
+      const { root, mixer } = buildBird();
       root.position.set(
         cx + (Math.random() - 0.5) * 24,
         pose.y + 14 + Math.random() * 22,
@@ -228,10 +255,8 @@ export function createCreatures(
         velocity: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5)
           .normalize()
           .multiplyScalar(MIN_SPEED + 2),
-        leftWing,
-        rightWing,
         flapPhase: Math.random() * Math.PI * 2,
-        flapSpeed: 7 + Math.random() * 3,
+        mixer,
         flock: f,
       });
     }
@@ -409,25 +434,20 @@ export function createCreatures(
           b.position.z + b.velocity.z,
         );
 
-        // Wing flap — the local animation the motion sense perceives.
-        const flap = Math.sin(elapsed * b.flapSpeed + b.flapPhase) * 0.85;
-        b.leftWing.rotation.z = flap;
-        b.rightWing.rotation.z = -flap;
+        // Wing flap — the armature clip is the local vertex motion the motion
+        // sense perceives (jittered phase/tempo per bird, set at build).
+        b.mixer.update(dt);
       }
     },
     dispose(): void {
       unsubscribeLayers?.();
       group.removeFromParent();
-      material.dispose();
-      for (const b of birds) {
-        b.leftWing.geometry.dispose();
-        // right wing shares the geometry instance
-        for (const child of b.object.children) {
-          if (child instanceof THREE.Mesh && child !== b.leftWing && child !== b.rightWing) {
-            child.geometry.dispose();
-          }
-        }
-      }
+      for (const entry of materials.values()) entry.material.dispose();
+      materials.clear();
+      // Skeleton clones share the source geometries — dispose them once.
+      gltf.scene.traverse((child) => {
+        if (child instanceof THREE.Mesh) child.geometry.dispose();
+      });
     },
   };
 }
