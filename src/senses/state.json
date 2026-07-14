@@ -223,10 +223,13 @@
       "myzel.hotspotColor": "#d7ff9a"
     },
     "motion": {
-      "particleSize": 0.11,
+      "particleSize": 0.18,
       "motionGain": 8,
       "expansionDistance": 0.22,
-      "fadePower": 1.6
+      "fadePower": 1.6,
+      "density": 1,
+      "lifetimeFrames": 14,
+      "opacity": 1
     },
     "rundum": {
       "zoom": 1.04,

@@ -32,6 +32,10 @@ export interface TrailBufferOptions {
   expansionDistance?: number;
   motionGain?: number;
   fadePower?: number;
+  /** Fraction of emitting vertices that actually spawn particles, 0..1. */
+  density?: number;
+  /** Overall opacity multiplier. */
+  opacity?: number;
 }
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
@@ -42,10 +46,13 @@ export class ParticleTrailBuffer {
   expansionDistance: number;
   motionGain: number;
   fadePower: number;
+  /** Fraction of emitting vertices that spawn, 0..1 (deterministic subset). */
+  density: number;
   capacity = 0;
 
   private readonly material: THREE.SpriteNodeMaterial;
   private readonly sizeUniform: { value: number };
+  private readonly opacityUniform: { value: number };
   private frame = 0;
   private totalVertexCount = 0;
   private readonly maxCapacity: number;
@@ -64,6 +71,7 @@ export class ParticleTrailBuffer {
     this.expansionDistance = options.expansionDistance ?? 0.22;
     this.motionGain = options.motionGain ?? 26;
     this.fadePower = options.fadePower ?? 1.6;
+    this.density = options.density ?? 1;
     this.maxCapacity = maxParticles;
 
     this.positions = new Float32Array(maxParticles * 3);
@@ -79,21 +87,23 @@ export class ParticleTrailBuffer {
     this.colorAttribute.setUsage(THREE.DynamicDrawUsage);
 
     const material = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false });
-    // NORMAL blending, not additive: the motion trails must read against the
-    // white void ground as much as against the dark sky. Additive white-ish
-    // particles are mathematically invisible over white — the buffer's intensity
-    // channel instead drives an indigo→pale-cyan ramp with real opacity, which
-    // contrasts both backdrops.
+    // NORMAL blending with BLACK particles: the motion world is a near-white
+    // void, so ink-dark specks are the highest-contrast read for the swarms
+    // (additive white-ish sprites were mathematically invisible over white).
+    // The buffer's intensity channel drives the opacity — wing-flap vertices
+    // print hard, still bodies barely at all.
     material.blending = THREE.NormalBlending;
     material.toneMapped = false;
     material.positionNode = instancedBufferAttribute<"vec3">(this.positionAttribute, "vec3");
     const color = vec3(instancedBufferAttribute<"vec3">(this.colorAttribute, "vec3"));
     const intensity = color.z.clamp(0, 1); // blue channel = raw intensity × fade
-    material.colorNode = mix(vec3(0.16, 0.2, 0.55), vec3(0.62, 0.9, 1.0), intensity);
+    material.colorNode = mix(vec3(0.1, 0.11, 0.16), vec3(0.0), intensity);
     // Soft round particle; fully faded particles collapse (no fill-rate waste).
     const d = uv().sub(0.5).length();
     const disc = smoothstep(0.5, 0.12, d);
-    material.opacityNode = disc.mul(intensity.pow(0.7).mul(0.9));
+    const uOpacity = uniform(options.opacity ?? 1);
+    this.opacityUniform = uOpacity;
+    material.opacityNode = disc.mul(intensity.pow(0.6)).mul(uOpacity).clamp(0, 1);
     const luma = color.dot(vec3(0.4, 0.4, 0.4));
     // Live size uniform — the UI writes `.value`, no rebuild.
     const uSize = uniform(options.particleSize ?? 0.055);
@@ -108,6 +118,31 @@ export class ParticleTrailBuffer {
 
   get particleSize(): number {
     return this.sizeUniform.value;
+  }
+
+  get opacity(): number {
+    return this.opacityUniform.value;
+  }
+
+  setOpacity(value: number): void {
+    this.opacityUniform.value = value;
+  }
+
+  /** Change the trail length (frames). Recomputes capacity and clears the ring. */
+  setLifetimeFrames(frames: number): void {
+    this.lifetimeFrames = Math.max(1, Math.round(frames));
+    this.resize(this.totalVertexCount);
+  }
+
+  /** Deterministic per-vertex thinning: the same subset spawns every frame, so
+   *  trails stay continuous instead of flickering. */
+  private spawns(localIndex: number): boolean {
+    if (this.density >= 1) {
+      return true;
+    }
+    let h = (localIndex * 2654435761) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h >>> 16) & 0xffff) / 0x10000 < this.density;
   }
 
   resize(totalVertexCount: number): void {
@@ -175,6 +210,11 @@ export class ParticleTrailBuffer {
 
         const particleIndex = slotOffset + localIndex;
         if (particleIndex >= this.maxCapacity) {
+          continue;
+        }
+        if (!this.spawns(localIndex)) {
+          // Thinned out — clear the ring slot so no stale particle lingers.
+          this.spawnIntensities[particleIndex] = 0;
           continue;
         }
         const dst = particleIndex * 3;

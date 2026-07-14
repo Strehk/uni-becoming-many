@@ -42,13 +42,13 @@ export interface MotionSense {
 export function createMotionSense(scene: THREE.Scene, bus: Bus, creatures: Creatures): MotionSense {
   const group = new THREE.Group();
   group.name = "motion-particle-effect";
-  // maxParticles covers the whole flock set: 4 flocks × 24 birds × ~28 verts ×
-  // 14 lifetime frames ≈ 38 k — sized with headroom (plain float buffers, ~1 MB).
-  // particleSize 0.11: flocks now roam far rings (35-280 m) — trails must still
-  // read as a shimmer when a swarm passes at a hundred metres.
+  // maxParticles covers the whole flock set at the LONGEST trail setting:
+  // 4 flocks × 24 birds × ~28 verts × 40 lifetime frames ≈ 108 k (plain float
+  // buffers, ~6 MB). particleSize 0.18: flocks roam far rings (35-280 m) — the
+  // ink-dark trails must read clearly when a swarm passes at a hundred metres.
   const trail = new ParticleTrailBuffer(
-    { lifetimeFrames: 14, particleSize: 0.11, motionGain: 8 },
-    48_000,
+    { lifetimeFrames: 14, particleSize: 0.18, motionGain: 8 },
+    128_000,
   );
   group.add(trail.points);
   group.visible = false;
@@ -117,6 +117,12 @@ export function createMotionSense(scene: THREE.Scene, bus: Bus, creatures: Creat
       trail.expansionDistance = value;
     } else if (key === "fadePower") {
       trail.fadePower = value;
+    } else if (key === "density") {
+      trail.density = Math.min(1, Math.max(0, value));
+    } else if (key === "lifetimeFrames") {
+      trail.setLifetimeFrames(value);
+    } else if (key === "opacity") {
+      trail.setOpacity(value);
     }
   });
 
@@ -163,6 +169,34 @@ export function createMotionSense(scene: THREE.Scene, bus: Bus, creatures: Creat
           max: 4,
           step: 0.05,
           get: () => trail.fadePower,
+        },
+        {
+          type: "range",
+          key: "density",
+          label: "Partikeldichte",
+          min: 0.05,
+          max: 1,
+          step: 0.05,
+          get: () => trail.density,
+        },
+        {
+          type: "range",
+          key: "lifetimeFrames",
+          label: "Spur-Länge (Frames)",
+          min: 2,
+          max: 40,
+          step: 1,
+          digits: 0,
+          get: () => trail.lifetimeFrames,
+        },
+        {
+          type: "range",
+          key: "opacity",
+          label: "Deckkraft",
+          min: 0.1,
+          max: 2,
+          step: 0.05,
+          get: () => trail.opacity,
         },
       ],
     },

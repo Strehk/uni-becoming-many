@@ -442,11 +442,6 @@ renderer.start((dtSeconds) => {
   magnetfeld.update(dtSeconds); // sky dome fade + follow player + spine time
   duft.update(clock.delta); // scent field: fade, re-anchor, GPU sim (spine-scaled dt)
   creatures.update(clock.delta); // boids swarm + mushroom anchors (obey pause/timeScale)
-  // The bird MESHES are never drawn: birds enter the picture only through the senses
-  // that perceive them — `motion` draws their vertex trails, `netzwerk` its swarm web.
-  // Their raw dark meshes would pollute every other view (e.g. echo's pure depth map).
-  // The boids keep flying while hidden, so those senses read live positions/animation.
-  creatures.setBirdsVisible(false);
   // Flora is perception-dependent: the white void must read as an empty uniform field,
   // so the flora stays hidden until a sense reveals the world. Dust, by contrast, hangs
   // in the air even in the void — a faint drift of motes so the white-out never reads as
@@ -456,6 +451,13 @@ renderer.start((dtSeconds) => {
     (id) => !AIR_ONLY_SENSES.has(id) && signals.sense[id].peek() > 0,
   );
   life.group.visible = worldRevealed;
+  // The bird MESHES follow the same reveal — flocks are part of the visible world
+  // under the colour-spectrum senses. EXCEPT under motion: there the meshes vanish
+  // and only their vertex trails remain (the sense's "only movement is visible"
+  // contract). The boids keep flying while hidden, so motion/netzwerk read live
+  // positions either way.
+  const motionUp = signals.sense.motion.peek() > 0.5;
+  creatures.setBirdsVisible(worldRevealed && !motionUp);
   netzwerk.update(clock.delta); // swarm web + mycelium (fade, rebuild, pulse)
   motion.update(clock.delta); // vertex-motion trails (spawn/fade ring buffer)
   synth.update(dtSeconds); // push the signal packet into the synth iframe

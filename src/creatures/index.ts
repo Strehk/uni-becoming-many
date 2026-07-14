@@ -137,9 +137,12 @@ export function createCreatures(scene: THREE.Scene, bus: Bus, ground: GroundSour
   group.visible = false;
   scene.add(group);
 
-  const material = new THREE.MeshStandardNodeMaterial();
-  material.color = new THREE.Color(0x2c3240);
-  material.roughness = 0.9;
+  // UNLIT (the scene has no lights — a standard material would render black,
+  // see src/life/material.ts). Mid grey-blue plumage: light enough to read
+  // against the dark sense skies from below, dark enough against the pale
+  // ground from above.
+  const material = new THREE.MeshBasicNodeMaterial();
+  material.color = new THREE.Color(0x8e98a8);
   material.side = THREE.DoubleSide;
 
   const pose = signals.playerPose.peek();
