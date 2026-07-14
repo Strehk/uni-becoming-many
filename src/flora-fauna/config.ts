@@ -74,7 +74,8 @@ export interface FloraConfig {
   readonly flowerDensity: number;
   readonly mushroomDensity: number;
   readonly rockDensity: number;
-  /** Clearing frequency 0..1 — higher = fewer/smaller Lichtungen (denser forest). */
+  /** Clearing amount 0..1 — higher = more/larger Lichtungen (opener forest);
+   *  0.5 is neutral (the hand-tuned original). */
   readonly forestClearing: number;
   /** Scales the conifer↔deciduous zone size (× on the woodland type wavelength). */
   readonly forestZoneScale: number;

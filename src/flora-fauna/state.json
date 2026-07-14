@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "config": {
+    "flora": {
+      "globalDensity": 1,
+      "treeDensity": 1,
+      "undergrowthDensity": 1,
+      "flowerDensity": 1,
+      "mushroomDensity": 1,
+      "rockDensity": 1,
+      "forestClearing": 0.5,
+      "forestZoneScale": 1,
+      "swayStrength": 0.5,
+      "speciesCap": {}
+    },
+    "fauna": {
+      "flockCount": 4,
+      "birdsPerFlock": 24,
+      "roamScale": 1,
+      "flightSpeed": 1,
+      "mushroomCount": 24,
+      "mushroomRadius": 90
+    }
+  }
+}

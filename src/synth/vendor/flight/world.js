@@ -6,7 +6,7 @@
      { t, pose:{x,y,z,yaw,pitch},
        params:{hoehe,tempo,kurve,neigung,naehe,richtung},   // alle 0..1
        senses:{sinn_farben,…, unrest, intensity, quality},  // alle 0..1
-       anchors:[{id:"ort_a",x,y,z}, …] }
+       anchors:[{id:"duft_blume",x,y,z}, …] }
 
    Diese Klasse hält denselben Vertrag wie die alte FlightWorld
    (params / pos / yaw / pitch / anchors, in-place mutiert), damit
@@ -14,7 +14,10 @@
    Ohne Host-Frame (Standalone auf dem Handy) bleiben die Werte stehen —
    Zuordnungen frieren ein, genau wie beim geschlossenen Flug-Modul. */
 
-const ANCHOR_IDS = ["ort_a", "ort_b", "ort_c", "ort_d"];
+const ANCHOR_IDS = [
+  "duft_blume", "duft_lavendel", "duft_baum",
+  "duft_kiefer", "duft_kraut", "duft_pilz",
+];
 
 export class SignalWorld {
   constructor() {

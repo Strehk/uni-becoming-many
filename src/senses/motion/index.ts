@@ -85,13 +85,19 @@ export function createMotionSense(scene: THREE.Scene, bus: Bus, creatures: Creat
       return base.evaluate(vertex, bounds, context);
     },
   };
-  rebuildTargets([
-    {
-      className: "birds",
-      emissionProfile: strided,
-      objects: creatures.birds.map((b) => ({ object: b.object })),
-    },
-  ]);
+  const retargetBirds = (): void => {
+    rebuildTargets([
+      {
+        className: "birds",
+        emissionProfile: strided,
+        objects: creatures.birds.map((b) => ({ object: b.object })),
+      },
+    ]);
+  };
+  retargetBirds();
+  // The flock can be rebuilt at runtime (flora-fauna config): re-sample the new
+  // bird meshes when it is (the mesh objects the samplers cached are now stale).
+  const offBirds = bus.on("creatures:birds-changed", retargetBirds);
 
   const setEnabled = (next: boolean): void => {
     if (next === enabled) {
@@ -240,6 +246,7 @@ export function createMotionSense(scene: THREE.Scene, bus: Bus, creatures: Creat
     dispose(): void {
       offSignal();
       offParams();
+      offBirds();
       for (const sampler of samplers) {
         sampler.dispose();
       }

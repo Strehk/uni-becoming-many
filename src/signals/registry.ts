@@ -20,6 +20,17 @@ export interface PlayerPose {
   z: number;
 }
 
+/**
+ * World-space anchor for spatial consumers. Mutated in place by its writer and read via `peek()`
+ * in frame loops, same pattern as PlayerPose.
+ */
+export interface SpatialAnchor {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+}
+
 /** Who is allowed to write the per-sense intensities right now. */
 export type SenseAuthority = "manual" | "theatre";
 
@@ -44,6 +55,8 @@ export const signals = {
   time: signal(0),
   /** World position of the player rig, mutated in place. WRITER: player update. */
   playerPose: signal<PlayerPose>({ x: 0, y: 0, z: 0 }),
+  /** Nearest scent-source positions per scent type. WRITER: main.ts Duft anchor sampler. */
+  scentAnchors: signal<SpatialAnchor[]>([]),
   /**
    * Per-sense layer intensity 0..1 (0 = off). The senses are LAYERS — any combination may be
    * non-zero at once. WRITER: SenseDirector (manual bus commands) / Theatre bridge while

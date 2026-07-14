@@ -10,6 +10,6 @@
 export { signal } from "./signal.ts";
 export type { Signal } from "./signal.ts";
 export { signals } from "./registry.ts";
-export type { PlayerPose, Signals } from "./registry.ts";
+export type { PlayerPose, Signals, SpatialAnchor } from "./registry.ts";
 export { bus, createBus } from "./bus.ts";
 export type { Bus, EventHandler } from "./bus.ts";

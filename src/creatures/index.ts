@@ -26,6 +26,7 @@ import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js";
 import { float, mix, normalWorld, positionView, vec3 } from "three/tsl";
 import * as THREE from "three/webgpu";
 import type { Node } from "three/webgpu";
+import { DEFAULT_CONFIG, type FaunaConfig } from "../flora-fauna/config.ts";
 import type { FloraLayerCompositor } from "../life/material.ts";
 import { distanceFog, viewReveal } from "../render/tsl-kit.ts";
 import type { KitUniforms } from "../render/uniforms.ts";
@@ -33,18 +34,24 @@ import type { Bus } from "../signals/index.ts";
 import { signals } from "../signals/index.ts";
 
 // ── Flock layout ──
-// Each flock roams its own distance RING around the player: one stays close
-// enough that its motion trails are always experienceable, the others range far
-// ("schön weit rumfliegen") and only sweep past now and then. All rings sit well
-// inside the streamed-terrain window (keepRadius 3 × 256 m chunks) so `ground()`
-// almost always answers.
-const FLOCK_RINGS: readonly { min: number; max: number }[] = [
-  { min: 35, max: 130 }, // the near flock — the one you meet
-  { min: 50, max: 160 }, // a second near-ish flock so encounters stay frequent
-  { min: 90, max: 200 },
-  { min: 150, max: 280 }, // the far wanderers
-];
-const BIRDS_PER_FLOCK = 24;
+// Each flock roams its own distance RING around the player: the near flocks stay
+// close enough that their motion trails are always experienceable, the far ones
+// range wide ("schön weit rumfliegen") and only sweep past now and then. Rings
+// are interpolated from NEAR to FAR across `flockCount` flocks (config-driven),
+// scaled by `roamScale`, and kept inside the streamed-terrain window (keepRadius
+// 3 × 256 m chunks) so `ground()` almost always answers.
+const NEAR_RING = { min: 35, max: 130 };
+const FAR_RING = { min: 150, max: 280 };
+
+/** The roam ring for flock `i` of `count`, scaled by `roamScale`. */
+function ringFor(i: number, count: number, roamScale: number): { min: number; max: number } {
+  const t = count <= 1 ? 0 : i / (count - 1);
+  return {
+    min: (NEAR_RING.min + (FAR_RING.min - NEAR_RING.min) * t) * roamScale,
+    max: (NEAR_RING.max + (FAR_RING.max - NEAR_RING.max) * t) * roamScale,
+  };
+}
+
 /** A bird farther than its ring + this margin from the player is steered back
  *  hard (the juanuys boundary rule — there: outside the sphere, wander ×20). */
 const BOUNDARY_MARGIN = 80;
@@ -72,8 +79,6 @@ const MAX_ALTITUDE = 60;
 const BIRD_MODEL_URL = "/creatures/bird_erasmus.glb";
 /** Target wingspan in metres (the file spans ~17.4 units). */
 const BIRD_WINGSPAN = 1.05;
-const MUSHROOM_COUNT = 24;
-const MUSHROOM_RADIUS = 90;
 /** Re-scatter the mushrooms when the player is farther than this from their anchor. */
 const MUSHROOM_REANCHOR = 110;
 
@@ -95,6 +100,11 @@ export interface Creatures {
   readonly mushrooms: readonly THREE.Vector3[];
   /** Show/hide the bird meshes (the motion sense recommends hiding its sources). */
   setBirdsVisible(visible: boolean): void;
+  /** Apply new fauna config. Behavioural knobs (roam/speed/mushroom radius) take
+   *  effect live; changing flock/bird COUNTS rebuilds the flock (emits
+   *  `creatures:birds-changed`); changing the mushroom count re-scatters (emits
+   *  `creatures:mushrooms-changed`). */
+  reconfigure(config: FaunaConfig): void;
   update(dt: number): void;
   dispose(): void;
 }
@@ -121,6 +131,8 @@ export interface CreatureSenseOptions {
   /** The shader-sense compositor — birds run through the SAME sense layers, so
    *  infrarot reads them as WARM BODIES, echo as depth, uv as faint signal. */
   layers?: FloraLayerCompositor;
+  /** Flock / speed / mushroom config. Defaults to `DEFAULT_CONFIG.fauna`. */
+  config?: FaunaConfig;
 }
 
 export async function createCreatures(
@@ -215,6 +227,10 @@ export async function createCreatures(
 
   const pose = signals.playerPose.peek();
 
+  // Live fauna config — the update loop reads roam/speed from here; counts drive
+  // the flock/mushroom rebuilds in `reconfigure`.
+  let fauna: FaunaConfig = senseOpts.config ?? DEFAULT_CONFIG.fauna;
+
   // ── birds ──
   // A flock waypoint: somewhere in the flock's roam ring around the player, at
   // soaring altitude over the local terrain (player height as the fallback
@@ -230,47 +246,65 @@ export async function createCreatures(
   };
 
   const flocks: Flock[] = [];
+  // `birds` is mutated IN PLACE across rebuilds so live readers (netzwerk, synth)
+  // keep a valid reference; motion caches target objects, so it re-reads on the
+  // `creatures:birds-changed` event that `rebuildFlocks` emits.
   const birds: Bird[] = [];
-  for (const [f, ring] of FLOCK_RINGS.entries()) {
-    const flock: Flock = { waypoint: new THREE.Vector3(), age: 0 };
-    rollWaypoint(flock.waypoint, ring);
-    flocks.push(flock);
 
-    // The flock spawns as a loose cloud somewhere in its ring.
-    const a = Math.random() * Math.PI * 2;
-    const r = ring.min + Math.random() * (ring.max - ring.min) * 0.7;
-    const cx = pose.x + Math.cos(a) * r;
-    const cz = pose.z + Math.sin(a) * r;
-    for (let i = 0; i < BIRDS_PER_FLOCK; i++) {
-      const { root, mixer } = buildBird();
-      root.position.set(
-        cx + (Math.random() - 0.5) * 24,
-        pose.y + 14 + Math.random() * 22,
-        cz + (Math.random() - 0.5) * 24,
-      );
-      group.add(root);
-      birds.push({
-        object: root,
-        position: root.position,
-        velocity: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5)
-          .normalize()
-          .multiplyScalar(MIN_SPEED + 2),
-        flapPhase: Math.random() * Math.PI * 2,
-        mixer,
-        flock: f,
-      });
+  /** (Re)build the flock set from `fauna.flockCount × fauna.birdsPerFlock`.
+   *  Disposes any prior birds, repopulates `flocks`/`birds` in place. */
+  const rebuildFlocks = (emit: boolean): void => {
+    for (const b of birds) b.object.removeFromParent();
+    birds.length = 0;
+    flocks.length = 0;
+
+    const count = Math.max(1, Math.round(fauna.flockCount));
+    const perFlock = Math.max(1, Math.round(fauna.birdsPerFlock));
+    for (let f = 0; f < count; f++) {
+      const ring = ringFor(f, count, fauna.roamScale);
+      const flock: Flock = { waypoint: new THREE.Vector3(), age: 0 };
+      rollWaypoint(flock.waypoint, ring);
+      flocks.push(flock);
+
+      // The flock spawns as a loose cloud somewhere in its ring.
+      const a = Math.random() * Math.PI * 2;
+      const r = ring.min + Math.random() * (ring.max - ring.min) * 0.7;
+      const cx = pose.x + Math.cos(a) * r;
+      const cz = pose.z + Math.sin(a) * r;
+      for (let i = 0; i < perFlock; i++) {
+        const { root, mixer } = buildBird();
+        root.position.set(
+          cx + (Math.random() - 0.5) * 24,
+          pose.y + 14 + Math.random() * 22,
+          cz + (Math.random() - 0.5) * 24,
+        );
+        group.add(root);
+        birds.push({
+          object: root,
+          position: root.position,
+          velocity: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5)
+            .normalize()
+            .multiplyScalar(MIN_SPEED + 2),
+          flapPhase: Math.random() * Math.PI * 2,
+          mixer,
+          flock: f,
+        });
+      }
     }
-  }
+    if (emit) bus.emit("creatures:birds-changed");
+  };
+  rebuildFlocks(false);
 
   // ── mushrooms ──
   const mushrooms: THREE.Vector3[] = [];
   let mushroomAnchor: { x: number; z: number } | null = null;
 
   const scatterMushrooms = (): boolean => {
+    const target = Math.max(0, Math.round(fauna.mushroomCount));
     const next: THREE.Vector3[] = [];
-    for (let i = 0; i < MUSHROOM_COUNT * 2 && next.length < MUSHROOM_COUNT; i++) {
+    for (let i = 0; i < target * 2 && next.length < target; i++) {
       const a = Math.random() * Math.PI * 2;
-      const r = 10 + Math.sqrt(Math.random()) * MUSHROOM_RADIUS;
+      const r = 10 + Math.sqrt(Math.random()) * fauna.mushroomRadius;
       const x = pose.x + Math.cos(a) * r;
       const z = pose.z + Math.sin(a) * r;
       const y = ground(x, z);
@@ -279,7 +313,7 @@ export async function createCreatures(
       }
       next.push(new THREE.Vector3(x, y + 0.15, z));
     }
-    if (next.length < 4) {
+    if (target > 0 && next.length < 4) {
       return false; // terrain not streamed yet
     }
     mushrooms.length = 0;
@@ -307,6 +341,16 @@ export async function createCreatures(
       // trails / network still read live positions.
       group.visible = visible;
     },
+    reconfigure(next: FaunaConfig): void {
+      const countsChanged =
+        next.flockCount !== fauna.flockCount || next.birdsPerFlock !== fauna.birdsPerFlock;
+      const mushroomsChanged =
+        next.mushroomCount !== fauna.mushroomCount || next.mushroomRadius !== fauna.mushroomRadius;
+      fauna = next;
+      // roam/speed are read live in `update` — nothing to do for those.
+      if (countsChanged) rebuildFlocks(true); // emits creatures:birds-changed
+      if (mushroomsChanged) scatterMushrooms(); // emits creatures:mushrooms-changed
+    },
     update(dt: number): void {
       if (dt <= 0) {
         return;
@@ -324,17 +368,24 @@ export async function createCreatures(
         }
       }
 
+      const flockCount = flocks.length;
+      const minSpeed = MIN_SPEED * fauna.flightSpeed;
+      const maxSpeed = MAX_SPEED * fauna.flightSpeed;
+
       // ── Flock goals: reached / stale / left-behind waypoints get re-rolled ──
       for (const [f, flock] of flocks.entries()) {
-        const ring = FLOCK_RINGS[f];
-        if (!ring) continue;
+        const ring = ringFor(f, flockCount, fauna.roamScale);
         flock.age += dt;
 
         centre.set(0, 0, 0);
+        let flockSize = 0;
         for (const b of birds) {
-          if (b.flock === f) centre.add(b.position);
+          if (b.flock === f) {
+            centre.add(b.position);
+            flockSize++;
+          }
         }
-        centre.divideScalar(BIRDS_PER_FLOCK);
+        centre.divideScalar(Math.max(1, flockSize));
 
         const reached = centre.distanceTo(flock.waypoint) < WAYPOINT_REACHED;
         const behind =
@@ -388,11 +439,11 @@ export async function createCreatures(
         diff.copy(flock.waypoint).sub(b.position);
         const goalDist = diff.length();
         if (goalDist > 1) {
-          steer.addScaledVector(diff.divideScalar(goalDist), SEEK_WEIGHT * MAX_SPEED * 0.35);
+          steer.addScaledVector(diff.divideScalar(goalDist), SEEK_WEIGHT * maxSpeed * 0.35);
         }
 
         // Boundary (juanuys: outside the sphere the return urge dominates).
-        const boundary = (FLOCK_RINGS[b.flock]?.max ?? 280) + BOUNDARY_MARGIN;
+        const boundary = ringFor(b.flock, flockCount, fauna.roamScale).max + BOUNDARY_MARGIN;
         diff.set(pose.x - b.position.x, 0, pose.z - b.position.z);
         const fromPlayer = diff.length();
         if (fromPlayer > boundary) {
@@ -421,7 +472,7 @@ export async function createCreatures(
         }
         b.velocity.addScaledVector(steer, dt);
         const speed = b.velocity.length();
-        const clamped = Math.min(Math.max(speed, MIN_SPEED), MAX_SPEED);
+        const clamped = Math.min(Math.max(speed, minSpeed), maxSpeed);
         if (speed > 0.001) {
           b.velocity.multiplyScalar(clamped / speed);
         }

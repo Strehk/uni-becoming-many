@@ -89,5 +89,9 @@ export function laubWeight(x: number, z: number): number {
  *  pockets. Trees multiply by `1 - lichtung`, flowers/bushes by `1 + lichtung·k`. */
 export function lichtung(x: number, z: number): number {
   const n = fbm2(x / CLEARING_WAVELENGTH, z / CLEARING_WAVELENGTH, CLEARING_SEED);
-  return smoothstep(CLEARING_EDGE_LO + config.clearingBias, CLEARING_EDGE_HI + config.clearingBias, n);
+  return smoothstep(
+    CLEARING_EDGE_LO + config.clearingBias,
+    CLEARING_EDGE_HI + config.clearingBias,
+    n,
+  );
 }

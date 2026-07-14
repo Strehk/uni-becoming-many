@@ -742,28 +742,80 @@ export const SENSES = [
         envelope: { attack: 0.004, decay: 0.09, sustain: 0, release: 0.1 }, volume: -8,
       });
       blip.maxPolyphony = 6;
-      const lp = new Tone.Filter(1200, "lowpass");
+      const hp = new Tone.Filter(45, "highpass");
+      const lp = new Tone.Filter(1200, "lowpass"); lp.Q.value = 1.1;
       const dly = new Tone.FeedbackDelay({ delayTime: 0.09, feedback: 0.3, wet: 0.4 });
-      blip.chain(lp, dly, bus);
+      const foam = new Tone.NoiseSynth({
+        noise: { type: "brown" },
+        envelope: { attack: 0.002, decay: 0.045, sustain: 0, release: 0.04 },
+        volume: -38,
+      });
+      const foamFilter = new Tone.Filter(900, "bandpass"); foamFilter.Q.value = 2.5;
+      blip.chain(hp, lp, dly, bus);
+      foam.chain(foamFilter, dly);
       let range = 2;
+      let dur = 0.08;
+      let jitter = 0.08;
+      let velBase = 0.3;
+      let velSpan = 0.5;
+      let octaveSink = 0;
+      let foamChance = 0.14;
+      let foamDur = 0.045;
+      const intervals = ["8n", "16n", "16t", "32n"];
       const loop = new Tone.Loop((t) => {
         // Blasen steigen zufällig aus der Welt-Skala auf (tiefe Lage)
         const w = engine.world, sc = w.scale;
         const deg = Math.floor(Math.random() * sc.length * range);
-        const midi = w.rootMidi + Math.floor(deg / sc.length) * 12 + sc[deg % sc.length];
-        try { blip.triggerAttackRelease(Tone.Frequency(midi, "midi").toFrequency(),
-              0.08, t + Math.random() * 0.08, 0.3 + Math.random() * 0.5); } catch (e) {}
+        const midi = w.rootMidi - octaveSink * 12 + Math.floor(deg / sc.length) * 12 + sc[deg % sc.length];
+        const when = t + Math.random() * jitter;
+        try {
+          blip.triggerAttackRelease(Tone.Frequency(midi, "midi").toFrequency(),
+            dur, when, velBase + Math.random() * velSpan);
+          if (Math.random() < foamChance) foam.triggerAttackRelease(foamDur, when + Math.random() * 0.035);
+        } catch (e) {}
       }, "16n").start(0);
       loop.probability = 0.45;
       return {
         setXY(x, y) { loop.probability = x * 0.9; lp.frequency.rampTo(300 + y * 3500, 0.2); },
         macro: { label: "blasengröße", default: 0.25,
-          set(v) { blip.set({ envelope: { decay: 0.03 + v * 0.4 } }); } },
+          set(v) {
+            dur = 0.035 + v * 0.22;
+            blip.set({ envelope: { decay: 0.03 + v * 0.4, release: 0.04 + v * 0.35 } });
+          } },
         params: [
           { label: "gluckern", default: 0.3, set(v) { dly.feedback.rampTo(v * 0.75, 0.1); } },
           { label: "steighöhe", default: 0.5, set(v) { range = 1 + v * 2.5; } },
+          { label: "gärtempo", default: 0.45,
+            set(v) { loop.interval = intervals[Math.min(intervals.length - 1, Math.floor(v * intervals.length))]; } },
+          { label: "unregelmaß", default: 0.55, set(v) { jitter = v * 0.18; } },
+          { label: "gasdruck", default: 0.5,
+            set(v) { velBase = 0.12 + v * 0.35; velSpan = 0.18 + v * 0.55; } },
+          { label: "säure", default: 0.18,
+            set(v) {
+              hp.frequency.rampTo(25 + v * 760, 0.12);
+              blip.set({ oscillator: { type: v > 0.72 ? "square" : v > 0.4 ? "triangle" : "sine" } });
+            } },
+          { label: "trübung", default: 0.35, set(v) { lp.Q.rampTo(0.4 + v * 9, 0.15); } },
+          { label: "klebrigkeit", default: 0.28,
+            set(v) {
+              dly.delayTime.rampTo(0.035 + v * 0.32, 0.12);
+              dly.wet.rampTo(0.18 + v * 0.62, 0.12);
+            } },
+          { label: "schaum", default: 0.25,
+            set(v) { foamChance = v * 0.8; foam.volume.rampTo(-48 + v * 28, 0.12); } },
+          { label: "schaumfarbe", default: 0.35,
+            set(v) {
+              foam.noise.type = v < 0.33 ? "brown" : v < 0.66 ? "pink" : "white";
+              foamFilter.frequency.rampTo(180 + v * 5200, 0.12);
+            } },
+          { label: "schaumdauer", default: 0.3,
+            set(v) {
+              foamDur = 0.015 + v * 0.18;
+              foam.set({ envelope: { decay: 0.02 + v * 0.2, release: 0.02 + v * 0.16 } });
+            } },
+          { label: "bodensatz", default: 0.2, set(v) { octaveSink = Math.round(v * 2); } },
         ],
-        dispose() { loop.dispose(); [blip, lp, dly].forEach(n => n.dispose()); },
+        dispose() { loop.dispose(); [blip, hp, lp, dly, foam, foamFilter].forEach(n => n.dispose()); },
       };
     } },
 

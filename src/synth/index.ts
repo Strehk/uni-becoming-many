@@ -9,8 +9,8 @@
 //
 //   - every frame it pushes a `__bmFrame` object into the synth window: player
 //     pose (for the spatial listener), the six flight values (0..1), the nine
-//     sense intensities + unrest/intensity/quality, and the four `ort_*` anchor
-//     positions (swarm centroid + mushrooms). The vendored "Signale" rack card
+//     sense intensities + unrest/intensity/quality, and the scent-source anchor
+//     positions published on the signal substrate. The vendored "Signale" rack card
 //     exposes them as patchable sources — the demo flight world it replaces is gone.
 //   - the synth app preloads its default sense layers after audio unlock. Each
 //     frame this bridge mirrors visual sense intensities onto every matching
@@ -24,19 +24,11 @@ import { signals } from "../signals/index.ts";
 
 const STYLE_ID = "synth-overlay-styles";
 
-export interface SynthAnchorSource {
-  /** Swarm centroid provider (ort_a). */
-  readonly birds: readonly { position: { x: number; y: number; z: number } }[];
-  /** Mushroom positions (ort_b..d take every eighth). */
-  readonly mushrooms: readonly { x: number; y: number; z: number }[];
-}
-
 export interface SynthOverlayOptions {
   /** Ground height under (x,z) — for the altitude/proximity params. */
   ground(x: number, z: number): number | null;
   /** Camera world matrix elements provider (yaw/pitch extraction). */
   cameraMatrix(): ArrayLike<number>;
-  anchors: SynthAnchorSource;
 }
 
 export interface SynthOverlay {
@@ -263,39 +255,12 @@ export function createSynthOverlay(options: SynthOverlayOptions): SynthOverlay {
     senseFrame.intensity = signals.intensity.peek();
     senseFrame.quality = signals.controlQuality.peek();
 
-    // Anchors: swarm centroid (ort_a) + three mushrooms (ort_b..d).
-    const anchors: { id: string; x: number; y: number; z: number }[] = [];
-    const birds = options.anchors.birds;
-    if (birds.length > 0) {
-      let cx = 0;
-      let cy = 0;
-      let cz = 0;
-      for (const b of birds) {
-        cx += b.position.x;
-        cy += b.position.y;
-        cz += b.position.z;
-      }
-      anchors.push({
-        id: "ort_a",
-        x: cx / birds.length,
-        y: cy / birds.length,
-        z: cz / birds.length,
-      });
-    }
-    const mushrooms = options.anchors.mushrooms;
-    ["ort_b", "ort_c", "ort_d"].forEach((id, i) => {
-      const mushroom = mushrooms[i * 8];
-      if (mushroom) {
-        anchors.push({ id, x: mushroom.x, y: mushroom.y, z: mushroom.z });
-      }
-    });
-
     win.__bmFrame = {
       t: signals.time.peek(),
       pose: { x: pose.x, y: pose.y, z: pose.z, yaw, pitch },
       params,
       senses: senseFrame,
-      anchors,
+      anchors: signals.scentAnchors.peek(),
     };
 
     // Sense → layer coupling: every synth layer of a mapped kind follows the visual

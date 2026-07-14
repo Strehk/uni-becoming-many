@@ -48,13 +48,16 @@ export const QUELLEN = [...FLIGHT_QUELLEN, ...LFO_QUELLEN, ...SENSE_QUELLEN];
    Record-Form: wie ein normales Mapping, plus control:"ort" und
    spatial:{ref, roll} (0..1 → refDistance 6..60 / rolloff 0.4..2.6). */
 export const SPATIAL_QUELLEN = [
-  ["ort_a", "ort a"], ["ort_b", "ort b"], ["ort_c", "ort c"], ["ort_d", "ort d"],
+  ["duft_blume", "duft blume"], ["duft_lavendel", "duft lavendel"],
+  ["duft_baum", "duft baum"], ["duft_kiefer", "duft kiefer"],
+  ["duft_kraut", "duft kraut"], ["duft_pilz", "duft pilz"],
   ["kompass_n", "kompass n"], ["kompass_o", "kompass o"],
   ["kompass_s", "kompass s"], ["kompass_w", "kompass w"],
 ];
 /* Ankerfarben — Welt (Punktwolken) und Flug-Karte (Buchsen) teilen sie. */
 export const SPATIAL_FARBEN = {
-  ort_a: "#e8b46b", ort_b: "#e87fb0", ort_c: "#9be87f", ort_d: "#b09bff",
+  duft_blume: "#ff4f9a", duft_lavendel: "#8a5cff", duft_baum: "#ffb340",
+  duft_kiefer: "#2fd6a3", duft_kraut: "#b8e02e", duft_pilz: "#8a6f4d",
   kompass_n: "#cad5df", kompass_o: "#cad5df", kompass_s: "#cad5df", kompass_w: "#cad5df",
 };
 
@@ -117,7 +120,7 @@ export class FlightMap {
   }
 
   /* ---------- Orts-Bindungen (räumliches Hören) ---------- */
-  isSpatial(q) { return q.startsWith("ort_") || q.startsWith("kompass_"); }
+  isSpatial(q) { return q.startsWith("duft_") || q.startsWith("ort_") || q.startsWith("kompass_"); }
 
   /* Belegbare Ort-Ziele (jede Karte hat genau eine Ort-Buchse). */
   ortTargets() {

@@ -38,6 +38,7 @@ function downloadJson(filename: string, data: unknown): void {
 export function createSaveTuningControls(opts: {
   serializeSenses(): unknown;
   serializeWorld(): unknown;
+  serializeFloraFauna(): unknown;
 }): SaveTuningControls {
   injectStyles();
 
@@ -66,12 +67,19 @@ export function createSaveTuningControls(opts: {
     downloadJson("terrain-state.json", opts.serializeWorld()),
   );
 
-  row.append(sensesBtn, worldBtn);
+  const floraFaunaBtn = document.createElement("button");
+  floraFaunaBtn.textContent = "⤓ Flora & Fauna";
+  floraFaunaBtn.title = "Flora-&-Fauna-Zustand als flora-fauna-state.json exportieren";
+  floraFaunaBtn.addEventListener("click", () =>
+    downloadJson("flora-fauna-state.json", opts.serializeFloraFauna()),
+  );
+
+  row.append(sensesBtn, worldBtn, floraFaunaBtn);
   root.append(row);
 
   const hint = document.createElement("p");
   hint.className = "st-hint";
-  hint.textContent = "→ src/senses/state.json · src/terrain/state.json";
+  hint.textContent = "→ src/senses · src/terrain · src/flora-fauna /state.json";
   root.append(hint);
 
   return {

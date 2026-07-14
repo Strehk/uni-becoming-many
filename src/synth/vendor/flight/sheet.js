@@ -7,6 +7,8 @@
 import { QUELLEN, FLIGHT_KURVEN, SPATIAL_QUELLEN } from "./mapping.js";
 import { Knob } from "../ui/widgets.js";
 
+const isAnchorQuelle = (quelle) => quelle.startsWith("duft_") || quelle.startsWith("ort_");
+
 const h = (tag, cls, html) => {
   const el = document.createElement(tag);
   if (cls) el.className = cls;
@@ -46,7 +48,7 @@ function spatialRow(map, m) {
   selRow.append(del);
   row.append(selRow);
 
-  if (m.quelle.startsWith("ort_")) {
+  if (isAnchorQuelle(m.quelle)) {
     if (!m.spatial) m.spatial = { ref: 0.15, roll: 0.45 };
     const knobs = h("div", "knob-row wrap");
     const mk = (label, value, onChange) => {

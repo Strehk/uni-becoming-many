@@ -2,6 +2,7 @@ import { time } from "three/tsl";
 import { createAtmosphere } from "./atmosphere/index.ts";
 import { SoundBus, SoundDirector } from "./audio/index.ts";
 import { createCreatures } from "./creatures/index.ts";
+import { createFloraFaunaControls } from "./dev-console/flora-fauna-controls.ts";
 import { createDevConsole } from "./dev-console/index.ts";
 import { createSaveTuningControls } from "./dev-console/save-tuning.ts";
 import { createSenseControls } from "./dev-console/sense-controls.ts";
@@ -13,6 +14,12 @@ import {
 } from "./experience/config.ts";
 import { createInterfaceModeController } from "./experience/interface-mode.ts";
 import { createStartMenu } from "./experience/start-menu.ts";
+import { createFloraFaunaController } from "./flora-fauna/index.ts";
+import {
+  configFromState,
+  savedFloraFaunaState,
+  serializeFloraFaunaState,
+} from "./flora-fauna/state.ts";
 import { type Grass, createGrass } from "./grass/index.ts";
 import { type ControlOrientation, connectHost } from "./icaros/index.ts";
 import { createLife } from "./life/index.ts";
@@ -78,6 +85,12 @@ window.addEventListener("pagehide", () => senses.dispose());
 // live `fogColor` the SenseManager lerps, so the background transitions with the senses.
 renderer.scene.background = senses.uniforms.fogColor.value;
 
+// Flora & Fauna tuning (density / forest shape / flocks / mushrooms), committed to
+// src/flora-fauna/state.json. Read once here and fed straight into flora + fauna so
+// the world streams with these values from the first chunk (no boot re-scatter);
+// the coordinator (created after both) drives live dev-panel edits + export.
+const floraFaunaConfig = configFromState(savedFloraFaunaState);
+
 // Life: instanced flora that streams with the terrain, wired to the sense substrate.
 // It shares the senses' uniforms so it reveals/fades with the world and reads
 // `activeSense` for its bioluminescence. Gated on a sense being active (the void
@@ -86,6 +99,7 @@ const life = await createLife({
   scene: renderer.scene,
   uniforms: senses.uniforms,
   layers: senses.shader.compositor,
+  config: floraFaunaConfig.flora,
 });
 window.addEventListener("pagehide", () => life.dispose());
 
@@ -164,13 +178,63 @@ const duft = createDuftSense(
 );
 window.addEventListener("pagehide", () => duft.dispose());
 
+// Live handle to the mutated-in-place pose signal — the player writes into it each frame.
+const pose = signals.playerPose.peek();
+
+const scentAnchorIds = new Map(SCENT_TYPES.map((t) => [t.key, `duft_${t.key}`]));
+const scentAnchors = SCENT_TYPES.map((t) => ({
+  id: `duft_${t.key}`,
+  x: pose.x,
+  y: pose.y,
+  z: pose.z,
+}));
+signals.scentAnchors.value = scentAnchors;
+
+function publishScentAnchors(): void {
+  const nearest = new Map<string, { x: number; y: number; z: number; d2: number }>();
+  for (const spot of life.scentSpotsAround(pose.x, pose.z, 114)) {
+    const id = scentAnchorIds.get(spot.type);
+    if (!id) {
+      continue;
+    }
+    const dx = spot.x - pose.x;
+    const dz = spot.z - pose.z;
+    const d2 = dx * dx + dz * dz;
+    const current = nearest.get(id);
+    if (!current || d2 < current.d2) {
+      nearest.set(id, { x: spot.x, y: spot.y, z: spot.z, d2 });
+    }
+  }
+
+  for (const anchor of scentAnchors) {
+    const spot = nearest.get(anchor.id);
+    if (spot) {
+      anchor.x = spot.x;
+      anchor.y = spot.y;
+      anchor.z = spot.z;
+    } else {
+      // No streamed source of this scent type nearby: collapse to the listener so
+      // spatial bindings go neutral instead of keeping a stale old position.
+      anchor.x = pose.x;
+      anchor.y = pose.y;
+      anchor.z = pose.z;
+    }
+  }
+}
+
 // Creatures substrate: the boids bird swarm + mushroom spawn points that the
 // netzwerk / motion senses perceive. Plain world state, no sense logic.
 const creatures = await createCreatures(renderer.scene, bus, (x, z) => world.groundHeightAt(x, z), {
   uniforms: senses.uniforms,
   layers: senses.shader.compositor,
+  config: floraFaunaConfig.fauna,
 });
 window.addEventListener("pagehide", () => creatures.dispose());
+
+// Flora & Fauna coordinator: owns the live config, applies `flora-fauna:param` bus
+// edits (density → re-scatter, counts → flock/mushroom rebuild), serializes for export.
+const floraFauna = createFloraFaunaController({ life, creatures, bus, config: floraFaunaConfig });
+window.addEventListener("pagehide", () => floraFauna.dispose());
 
 // Netzwerk sense: swarm communication web between the birds + pulsing mycelium
 // between the mushrooms, gated by `signals.sense.netzwerk`.
@@ -208,7 +272,6 @@ loadSenseState(savedSenseState, { shader: senses.shader, bus });
 const synth = createSynthOverlay({
   ground: (x, z) => world.groundHeightAt(x, z),
   cameraMatrix: () => renderer.camera.matrixWorld.elements,
-  anchors: creatures,
 });
 window.addEventListener("pagehide", () => synth.dispose());
 
@@ -345,11 +408,18 @@ const worldControls = createWorldControls(world);
 devConsole.addSection(worldControls.element);
 window.addEventListener("pagehide", () => worldControls.dispose());
 
-// Dev-only: export the live sense + world tuning as committed state.json files.
+// Flora & Fauna controls: density / forest shape / flock / mushroom tuning. Edits
+// emit `flora-fauna:param` — the coordinator applies them (re-scatter / rebuild).
+const floraFaunaControls = createFloraFaunaControls(bus, floraFauna.config);
+devConsole.addSection(floraFaunaControls.element);
+window.addEventListener("pagehide", () => floraFaunaControls.dispose());
+
+// Dev-only: export the live sense + world + flora/fauna tuning as committed state.json files.
 if (import.meta.env.DEV) {
   const saveTuning = createSaveTuningControls({
     serializeSenses: () => serializeSenseState(senses.shader, senseModules),
     serializeWorld: () => serializeTerrainState(world),
+    serializeFloraFauna: () => serializeFloraFaunaState(floraFauna),
   });
   devConsole.addSection(saveTuning.element);
   window.addEventListener("pagehide", () => saveTuning.dispose());
@@ -397,9 +467,6 @@ const disconnectHost = connectHost({
   onRejected: (reason) => console.warn(`[icaros] host rejected client: ${reason}`),
 });
 window.addEventListener("pagehide", disconnectHost);
-
-// Live handle to the mutated-in-place pose signal — the player writes into it each frame.
-const pose = signals.playerPose.peek();
 
 // Biome minimap: a top-down chunk/biome debug overlay hosted inside the C console.
 // Heading = camera forward on XZ, read from the camera's world matrix (forward = −Z
@@ -452,6 +519,7 @@ renderer.start((dtSeconds) => {
   magnetfeld.update(dtSeconds); // sky dome fade + follow player + spine time
   duft.update(clock.delta); // scent field: fade, re-anchor, GPU sim (spine-scaled dt)
   creatures.update(clock.delta); // boids swarm + mushroom anchors (obey pause/timeScale)
+  publishScentAnchors(); // Duft source positions -> signal substrate for spatial synth bindings
   // Flora is perception-dependent: the white void must read as an empty uniform field,
   // so the flora stays hidden until a sense reveals the world. Dust, by contrast, hangs
   // in the air even in the void — a faint drift of motes so the white-out never reads as
