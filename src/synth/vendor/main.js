@@ -28,5 +28,17 @@ import savedState from "./state.json";   // committете Komposition (Theatre-M
     engine.start().catch((e) => console.warn("audio start blocked:", e));
   };
   window.bmStartAudio = startAudio;
-  window.addEventListener("pointerdown", startAudio, { once: true });
+
+  // Retry the unlock on every early gesture until the context is genuinely
+  // running — a single blocked/raced attempt must not leave the page silent
+  // until reload. Detached the moment audio is audible.
+  const unlockEvents = ["pointerdown", "keydown", "touchend"];
+  const tryStart = () => {
+    if (engine.isAudible()) {
+      for (const ev of unlockEvents) window.removeEventListener(ev, tryStart);
+      return;
+    }
+    startAudio();
+  };
+  for (const ev of unlockEvents) window.addEventListener(ev, tryStart);
 })();

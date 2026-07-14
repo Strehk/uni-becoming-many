@@ -57,9 +57,13 @@ interface SynthApp {
   ensureBecomingManyDefaults?: () => void;
   syncSenseLayers?: (id: string, value: number) => void;
 }
+interface SynthEngine {
+  isAudible?: () => boolean;
+}
 interface SynthWindow {
   __bmFrame?: Record<string, unknown>;
   bmApp?: SynthApp;
+  bmEngine?: SynthEngine;
   bmStartAudio?: () => void;
 }
 
@@ -137,6 +141,35 @@ export function createSynthOverlay(options: SynthOverlayOptions): SynthOverlay {
 
   tab.addEventListener("click", () => setOpen(true));
   close.addEventListener("click", () => setOpen(false));
+
+  // ── autoplay unlock ──
+  // The synth iframe carries its own AudioContext, which the browser keeps
+  // suspended until a user gesture. The iframe's own pointerdown unlock never
+  // fires while the drawer is hidden (display:none), so in the main experience —
+  // and on the config page — the organ stays silent until the drawer is opened.
+  // Forward the first parent-window gesture into the iframe instead, and keep
+  // retrying until audio is genuinely running: a single blocked attempt (iframe
+  // not yet loaded, a gesture lost to a race) must not leave the synth mute.
+  const unlockEvents = ["pointerdown", "keydown", "touchend"] as const;
+  const tryUnlockAudio = (): void => {
+    const win = synthWindow(iframe);
+    if (!win) {
+      return;
+    }
+    if (win.bmEngine?.isAudible?.()) {
+      detachUnlock();
+      return;
+    }
+    win.bmStartAudio?.();
+  };
+  const detachUnlock = (): void => {
+    for (const ev of unlockEvents) {
+      window.removeEventListener(ev, tryUnlockAudio);
+    }
+  };
+  for (const ev of unlockEvents) {
+    window.addEventListener(ev, tryUnlockAudio);
+  }
 
   const isTyping = (): boolean => {
     const el = document.activeElement;
@@ -303,6 +336,7 @@ export function createSynthOverlay(options: SynthOverlayOptions): SynthOverlay {
     },
     dispose(): void {
       window.removeEventListener("keydown", onKeyDown);
+      detachUnlock();
       openListeners.clear();
       tab.remove();
       drawer.remove();
