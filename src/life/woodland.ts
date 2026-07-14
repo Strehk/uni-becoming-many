@@ -21,6 +21,24 @@ const CLEARING_WAVELENGTH = 60;
 const TYPE_SEED = 0x9e37;
 const CLEARING_SEED = 0x51ed;
 
+/** Base clearing threshold edges — the `lichtung` smoothstep band at neutral
+ *  config (0.62..0.72 = the hand-tuned original). */
+const CLEARING_EDGE_LO = 0.62;
+const CLEARING_EDGE_HI = 0.72;
+
+/** Live woodland tuning (the flora config drives this via `setWoodlandConfig`).
+ *  `clearingBias` shifts the threshold (positive = fewer clearings, denser
+ *  forest); `typeWavelengthScale` scales the conifer↔deciduous zone size. */
+const config = { clearingBias: 0, typeWavelengthScale: 1 };
+
+/** Map the config's `forestClearing` (0..1, higher = more open) + `forestZoneScale`
+ *  onto the live woodland state. `forestClearing = 0.5` is neutral. */
+export function setWoodlandConfig(opts: { forestClearing: number; forestZoneScale: number }): void {
+  // More clearings ⇒ lower threshold. Range ±0.3 keeps the smoothstep valid.
+  config.clearingBias = (0.5 - opts.forestClearing) * 0.6;
+  config.typeWavelengthScale = Math.max(0.1, opts.forestZoneScale);
+}
+
 /** Integer-lattice hash → [0, 1). Splitmix-style avalanche, cheap and stable. */
 function hash2(ix: number, iz: number, seed: number): number {
   let h = (ix * 374761393 + iz * 668265263 + seed * 2246822519) | 0;
@@ -57,7 +75,8 @@ function fbm2(x: number, z: number, seed: number): number {
 /** Conifer share at this point, 0..1 — 1 deep in a Tannenwald, 0 in a Laubwald,
  *  a smooth Mischwald band in between (where both weights are mid-range). */
 export function nadelWeight(x: number, z: number): number {
-  const n = fbm2(x / TYPE_WAVELENGTH, z / TYPE_WAVELENGTH, TYPE_SEED);
+  const wavelength = TYPE_WAVELENGTH * config.typeWavelengthScale;
+  const n = fbm2(x / wavelength, z / wavelength, TYPE_SEED);
   return 1 - smoothstep(0.35, 0.65, n);
 }
 
@@ -70,5 +89,5 @@ export function laubWeight(x: number, z: number): number {
  *  pockets. Trees multiply by `1 - lichtung`, flowers/bushes by `1 + lichtung·k`. */
 export function lichtung(x: number, z: number): number {
   const n = fbm2(x / CLEARING_WAVELENGTH, z / CLEARING_WAVELENGTH, CLEARING_SEED);
-  return smoothstep(0.62, 0.72, n);
+  return smoothstep(CLEARING_EDGE_LO + config.clearingBias, CLEARING_EDGE_HI + config.clearingBias, n);
 }

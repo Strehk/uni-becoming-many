@@ -61,8 +61,10 @@ export function scatterChunk(
   def: SpeciesDef,
   affinity: Float32Array,
   speciesIndex: number,
+  /** Effective per-chunk cap (density config × base cap). Defaults to the base
+   *  cap; the flora config passes the live effective value. */
+  cap: number = def.perChunkCap,
 ): ScatterBlock {
-  const cap = def.perChunkCap;
   const matrices = new Float32Array(cap * 16);
   const jitter = new Float32Array(cap);
 

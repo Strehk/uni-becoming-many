@@ -78,10 +78,14 @@ export class SpeciesInstances {
     life: LifeUniforms,
     layers?: FloraLayerCompositor,
     foliageAtlas?: THREE.Texture,
+    /** Per-chunk cap the buffers are SIZED for — the density ceiling. Defaults to
+     *  the base cap; the flora config passes a larger reserve so live density
+     *  edits re-scatter into the same buffers without reallocation. */
+    reserveCap: number = def.perChunkCap,
   ) {
     this.def = def;
-    // Worst case: every live chunk fills its cap at once.
-    this.capacity = maxLiveChunks * def.perChunkCap;
+    // Worst case: every live chunk fills its reserve cap at once.
+    this.capacity = maxLiveChunks * reserveCap;
 
     // Two material variants at most: solid parts share one graph, foliage parts
     // (atlas-cutout cards, see material.ts) share the other. Built lazily — a
@@ -208,6 +212,19 @@ export class SpeciesInstances {
         this.markDirty(part);
         part.mesh.count = this.liveCount;
       }
+    }
+  }
+
+  /** Drop every chunk's instances (packing state only — buffers keep their
+   *  capacity). Used by a live density re-scatter: clear, then re-`addChunk` all
+   *  cached chunks with new caps. */
+  clear(): void {
+    this.blocks.clear();
+    this.order.length = 0;
+    this.liveCount = 0;
+    for (const part of this.parts) {
+      this.markDirty(part);
+      part.mesh.count = 0;
     }
   }
 

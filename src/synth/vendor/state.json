@@ -27,8 +27,8 @@
       "macro": 0.3,
       "melody": 0.25,
       "xy": [
-        0.9342930890866646,
-        0.5
+        0.07954554518253443,
+        0.1797408478163106
       ],
       "params": [
         0.15,
@@ -38,35 +38,35 @@
     },
     {
       "sense": "echo",
-      "variant": 0,
+      "variant": 3,
       "muted": false,
       "gate": "sinn_echo",
       "volume": 0.68,
-      "room": 0.34,
-      "cut": 0.9,
-      "macro": 0.55,
-      "melody": 0.55,
+      "room": 1,
+      "cut": 0.5876302083333333,
+      "macro": 1,
+      "melody": 0.6,
       "xy": [
-        0.4,
-        0.6
+        0.45,
+        0.55
       ],
       "params": [
-        0.5,
-        0.4
+        0.4,
+        0.1995833333333333
       ]
     },
     {
       "sense": "motion",
       "variant": 0,
-      "muted": false,
-      "gate": "sinn_motion",
+      "muted": true,
+      "gate": "aus",
       "volume": 0.2033854166666667,
-      "room": 0.34,
+      "room": 0,
       "cut": 0.9,
       "macro": 0.2,
       "melody": 0,
       "xy": [
-        0.4999999999999999,
+        0.5,
         0.5
       ],
       "params": [
@@ -77,7 +77,7 @@
     {
       "sense": "infrarot",
       "variant": 0,
-      "muted": false,
+      "muted": true,
       "gate": "sinn_infrarot",
       "volume": 0.7174739583333334,
       "room": 0.34,
@@ -96,7 +96,7 @@
     {
       "sense": "licht",
       "variant": 0,
-      "muted": false,
+      "muted": true,
       "gate": "sinn_uv",
       "volume": 0.2168489583333334,
       "room": 0.34,
@@ -115,7 +115,7 @@
     {
       "sense": "magnet",
       "variant": 0,
-      "muted": false,
+      "muted": true,
       "gate": "sinn_magnetfeld",
       "volume": 0.17690104166666673,
       "room": 0.702734375,
@@ -124,7 +124,7 @@
       "melody": 0,
       "xy": [
         0.3,
-        0.4410440653434249
+        0.36206319108200047
       ],
       "params": [
         0.45,
@@ -135,7 +135,7 @@
     {
       "sense": "rhythmus",
       "variant": 0,
-      "muted": false,
+      "muted": true,
       "gate": "sinn_netzwerk",
       "volume": 0.3114322916666667,
       "room": 0.34,
@@ -143,8 +143,8 @@
       "macro": 0.35,
       "melody": 0,
       "xy": [
-        0.3,
-        0.6
+        0.8112440640678239,
+        0.4460665214477212
       ],
       "params": [
         0.35,
@@ -154,7 +154,7 @@
     {
       "sense": "sicht",
       "variant": 0,
-      "muted": false,
+      "muted": true,
       "gate": "sinn_rundum",
       "volume": 0.5876302083333333,
       "room": 0.34,
@@ -226,6 +226,16 @@
       "layer": 5,
       "control": "pady",
       "min": 0,
+      "max": 1,
+      "staerke": 1,
+      "glatt": 0.4,
+      "kurve": "linear"
+    },
+    {
+      "quelle": "hoehe",
+      "layer": 0,
+      "control": "pady",
+      "min": 0.10885416666666667,
       "max": 1,
       "staerke": 1,
       "glatt": 0.4,
