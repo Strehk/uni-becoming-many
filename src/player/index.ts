@@ -1,16 +1,23 @@
 /**
  * Player — locomotion through the world.
  *
- * Flies forward at a constant speed along wherever it is looking. Two steering layers ride on
- * top, differing in whether they persist:
+ * Flies forward at a constant speed along wherever it is looking. Steering rides on top in
+ * three layers — the first two are the ICAROS flight model and both *persist*; the third is a
+ * debug-keyboard convenience that springs back:
  *
- *   - **Heading** (`update`'s `Steering`): an integrating *rate* — deflection turns the rig and
- *     the new heading persists after input returns to zero. This is how you turn and come about:
- *     curve while held, hold the new course on release. It is also the ICAROS flight model.
+ *   - **Heading** (`update`'s `roll`): an integrating *rate* — deflection yaws the rig about the
+ *     world-up axis and the new heading persists after input returns to zero. This is how you
+ *     turn and come about: curve while held, hold the new course on release. Because the yaw is
+ *     taken about world-up (never a tilted local axis), the horizon stays level — the camera can
+ *     never bank or roll upside down.
+ *   - **Altitude** (`update`'s `pitch`): an integrating vertical *rate* — deflection climbs or
+ *     descends (positive = up) and the altitude gained persists after input returns to zero.
+ *     Pitch moves the rig straight up/down without tilting it, so travel stays level and the
+ *     view never pitches with it. This is the ICAROS climb/descend.
  *   - **Pitch look** (`look`): an *absolute*, non-accumulating pitch of an inner gimbal.
  *     Deflection tilts the view — and therefore travel — up or down; zero re-centers. Nothing
- *     accumulates, so releasing springs back to level (you keep the altitude gained but don't
- *     stay pitched). The debug keyboard drives this for climb/descend.
+ *     accumulates, so releasing springs back to level. The debug keyboard drives this for
+ *     climb/descend; the ICAROS stream leaves it identity and uses the Altitude rate above.
  *
  * The player owns a rig `Group` (heading + position) carrying a gimbal `Group` (pitch look)
  * carrying the camera; **move the rig, never the camera directly**. This is the WebXR pattern:
@@ -19,7 +26,7 @@
  * debug pitch is used, so VR is unaffected.
  *
  * Convention (three.js): the rig looks down its local -Z, so "forward" is negative Z. Positive
- * pitch climbs; positive roll turns right.
+ * pitch climbs (raises altitude); positive roll turns right.
  */
 import * as THREE from "three/webgpu";
 
@@ -42,8 +49,8 @@ export type Locomotion = Steering &
 export type PlayerOptions = Readonly<{
   /** Constant forward speed, world units per second. */
   speed?: number;
-  /** Climb/dive rate at full pitch deflection, radians per second. */
-  pitchRate?: number;
+  /** Vertical climb/descend speed at full pitch deflection, world units per second. */
+  climbRate?: number;
   /** Turn rate at full roll deflection, radians per second. */
   yawRate?: number;
   /** Pitch-look angle at full deflection, radians. Bounds how far `look` tilts travel. */
@@ -57,12 +64,22 @@ export type PlayerOptions = Readonly<{
   floor?: (x: number, z: number) => number | null;
   /** Metres to keep between the rig and the terrain floor. Defaults to 3. */
   clearance?: number;
+  /**
+   * Maximum altitude above the terrain floor, in metres. Caps how high pitch can climb, so the
+   * player can never leave the world's airspace. Terrain-relative like `clearance` (and using the
+   * same `floor` query), so the ceiling follows the ground; when the floor is unknown, no cap is
+   * applied. Defaults to 200.
+   */
+  maxAltitude?: number;
 }>;
 
 export interface Player {
   /** Rig carrying the gimbal + camera. Add it to the scene; it is what moves through the world. */
   readonly rig: THREE.Group;
-  /** Advance one frame: apply heading `input`, then fly forward `speed * throttle * dtSeconds`. */
+  /**
+   * Advance one frame: yaw the heading by `roll`, then (unless paused) fly forward
+   * `speed * throttle * dtSeconds` and climb/descend by `pitch * climbRate * dtSeconds`.
+   */
   update(dtSeconds: number, input: Locomotion): void;
   /**
    * Tilt the look gimbal to an absolute, non-accumulating pitch. `pitch` is normalized to
@@ -82,11 +99,12 @@ export interface Player {
  */
 export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}): Player {
   const speed = options.speed ?? 4;
-  const pitchRate = options.pitchRate ?? 0.8;
+  const climbRate = options.climbRate ?? 4;
   const yawRate = options.yawRate ?? 0.8;
   const lookAngle = options.lookAngle ?? 0.7; // ~40° at full deflection
   const floor = options.floor;
   const clearance = options.clearance ?? 3;
+  const maxAltitude = options.maxAltitude ?? 200;
 
   const rig = new THREE.Group();
   rig.name = "player-rig";
@@ -100,36 +118,44 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
   // Scratch objects: forward = rig heading composed with the gimbal pitch look, per frame.
   const worldQuat = new THREE.Quaternion();
   const forward = new THREE.Vector3();
+  // Yaw is always taken about world-up so the heading can never tip into a bank or roll, no
+  // matter how the rig accumulates. (Constant, so declared once outside the hot path.)
+  const worldUp = new THREE.Vector3(0, 1, 0);
 
   function update(dtSeconds: number, input: Locomotion): void {
     if (dtSeconds <= 0) {
       return;
     }
-    // Heading: integrate the steering rate into the rig, so the new course persists — this is
-    // what lets you turn and come about.
-    rig.rotateX(input.pitch * pitchRate * dtSeconds);
-    rig.rotateY(-input.roll * yawRate * dtSeconds); // roll > 0 turns right
+    // Heading: integrate the roll rate into the rig as a yaw about world-up, so the new course
+    // persists (turn and come about) and the horizon stays level — never a bank or flip.
+    rig.rotateOnWorldAxis(worldUp, -input.roll * yawRate * dtSeconds); // roll > 0 turns right
 
     if (!input.paused) {
       // Fly along where we're actually looking = rig heading * gimbal pitch. (The rig's parent is
-      // the scene, assumed unrotated, so the rig's local quaternion is its world one.)
+      // the scene, assumed unrotated, so the rig's local quaternion is its world one.) The rig
+      // itself only ever yaws, so this forward is level unless the debug gimbal is pitched.
       worldQuat.copy(rig.quaternion).multiply(gimbal.quaternion);
       forward.set(0, 0, -1).applyQuaternion(worldQuat);
       rig.position.addScaledVector(forward, speed * (input.throttle ?? 1) * dtSeconds);
+      // Altitude: pitch is a vertical rate — climb/descend straight up/down (positive = up)
+      // without tilting the rig, so the view never pitches. The gained altitude persists.
+      rig.position.y += input.pitch * climbRate * dtSeconds;
     }
 
-    // Terrain floor: never let the rig sink into (or below a small margin above) the
-    // ground. Runs even when paused so a chunk streaming in underfoot still lifts us.
-    // A null floor means "no surface known here yet" — leave altitude untouched.
-    applyFloor();
+    // Terrain bounds: keep the rig within the airspace — at least `clearance` above the ground
+    // and at most `maxAltitude` above it. Runs even when paused so a chunk streaming in underfoot
+    // still lifts us. A null floor means "no surface known here yet" — leave altitude untouched.
+    applyBounds();
   }
 
-  function applyFloor(): void {
+  function applyBounds(): void {
     if (!floor) return;
     const ground = floor(rig.position.x, rig.position.z);
     if (ground === null) return;
     const min = ground + clearance;
+    const max = ground + maxAltitude;
     if (rig.position.y < min) rig.position.y = min;
+    else if (rig.position.y > max) rig.position.y = max;
   }
 
   function look(pitch: number): void {
