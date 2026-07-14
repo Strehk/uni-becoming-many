@@ -369,8 +369,8 @@ const hostOrigin =
 // Bias subtracted from the controller's pitch before it drives altitude. Positive pitch climbs,
 // so a positive bias shifts the neutral point downward: the rig gently sinks at rest, making
 // pitch-down easy and pitch-up harder (the controller ergonomics make climbing the easy default,
-// so we counterweight it here). ~0.2 of the -1..1 range.
-const PITCH_BIAS = 0.2;
+// so we counterweight it here). ~0.4 of the -1..1 range.
+const PITCH_BIAS = 0.4;
 
 // Latest validated controller orientation; steers the player each frame.
 const orientation: { pitch: number; roll: number; quality: number } = {
