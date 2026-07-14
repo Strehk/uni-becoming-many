@@ -42,7 +42,14 @@ export interface MotionSense {
 export function createMotionSense(scene: THREE.Scene, bus: Bus, creatures: Creatures): MotionSense {
   const group = new THREE.Group();
   group.name = "motion-particle-effect";
-  const trail = new ParticleTrailBuffer({ lifetimeFrames: 14, particleSize: 0.06, motionGain: 8 });
+  // maxParticles covers the whole flock set: 3 flocks × 24 birds × ~28 verts ×
+  // 14 lifetime frames ≈ 28 k — sized with headroom (plain float buffers, ~1 MB).
+  // particleSize 0.11: flocks now roam far rings (35-280 m) — trails must still
+  // read as a shimmer when a swarm passes at a hundred metres.
+  const trail = new ParticleTrailBuffer(
+    { lifetimeFrames: 14, particleSize: 0.11, motionGain: 8 },
+    48_000,
+  );
   group.add(trail.points);
   group.visible = false;
   scene.add(group);
@@ -124,7 +131,7 @@ export function createMotionSense(scene: THREE.Scene, bus: Bus, creatures: Creat
           key: "particleSize",
           label: "Partikelgröße",
           min: 0.01,
-          max: 0.3,
+          max: 0.6,
           step: 0.005,
           digits: 3,
           get: () => trail.particleSize,

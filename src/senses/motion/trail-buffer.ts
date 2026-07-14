@@ -6,10 +6,17 @@
 // their actor's centre — motion trails without the meshes.
 //
 // Changed for WebGPU: `THREE.Points` + `PointsMaterial` (sizable GL points) became
-// an instanced `THREE.Sprite` with storage-buffer attributes and a TSL graph —
+// an instanced `THREE.Sprite` with per-instance buffer attributes and a TSL graph —
 // world-sized, additive, collapsing to nothing as the colour fades.
+//
+// IMPORTANT: the buffers are CPU-written every frame, so they must be
+// `InstancedBufferAttribute`s read via `instancedBufferAttribute(...)` — the
+// classic dynamic-upload path (`needsUpdate` re-uploads). `instancedArray`
+// storage buffers are for GPU-compute-owned state: their CPU `needsUpdate`
+// upload stops after the initial one, which left every trail particle at the
+// zeroed first upload (invisible) while the CPU arrays were perfectly correct.
 
-import { instancedArray, smoothstep, uniform, uv, vec3 } from "three/tsl";
+import { instancedBufferAttribute, smoothstep, uniform, uv, vec3 } from "three/tsl";
 import * as THREE from "three/webgpu";
 import type { AnimatedVertexSampler } from "./sampler.ts";
 import type { MotionTarget } from "./target-adapters.ts";
@@ -49,8 +56,8 @@ export class ParticleTrailBuffer {
   private readonly spawnIntensities: Float32Array;
   private previousLocalPositions = new Float32Array(0);
   private previousReady = new Uint8Array(0);
-  private readonly positionAttribute: { needsUpdate: boolean };
-  private readonly colorAttribute: { needsUpdate: boolean };
+  private readonly positionAttribute: THREE.InstancedBufferAttribute;
+  private readonly colorAttribute: THREE.InstancedBufferAttribute;
 
   constructor(options: TrailBufferOptions = {}, maxParticles = 16_000) {
     this.lifetimeFrames = Math.max(1, Math.round(options.lifetimeFrames ?? 12));
@@ -65,16 +72,17 @@ export class ParticleTrailBuffer {
     this.colors = new Float32Array(maxParticles * 3);
     this.spawnIntensities = new Float32Array(maxParticles);
 
-    const posBuf = instancedArray(this.positions, "vec3");
-    const colorBuf = instancedArray(this.colors, "vec3");
-    this.positionAttribute = posBuf.value;
-    this.colorAttribute = colorBuf.value;
+    // Dynamic per-instance attributes — CPU writes + `needsUpdate` every frame.
+    this.positionAttribute = new THREE.InstancedBufferAttribute(this.positions, 3);
+    this.colorAttribute = new THREE.InstancedBufferAttribute(this.colors, 3);
+    this.positionAttribute.setUsage(THREE.DynamicDrawUsage);
+    this.colorAttribute.setUsage(THREE.DynamicDrawUsage);
 
     const material = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false });
     material.blending = THREE.AdditiveBlending;
     material.toneMapped = false;
-    material.positionNode = posBuf.toAttribute();
-    const color = vec3(colorBuf.toAttribute());
+    material.positionNode = instancedBufferAttribute<"vec3">(this.positionAttribute, "vec3");
+    const color = vec3(instancedBufferAttribute<"vec3">(this.colorAttribute, "vec3"));
     material.colorNode = color;
     // Soft round particle; fully faded particles collapse (no fill-rate waste).
     const d = uv().sub(0.5).length();

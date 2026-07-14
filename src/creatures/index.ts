@@ -4,9 +4,16 @@
 // The swarm/network prototypes deliberately ship NO creatures of their own — the
 // host provides them:
 //
-//   - a **boids bird swarm** (procedurally animated wing flap, terrain-aware,
-//     loosely tethered to the player). The `netzwerk` sense reads the birds as
-//     network nodes; the `motion` sense samples their animated vertices.
+//   - **boids bird flocks** (procedurally animated wing flap, terrain-aware).
+//     Flocking follows the classic Reynolds model as implemented by
+//     github.com/juanuys/boids: separation / alignment / cohesion against
+//     flockmates, a WANDERING GOAL each flock seeks ("migratory urge" — a
+//     waypoint re-rolled when reached), and a soft boundary that steers
+//     far-strayed birds back. Several independent flocks roam a wide radius
+//     around the player, so swarms drift near and far instead of orbiting the
+//     camera. The `netzwerk` sense reads the birds as network nodes; the
+//     `motion` sense samples their animated vertices — the meshes themselves
+//     stay hidden (perception-only creatures).
 //   - **mushroom spawn points** scattered on the terrain around the player (the
 //     mycelium network's anchors). Re-anchored when the player flies on; a
 //     `creatures:mushrooms-changed` bus event tells consumers to rebuild.
@@ -18,11 +25,38 @@ import * as THREE from "three/webgpu";
 import type { Bus } from "../signals/index.ts";
 import { signals } from "../signals/index.ts";
 
-const BIRD_COUNT = 28;
-/** The swarm roams inside this radius around its tether (the player). */
-const SWARM_RADIUS = 70;
+// ── Flock layout ──
+// Each flock roams its own distance RING around the player: one stays close
+// enough that its motion trails are always experienceable, the others range far
+// ("schön weit rumfliegen") and only sweep past now and then. All rings sit well
+// inside the streamed-terrain window (keepRadius 3 × 256 m chunks) so `ground()`
+// almost always answers.
+const FLOCK_RINGS: readonly { min: number; max: number }[] = [
+  { min: 35, max: 130 }, // the near flock — the one you meet
+  { min: 90, max: 200 },
+  { min: 150, max: 280 }, // the far wanderers
+];
+const BIRDS_PER_FLOCK = 24;
+/** A bird farther than its ring + this margin from the player is steered back
+ *  hard (the juanuys boundary rule — there: outside the sphere, wander ×20). */
+const BOUNDARY_MARGIN = 80;
+/** A flock re-rolls its waypoint when its centroid gets this close to it… */
+const WAYPOINT_REACHED = 40;
+/** …or after this many seconds (a flock that fights headwind still moves on). */
+const WAYPOINT_TIMEOUT = 35;
+
+// ── Boids tuning (adapted from juanuys/boids to metres + our speeds) ──
+const SEPARATION_RADIUS = 4;
+const ALIGNMENT_RADIUS = 14;
+const COHESION_RADIUS = 22;
+const SEEK_WEIGHT = 0.9;
+const MIN_SPEED = 5;
+const MAX_SPEED = 13;
+/** Acceleration clamp, m/s² (juanuys: maxForce = delta·5 against maxSpeed 5). */
+const MAX_FORCE = 30;
+
 const MIN_ALTITUDE = 8; // metres above ground
-const MAX_ALTITUDE = 55;
+const MAX_ALTITUDE = 60;
 const MUSHROOM_COUNT = 24;
 const MUSHROOM_RADIUS = 90;
 /** Re-scatter the mushrooms when the player is farther than this from their anchor. */
@@ -55,6 +89,15 @@ interface Bird extends BirdActor {
   readonly rightWing: THREE.Mesh;
   readonly flapPhase: number;
   readonly flapSpeed: number;
+  /** Which flock this bird belongs to — neighbours are flock-internal. */
+  readonly flock: number;
+}
+
+/** One flock's shared state: the wandering goal its members seek. */
+interface Flock {
+  readonly waypoint: THREE.Vector3;
+  /** Seconds since the waypoint was rolled (drives the timeout re-roll). */
+  age: number;
 }
 
 /** Low-poly bird: a body cone + two hinged wing plates (procedural flap = the
@@ -101,28 +144,52 @@ export function createCreatures(scene: THREE.Scene, bus: Bus, ground: GroundSour
   const pose = signals.playerPose.peek();
 
   // ── birds ──
-  const birds: Bird[] = [];
-  for (let i = 0; i < BIRD_COUNT; i++) {
-    const { root, leftWing, rightWing } = buildBird(material);
+  // A flock waypoint: somewhere in the flock's roam ring around the player, at
+  // soaring altitude over the local terrain (player height as the fallback
+  // while the chunk under it is still streaming).
+  const rollWaypoint = (target: THREE.Vector3, ring: { min: number; max: number }): void => {
     const a = Math.random() * Math.PI * 2;
-    const r = 15 + Math.random() * (SWARM_RADIUS - 20);
-    root.position.set(
-      pose.x + Math.cos(a) * r,
-      pose.y + 10 + Math.random() * 20,
-      pose.z + Math.sin(a) * r,
-    );
-    group.add(root);
-    birds.push({
-      object: root,
-      position: root.position,
-      velocity: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5)
-        .normalize()
-        .multiplyScalar(6),
-      leftWing,
-      rightWing,
-      flapPhase: Math.random() * Math.PI * 2,
-      flapSpeed: 7 + Math.random() * 3,
-    });
+    const r = ring.min + Math.random() * (ring.max - ring.min);
+    const x = pose.x + Math.cos(a) * r;
+    const z = pose.z + Math.sin(a) * r;
+    const g = ground(x, z);
+    const y = (g ?? pose.y) + MIN_ALTITUDE + 10 + Math.random() * 25;
+    target.set(x, y, z);
+  };
+
+  const flocks: Flock[] = [];
+  const birds: Bird[] = [];
+  for (const [f, ring] of FLOCK_RINGS.entries()) {
+    const flock: Flock = { waypoint: new THREE.Vector3(), age: 0 };
+    rollWaypoint(flock.waypoint, ring);
+    flocks.push(flock);
+
+    // The flock spawns as a loose cloud somewhere in its ring.
+    const a = Math.random() * Math.PI * 2;
+    const r = ring.min + Math.random() * (ring.max - ring.min) * 0.7;
+    const cx = pose.x + Math.cos(a) * r;
+    const cz = pose.z + Math.sin(a) * r;
+    for (let i = 0; i < BIRDS_PER_FLOCK; i++) {
+      const { root, leftWing, rightWing } = buildBird(material);
+      root.position.set(
+        cx + (Math.random() - 0.5) * 24,
+        pose.y + 14 + Math.random() * 22,
+        cz + (Math.random() - 0.5) * 24,
+      );
+      group.add(root);
+      birds.push({
+        object: root,
+        position: root.position,
+        velocity: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5)
+          .normalize()
+          .multiplyScalar(MIN_SPEED + 2),
+        leftWing,
+        rightWing,
+        flapPhase: Math.random() * Math.PI * 2,
+        flapSpeed: 7 + Math.random() * 3,
+        flock: f,
+      });
+    }
   }
 
   // ── mushrooms ──
@@ -156,7 +223,7 @@ export function createCreatures(scene: THREE.Scene, bus: Bus, ground: GroundSour
   const centre = new THREE.Vector3();
   const steer = new THREE.Vector3();
   const diff = new THREE.Vector3();
-  const tether = new THREE.Vector3();
+  const align = new THREE.Vector3();
 
   let elapsed = 0;
 
@@ -187,42 +254,79 @@ export function createCreatures(scene: THREE.Scene, bus: Bus, ground: GroundSour
         }
       }
 
-      // Swarm centre (for cohesion).
-      centre.set(0, 0, 0);
-      for (const b of birds) {
-        centre.add(b.position);
+      // ── Flock goals: reached / stale / left-behind waypoints get re-rolled ──
+      for (const [f, flock] of flocks.entries()) {
+        const ring = FLOCK_RINGS[f];
+        if (!ring) continue;
+        flock.age += dt;
+
+        centre.set(0, 0, 0);
+        for (const b of birds) {
+          if (b.flock === f) centre.add(b.position);
+        }
+        centre.divideScalar(BIRDS_PER_FLOCK);
+
+        const reached = centre.distanceTo(flock.waypoint) < WAYPOINT_REACHED;
+        const behind =
+          (flock.waypoint.x - pose.x) ** 2 + (flock.waypoint.z - pose.z) ** 2 >
+          (ring.max + 120) ** 2; // the player flew on — bring the route with them
+        if (reached || behind || flock.age > WAYPOINT_TIMEOUT) {
+          rollWaypoint(flock.waypoint, ring);
+          flock.age = 0;
+        }
       }
-      centre.divideScalar(birds.length);
-
-      tether.set(pose.x, pose.y + 18, pose.z);
 
       for (const b of birds) {
+        const flock = flocks[b.flock];
+        if (!flock) continue;
         steer.set(0, 0, 0);
 
-        // Cohesion toward the swarm centre.
-        diff.copy(centre).sub(b.position);
-        steer.addScaledVector(diff, 0.35);
-
-        // Separation + alignment against near neighbours.
+        // The three Reynolds rules against FLOCKmates (juanuys/boids ranges,
+        // scaled to metres): separation < alignment < cohesion radius.
+        centre.set(0, 0, 0);
+        align.set(0, 0, 0);
+        let cohesionCount = 0;
+        let alignCount = 0;
         for (const o of birds) {
-          if (o === b) {
+          if (o === b || o.flock !== b.flock) {
             continue;
           }
           diff.copy(b.position).sub(o.position);
           const d2 = diff.lengthSq();
-          if (d2 < 16 && d2 > 0.0001) {
-            steer.addScaledVector(diff, 6 / d2); // separation
+          if (d2 < SEPARATION_RADIUS * SEPARATION_RADIUS && d2 > 0.0001) {
+            steer.addScaledVector(diff, 10 / d2); // separation (inverse-square)
           }
-          if (d2 < 100) {
-            steer.addScaledVector(o.velocity, 0.02); // alignment
+          if (d2 < ALIGNMENT_RADIUS * ALIGNMENT_RADIUS) {
+            align.add(o.velocity);
+            alignCount++;
+          }
+          if (d2 < COHESION_RADIUS * COHESION_RADIUS) {
+            centre.add(o.position);
+            cohesionCount++;
           }
         }
+        if (alignCount > 0) {
+          align.divideScalar(alignCount).sub(b.velocity);
+          steer.addScaledVector(align, 0.5); // match neighbours' heading
+        }
+        if (cohesionCount > 0) {
+          centre.divideScalar(cohesionCount).sub(b.position);
+          steer.addScaledVector(centre, 0.25); // toward local centre of mass
+        }
 
-        // Soft tether to the player (the swarm stays experienceable).
-        diff.copy(tether).sub(b.position);
-        const tetherDist = diff.length();
-        if (tetherDist > SWARM_RADIUS) {
-          steer.addScaledVector(diff.normalize(), (tetherDist - SWARM_RADIUS) * 0.4);
+        // Migratory urge: seek the flock's wandering waypoint.
+        diff.copy(flock.waypoint).sub(b.position);
+        const goalDist = diff.length();
+        if (goalDist > 1) {
+          steer.addScaledVector(diff.divideScalar(goalDist), SEEK_WEIGHT * MAX_SPEED * 0.35);
+        }
+
+        // Boundary (juanuys: outside the sphere the return urge dominates).
+        const boundary = (FLOCK_RINGS[b.flock]?.max ?? 280) + BOUNDARY_MARGIN;
+        diff.set(pose.x - b.position.x, 0, pose.z - b.position.z);
+        const fromPlayer = diff.length();
+        if (fromPlayer > boundary) {
+          steer.addScaledVector(diff.normalize(), (fromPlayer - boundary) * 0.5);
         }
 
         // Terrain floor + altitude ceiling.
@@ -236,13 +340,18 @@ export function createCreatures(scene: THREE.Scene, bus: Bus, ground: GroundSour
           }
         }
 
-        // Gentle wander so the swarm never fully settles.
+        // Gentle wander so the flock never fully settles (juanuys wanderWeight 0.2).
         steer.x += Math.sin(elapsed * 0.7 + b.flapPhase * 3.1) * 0.8;
         steer.z += Math.cos(elapsed * 0.6 + b.flapPhase * 2.3) * 0.8;
 
+        // Acceleration clamp, then integrate with min/max speed.
+        const force = steer.length();
+        if (force > MAX_FORCE) {
+          steer.multiplyScalar(MAX_FORCE / force);
+        }
         b.velocity.addScaledVector(steer, dt);
         const speed = b.velocity.length();
-        const clamped = Math.min(Math.max(speed, 4), 11);
+        const clamped = Math.min(Math.max(speed, MIN_SPEED), MAX_SPEED);
         if (speed > 0.001) {
           b.velocity.multiplyScalar(clamped / speed);
         }
