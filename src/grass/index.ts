@@ -16,6 +16,7 @@
 // `three/webgpu`. No GLSL.
 
 import * as THREE from "three/webgpu";
+import { AIR_ONLY_SENSES, SENSE_ORDER } from "../senses/ids.ts";
 import { signals } from "../signals/index.ts";
 import type {
   ChunkBuiltInfo,
@@ -136,8 +137,11 @@ export function createGrass(opts: CreateGrassOptions): Grass {
     },
 
     update(_dt: number): void {
-      // Void gate: no sense active ⇒ hide + skip ALL GPU work (compute + draw).
-      const revealed = signals.activeSense.peek() !== "none";
+      // Void gate: no SURFACE-revealing sense active ⇒ hide + skip ALL GPU work
+      // (compute + draw). Air-only senses (duft) never reveal the grass.
+      const revealed = SENSE_ORDER.some(
+        (id) => !AIR_ONLY_SENSES.has(id) && signals.sense[id].peek() > 0,
+      );
       group.visible = revealed;
       if (!revealed) return;
 

@@ -27,7 +27,14 @@ import { createSenseDirector } from "./director.ts";
 import { SENSE_KEY_ORDER, SENSE_LABELS, type SenseId } from "./ids.ts";
 import { type ShaderSenses, createShaderSenses } from "./shader/index.ts";
 
-export { SENSE_KEY_ORDER, SENSE_LABELS, SENSE_ORDER, SENSE_SYNTH_MAP, isSenseId } from "./ids.ts";
+export {
+  AIR_ONLY_SENSES,
+  SENSE_KEY_ORDER,
+  SENSE_LABELS,
+  SENSE_ORDER,
+  SENSE_SYNTH_MAP,
+  isSenseId,
+} from "./ids.ts";
 export type { SenseId } from "./ids.ts";
 export { createSenseDirector } from "./director.ts";
 export type { SenseDirector } from "./director.ts";
@@ -153,21 +160,23 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
     rimColor: 0xb26bff,
     dustStrength: 1,
   },
-  // 5 — smell / chemosense: wide field, green gradient; scent plumes carry the colour.
+  // 5 — smell / chemosense: an AIR-ONLY sense. The surfaces stay in the white
+  // void (same numbers as `none` — white sky, no distance tint); all colour in
+  // the picture comes from the scent plumes themselves drifting through the air.
   duft: {
     id: "duft",
     label: SENSE_LABELS.duft,
-    viewRadius: 600,
-    revealSoftness: 80,
-    depthLevels: 18,
-    fogNear: 70,
-    fogFar: 560,
-    rimPower: 2.0,
-    rimStrength: 0.35,
-    colorNear: 0xbfe08a,
-    colorFar: 0x2f5a4a,
-    fogColor: 0x0c1612,
-    rimColor: 0x9ff06a,
+    viewRadius: 60,
+    revealSoftness: 40,
+    depthLevels: 2,
+    fogNear: 4,
+    fogFar: 90,
+    rimPower: 1,
+    rimStrength: 0,
+    colorNear: 0xf0f4ff,
+    colorFar: 0xf0f4ff,
+    fogColor: 0xf0f4ff,
+    rimColor: 0xf0f4ff,
     dustStrength: 1,
   },
   // 6 — collective / network: wide field, red accent over near-dark ground.

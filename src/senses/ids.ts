@@ -37,6 +37,12 @@ export const SENSE_ORDER: readonly SenseId[] = [
   "rundum",
 ];
 
+/** Senses that perceive only the AIR, not the world's surfaces. While solely an
+ *  air-only sense is active, terrain/flora/grass stay in the white void — you see
+ *  the medium (scent plumes, dust), never the ground it drifts over. Consumed by
+ *  the world-reveal gates in main.ts and src/grass/. */
+export const AIR_ONLY_SENSES: ReadonlySet<SenseId> = new Set(["duft"]);
+
 export type SenseKeySlot = SenseId | null;
 
 /** Manual performance order. `null` is Luft: all sense layers off, white void.

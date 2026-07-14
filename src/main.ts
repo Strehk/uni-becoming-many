@@ -22,7 +22,7 @@ import { createKeyboardControls } from "./player/keyboard-controls.ts";
 import { createRenderer } from "./renderer/index.ts";
 import { createDuftSense } from "./senses/duft/index.ts";
 import { SCENT_TYPES } from "./senses/duft/params.ts";
-import { SENSE_ORDER, createSenses } from "./senses/index.ts";
+import { AIR_ONLY_SENSES, SENSE_ORDER, createSenses } from "./senses/index.ts";
 import { createMagnetfeldSense } from "./senses/magnetfeld/index.ts";
 import { createMotionSense } from "./senses/motion/index.ts";
 import { createNetzwerkSense } from "./senses/netzwerk/index.ts";
@@ -445,8 +445,11 @@ renderer.start((dtSeconds) => {
   // Flora is perception-dependent: the white void must read as an empty uniform field,
   // so the flora stays hidden until a sense reveals the world. Dust, by contrast, hangs
   // in the air even in the void — a faint drift of motes so the white-out never reads as
-  // a dead blank screen before the first sense comes up.
-  const worldRevealed = signals.activeSense.peek() !== "none";
+  // a dead blank screen before the first sense comes up. AIR-ONLY senses (duft) never
+  // reveal the surfaces: alone they show plumes drifting through the white void.
+  const worldRevealed = SENSE_ORDER.some(
+    (id) => !AIR_ONLY_SENSES.has(id) && signals.sense[id].peek() > 0,
+  );
   life.group.visible = worldRevealed;
   netzwerk.update(clock.delta); // swarm web + mycelium (fade, rebuild, pulse)
   motion.update(clock.delta); // vertex-motion trails (spawn/fade ring buffer)
