@@ -13,6 +13,7 @@ import {
   loadExperienceConfig,
   saveExperienceConfig,
 } from "./experience/config.ts";
+import { createCredits } from "./experience/credits.ts";
 import { createInterfaceModeController } from "./experience/interface-mode.ts";
 import { type StartGate, createStartGate } from "./experience/start-gate.ts";
 import { createStartMenu } from "./experience/start-menu.ts";
@@ -311,6 +312,16 @@ const offTheatrePosition = theatre.onPositionChange((seconds) => {
 });
 window.addEventListener("pagehide", offTheatrePosition);
 
+// End-of-piece credits / thank-you screen. Visibility + fade are authored on the Theatre timeline
+// (`credits.opacity`); one canvas-textured panel serves both presentations — a camera-following
+// billboard on desktop, world-locked in front of the player in VR (see src/experience/credits.ts).
+const credits = createCredits({
+  scene: renderer.scene,
+  camera: renderer.camera,
+  renderer: renderer.instance,
+});
+window.addEventListener("pagehide", () => credits.dispose());
+
 if (import.meta.env.DEV) {
   (window as Window & { __bmDebug?: unknown }).__bmDebug = { clock, signals, theatre };
 }
@@ -548,6 +559,10 @@ renderer.start((dtSeconds) => {
   // (view reveal / distance fog / rim / dust fades). In VR this reads the headset rig,
   // not the TSL `cameraPosition` node (which the WebGPU WebXR path leaves unresolved).
   syncCameraPos(renderer.instance, renderer.camera);
+
+  // Authored credits/thank-you screen: desktop billboard vs VR world-locked panel, faded by the
+  // Theatre `credits.opacity` envelope. Positioned from the just-synced camera pose.
+  credits.update(theatre.credits.value.opacity);
 
   senses.update(dtSeconds); // writes senseProgress; eases the view uniforms
   magnetfeld.update(dtSeconds); // sky dome fade + follow player + spine time

@@ -8,7 +8,7 @@
       },
       "sequence": {
         "subUnitsPerUnit": 30,
-        "length": 476.05,
+        "length": 481.97,
         "type": "PositionalSequence",
         "tracksByObject": {
           "arc": {
@@ -691,7 +691,7 @@
                 "keyframes": [
                   {
                     "id": "j_NsYUWBpR",
-                    "position": 0,
+                    "position": -0.467,
                     "connectedRight": true,
                     "handles": [
                       0.5,
@@ -704,7 +704,7 @@
                   },
                   {
                     "id": "wePIwd4hEh",
-                    "position": 96.933,
+                    "position": 96.467,
                     "connectedRight": true,
                     "handles": [
                       0.5,
@@ -734,6 +734,58 @@
             "trackIdByPropPath": {
               "[\"maxHeight\"]": "7XoseAELsP"
             }
+          },
+          "credits": {
+            "trackData": {
+              "MN7ArEmgkk": {
+                "type": "BasicKeyframedTrack",
+                "__debugName": "credits:[\"opacity\"]",
+                "keyframes": [
+                  {
+                    "id": "Byi8HWiC07",
+                    "position": 0,
+                    "connectedRight": true,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
+                    "value": 0
+                  },
+                  {
+                    "id": "mz0q-qC1H8",
+                    "position": 475.3,
+                    "connectedRight": true,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.455,
+                      0.03
+                    ],
+                    "type": "bezier",
+                    "value": 0
+                  },
+                  {
+                    "id": "eFg7nndhM6",
+                    "position": 477.167,
+                    "connectedRight": true,
+                    "handles": [
+                      0.515,
+                      0.955,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            "trackIdByPropPath": {
+              "[\"opacity\"]": "MN7ArEmgkk"
+            }
           }
         }
       }
@@ -741,6 +793,7 @@
   },
   "definitionVersion": "0.4.0",
   "revisionHistory": [
+    "Q84OpdcquZqCdxp1",
     "Ulkdo0pQumgvAXIT",
     "tyNVsWjm5cKP5oai",
     "5IP788Sq27P3vmgP",

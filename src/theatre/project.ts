@@ -83,11 +83,26 @@ const FLIGHT_PROPS = {
 
 export type FlightObject = ISheetObject<typeof FLIGHT_PROPS>;
 
+/**
+ * Authored credits/thank-you screen. `opacity` (0..1) is the master fade of the end-of-piece
+ * credits panel — keyframe it up near the end of the timeline to bring the panel in, back to 0
+ * to dismiss it. "When it shows" is simply where the envelope rises; the panel content lives in
+ * `src/experience/credits.ts`. Like `flight`, this is read straight into its subsystem each frame,
+ * never onto the signal substrate (it is not an authored *signal*).
+ */
+const CREDITS_PROPS = {
+  opacity: types.number(0, { range: [0, 1], label: "Credits Opacity" }),
+};
+
+export type CreditsObject = ISheetObject<typeof CREDITS_PROPS>;
+
 export interface Theatre {
   /** Authored envelopes: unrest / intensity + the per-sense layer envelopes. */
   readonly arc: ArcObject;
   /** Authored flight parameters (the altitude ceiling); read each frame into the player rig. */
   readonly flight: FlightObject;
+  /** Authored credits screen fade (0..1); read each frame into the credits subsystem. */
+  readonly credits: CreditsObject;
   /** The timeline sheet whose sequence is slaved to the clock (~300 s dramaturgy). */
   readonly timeline: ISheet;
   /** Drive the timeline playhead. Call each frame **only while the clock is running**. */
@@ -125,6 +140,7 @@ export async function initTheatre(): Promise<Theatre> {
   const timeline = project.sheet("Timeline");
   const arc = timeline.object("arc", ARC_PROPS);
   const flight = timeline.object("flight", FLIGHT_PROPS);
+  const credits = timeline.object("credits", CREDITS_PROPS);
 
   if (import.meta.env.DEV && new URLSearchParams(window.location.search).get("studio") === "1") {
     // Dynamic import ⇒ @theatre/studio is excluded from the production bundle.
@@ -136,7 +152,7 @@ export async function initTheatre(): Promise<Theatre> {
     // open on the stale browser snapshot and prompt "Use browser's state / Use disk state" — pick
     // "Use disk state" to reload the committed file.
     studio.initialize({ usePersistentStorage: true });
-    studio.setSelection([timeline, arc, flight]);
+    studio.setSelection([timeline, arc, flight, credits]);
     // Tip: `studio.createContentOfSaveFile("Becoming Many")` returns the state object to write
     // into src/theatre/state.json — the production save file — without the Studio export button.
   }
@@ -146,6 +162,7 @@ export async function initTheatre(): Promise<Theatre> {
   return {
     arc,
     flight,
+    credits,
     timeline,
     setPosition(seconds: number): void {
       timeline.sequence.position = seconds;
