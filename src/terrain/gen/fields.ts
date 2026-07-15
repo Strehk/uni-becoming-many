@@ -122,7 +122,10 @@ export function temperature01(
     fbm(psx / (P.continentScale * 8), psy / (P.continentScale * 8), S_GRAD, 2) *
     (P.temperatureGradient * 0.5);
   const height = baseHeight01(wx, wy, seedOffset, P);
-  const lapse = clamp(height - P.waterLevel, 0, 1) * 0.85;
+  // Lapse anchored to a FIXED reference (not waterLevel) and softened (0.85 → 0.5)
+  // so only genuinely high ground cools: dropping the sea level no longer chills the
+  // whole world, which was flooding the map with tundra/taiga.
+  const lapse = clamp(height - 0.45, 0, 1) * 0.5;
   return clamp(climate + grad - lapse, 0, 1);
 }
 
