@@ -18,6 +18,11 @@ import type { SensePanelDescriptor } from "../../dev-console/sense-controls.ts";
 import type { Bus } from "../../signals/index.ts";
 import { signals } from "../../signals/index.ts";
 import { type EmissionProfile, createDefaultEmissionProfile } from "./emission-profiles.ts";
+import {
+  MOTION_POINT_SOURCE_REGISTER,
+  MOTION_POINT_SOURCE_UNREGISTER,
+  type MotionPointSource,
+} from "./point-sources.ts";
 import { AnimatedVertexSampler } from "./sampler.ts";
 import { type MotionTarget, type MotionTargetGroup, normalizeTargets } from "./target-adapters.ts";
 import { ParticleTrailBuffer } from "./trail-buffer.ts";
@@ -54,6 +59,13 @@ export function createMotionSense(scene: THREE.Scene, bus: Bus, creatures: Creat
   group.add(trail.points);
   group.visible = false;
   scene.add(group);
+
+  interface PointTrailEntry {
+    readonly source: MotionPointSource;
+    readonly trail: ParticleTrailBuffer;
+    fadeFramesLeft: number;
+  }
+  const pointTrails = new Map<string, PointTrailEntry>();
 
   let targets: MotionTarget[] = [];
   let samplers: AnimatedVertexSampler[] = [];
@@ -99,6 +111,56 @@ export function createMotionSense(scene: THREE.Scene, bus: Bus, creatures: Creat
   // bird meshes when it is (the mesh objects the samplers cached are now stale).
   const offBirds = bus.on("creatures:birds-changed", retargetBirds);
 
+  const offPointRegister = bus.on(MOTION_POINT_SOURCE_REGISTER, (payload) => {
+    const source = payload as Partial<MotionPointSource> | undefined;
+    if (
+      !source ||
+      typeof source.id !== "string" ||
+      typeof source.maxPoints !== "number" ||
+      typeof source.getWorldPositions !== "function" ||
+      typeof source.isActive !== "function"
+    ) {
+      return;
+    }
+
+    pointTrails.get(source.id)?.trail.dispose();
+    const sizeScale = source.particleSizeScale ?? 1;
+    const sourceTrail = new ParticleTrailBuffer(
+      {
+        lifetimeFrames: trail.lifetimeFrames,
+        particleSize: trail.particleSize * sizeScale,
+        expansionDistance: trail.expansionDistance,
+        motionGain: trail.motionGain,
+        fadePower: trail.fadePower,
+        density: trail.density,
+        opacity: trail.opacity,
+      },
+      Math.max(1, Math.ceil(source.maxPoints)) * 40,
+    );
+    group.add(sourceTrail.points);
+    pointTrails.set(source.id, {
+      source: source as MotionPointSource,
+      trail: sourceTrail,
+      fadeFramesLeft: 0,
+    });
+  });
+  const offPointUnregister = bus.on(MOTION_POINT_SOURCE_UNREGISTER, (payload) => {
+    const id = (payload as { id?: unknown } | undefined)?.id;
+    if (typeof id !== "string") return;
+    pointTrails.get(id)?.trail.dispose();
+    pointTrails.delete(id);
+  });
+
+  // Persistent fauna mosquitoes use the same world-point trail path as the
+  // event swarm, but remain coupled to the global motion-sense signal.
+  bus.emit(MOTION_POINT_SOURCE_REGISTER, {
+    id: "fauna:mosquitoes",
+    maxPoints: creatures.mosquitoes.maxPoints,
+    particleSizeScale: 0.15,
+    getWorldPositions: () => creatures.mosquitoes.getWorldPositions(),
+    isActive: () => creatures.mosquitoes.count > 0,
+  } satisfies MotionPointSource);
+
   const setEnabled = (next: boolean): void => {
     if (next === enabled) {
       return;
@@ -133,18 +195,27 @@ export function createMotionSense(scene: THREE.Scene, bus: Bus, creatures: Creat
     }
     if (key === "particleSize") {
       trail.setParticleSize(value);
+      for (const entry of pointTrails.values()) {
+        entry.trail.setParticleSize(value * (entry.source.particleSizeScale ?? 1));
+      }
     } else if (key === "motionGain") {
       trail.motionGain = value;
+      for (const entry of pointTrails.values()) entry.trail.motionGain = value;
     } else if (key === "expansionDistance") {
       trail.expansionDistance = value;
+      for (const entry of pointTrails.values()) entry.trail.expansionDistance = value;
     } else if (key === "fadePower") {
       trail.fadePower = value;
+      for (const entry of pointTrails.values()) entry.trail.fadePower = value;
     } else if (key === "density") {
       trail.density = Math.min(1, Math.max(0, value));
+      for (const entry of pointTrails.values()) entry.trail.density = trail.density;
     } else if (key === "lifetimeFrames") {
       trail.setLifetimeFrames(value);
+      for (const entry of pointTrails.values()) entry.trail.setLifetimeFrames(value);
     } else if (key === "opacity") {
       trail.setOpacity(value);
+      for (const entry of pointTrails.values()) entry.trail.setOpacity(value);
     }
   });
 
@@ -223,34 +294,51 @@ export function createMotionSense(scene: THREE.Scene, bus: Bus, creatures: Creat
       ],
     },
     update(): void {
-      if (!totalVertexCount) {
+      if (!totalVertexCount && pointTrails.size === 0) {
         return;
       }
-      if (!enabled) {
-        if (fadeFramesLeft > 0) {
-          fadeFramesLeft--;
-          trail.fadeOnly();
-          if (fadeFramesLeft === 0) {
-            group.visible = false;
-          }
+      if (enabled && totalVertexCount) {
+        let offset = 0;
+        for (const sampler of samplers) {
+          sampler.sample(sampledVertices, offset);
+          offset += sampler.vertexCount;
         }
-        return;
+        trail.spawnFromSamples(sampledVertices, samplers, targets);
+      } else if (!enabled && fadeFramesLeft > 0) {
+        fadeFramesLeft--;
+        if (totalVertexCount) trail.fadeOnly();
       }
-      let offset = 0;
-      for (const sampler of samplers) {
-        sampler.sample(sampledVertices, offset);
-        offset += sampler.vertexCount;
+
+      for (const entry of pointTrails.values()) {
+        const canSpawn = enabled || entry.source.alwaysEnabled === true;
+        if (canSpawn && entry.source.isActive()) {
+          entry.trail.spawnFromWorldPoints(entry.source.getWorldPositions());
+          entry.fadeFramesLeft = entry.trail.lifetimeFrames;
+        } else if (entry.fadeFramesLeft > 0) {
+          entry.trail.fadeOnly();
+          entry.fadeFramesLeft--;
+        }
       }
-      trail.spawnFromSamples(sampledVertices, samplers, targets);
+
+      const pointTrailVisible = Array.from(pointTrails.values()).some(
+        (entry) =>
+          (enabled || entry.source.alwaysEnabled === true) &&
+          (entry.source.isActive() || entry.fadeFramesLeft > 0),
+      );
+      group.visible = enabled || fadeFramesLeft > 0 || pointTrailVisible;
     },
     dispose(): void {
       offSignal();
       offParams();
       offBirds();
+      offPointRegister();
+      offPointUnregister();
       for (const sampler of samplers) {
         sampler.dispose();
       }
       trail.dispose();
+      for (const entry of pointTrails.values()) entry.trail.dispose();
+      pointTrails.clear();
       group.removeFromParent();
     },
   };

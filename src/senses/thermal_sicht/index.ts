@@ -361,9 +361,7 @@ export function createThermalSicht(): ShaderSense {
       const microShift = microNoise.mul(microVariation).mul(ground.add(grass));
 
       // ── Höhenlage kühlt Boden, Fels und Gras ab (Wasser bleibt träge).
-      const altitudeShift = max(positionWorld.y, 0)
-        .mul(altitudeCooling)
-        .mul(ground.add(grass));
+      const altitudeShift = max(positionWorld.y, 0).mul(altitudeCooling).mul(ground.add(grass));
 
       const rawHeat = baseHeat
         .add(animalShift)

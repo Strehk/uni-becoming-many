@@ -6,6 +6,6 @@
 // list, without circular imports. Adding an event = adding its id here plus a
 // definition file under `src/events/definitions/`.
 
-export const EVENT_IDS = ["birdCircle"] as const;
+export const EVENT_IDS = ["birdCircle", "batFlight", "mosquitoSwarm"] as const;
 
 export type EventId = (typeof EVENT_IDS)[number];

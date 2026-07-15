@@ -7,6 +7,7 @@
 
 import type * as THREE from "three/webgpu";
 import type { KitUniforms } from "../render/uniforms.ts";
+import type { Bus } from "../signals/index.ts";
 import type { EventId } from "./ids.ts";
 
 /**
@@ -15,11 +16,14 @@ import type { EventId } from "./ids.ts";
  * distinction `syncCameraPos` makes). Events anchor their routes here.
  */
 export type AnchorPose = (position: THREE.Vector3, quaternion: THREE.Quaternion) => void;
+export type EventGroundSource = (x: number, z: number) => number | null;
 
 /** Everything the host hands an event definition at creation time. */
 export interface EventContext {
   /** The scene graph — events parent their own root group into it. */
   scene: THREE.Scene;
+  /** Shared event/sense substrate for dynamic integrations. */
+  bus: Bus;
   /**
    * Where event roots live; defaults to the scene. Pass the player RIG so a
    * camera-anchored route travels with the constantly-gliding player instead
@@ -27,6 +31,11 @@ export interface EventContext {
    * stay free to look around the route).
    */
   parent?: THREE.Object3D | undefined;
+  /** Optional translation-only source for routes that follow player XYZ while
+   * ignoring camera/head pose and every source rotation. */
+  positionSource?: THREE.Object3D | undefined;
+  /** Streamed terrain height for events that must stay above ground. */
+  ground?: EventGroundSource | undefined;
   /** The presenting-camera pose provider (VR-correct, see {@link AnchorPose}). */
   anchor: AnchorPose;
   /** The live sense-look uniforms (distance fog / view reveal), optional. */

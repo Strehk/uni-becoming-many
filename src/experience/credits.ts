@@ -27,12 +27,7 @@ import * as THREE from "three/webgpu";
  */
 export const CREDITS_CONTENT: { title: string; lines: string[] } = {
   title: "BECOMING MANY",
-  lines: [
-    "A Project By",
-    "Erasmus Schmidt",
-    "Eddie Huesmann",
-    "Tade Strehk",
-  ],
+  lines: ["A Project By", "Erasmus Schmidt", "Eddie Huesmann", "Tade Strehk"],
 };
 
 /** Metres the panel sits in front of the viewer. */

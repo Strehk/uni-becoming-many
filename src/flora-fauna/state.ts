@@ -25,9 +25,30 @@ export function configFromState(state: unknown): FloraFaunaConfig {
       ? (state as Partial<FloraFaunaStateFile>).config
       : undefined;
   if (!config || typeof config !== "object") return DEFAULT_CONFIG;
+  const rawFauna = config.fauna as
+    | (Partial<FloraFaunaConfig["fauna"]> & {
+        birdsPerFlock?: number;
+        batsPerFlock?: number;
+      })
+    | undefined;
+  const { birdsPerFlock, batsPerFlock, ...currentFauna } = rawFauna ?? {};
+  const fauna = { ...DEFAULT_CONFIG.fauna, ...currentFauna };
+  if (rawFauna?.birdMinPerFlock === undefined && typeof birdsPerFlock === "number") {
+    fauna.birdMinPerFlock = birdsPerFlock;
+  }
+  if (rawFauna?.birdMaxPerFlock === undefined && typeof birdsPerFlock === "number") {
+    fauna.birdMaxPerFlock = birdsPerFlock;
+  }
+  if (rawFauna?.batMinPerFlock === undefined && typeof batsPerFlock === "number") {
+    fauna.batMinPerFlock = batsPerFlock;
+  }
+  if (rawFauna?.batMaxPerFlock === undefined && typeof batsPerFlock === "number") {
+    fauna.batMaxPerFlock = batsPerFlock;
+  }
+
   return {
     flora: { ...DEFAULT_CONFIG.flora, ...config.flora },
-    fauna: { ...DEFAULT_CONFIG.fauna, ...config.fauna },
+    fauna,
   };
 }
 

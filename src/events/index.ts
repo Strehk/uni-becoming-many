@@ -25,12 +25,18 @@ import type * as THREE from "three/webgpu";
 import type { KitUniforms } from "../render/uniforms.ts";
 import type { Bus } from "../signals/index.ts";
 import { signals } from "../signals/index.ts";
+import { batFlightEvent } from "./definitions/bat-flight.ts";
 import { birdCircleEvent } from "./definitions/bird-circle.ts";
+import { mosquitoSwarmEvent } from "./definitions/mosquito-swarm.ts";
 import type { EventId } from "./ids.ts";
-import type { AnchorPose, EventDefinition, EventInstance } from "./types.ts";
+import type { AnchorPose, EventDefinition, EventGroundSource, EventInstance } from "./types.ts";
 
 /** The event registry — a new animal/route is one import + one entry here. */
-const DEFINITIONS: readonly EventDefinition[] = [birdCircleEvent];
+const DEFINITIONS: readonly EventDefinition[] = [
+  birdCircleEvent,
+  batFlightEvent,
+  mosquitoSwarmEvent,
+];
 
 export interface Events {
   /** id + label of every registered event (drives the dev panel). */
@@ -45,6 +51,10 @@ export interface EventsOptions {
   /** Where event roots live (pass the player rig so routes travel with the
    *  gliding player); defaults to the scene. */
   parent?: THREE.Object3D | undefined;
+  /** Translation-only source for player-relative events. */
+  positionSource?: THREE.Object3D | undefined;
+  /** Optional streamed-terrain height source for ground-safe paths. */
+  ground?: EventGroundSource | undefined;
   /** The underlying WebGPU renderer — for the VR-correct presenting camera. */
   renderer: THREE.WebGPURenderer;
   /** The mono app camera (the XR camera overrides it while presenting). */
@@ -55,7 +65,7 @@ export interface EventsOptions {
 }
 
 export function createEvents(options: EventsOptions): Events {
-  const { scene, parent, renderer, camera, bus, uniforms } = options;
+  const { scene, parent, positionSource, ground, renderer, camera, bus, uniforms } = options;
 
   // The presenting camera's pose — the same XR rule as `syncCameraPos`
   // (src/render/camera-pos.ts): while a VR session presents, read the XR
@@ -82,7 +92,7 @@ export function createEvents(options: EventsOptions): Events {
   for (const definition of DEFINITIONS) {
     const entry: Entry = {
       definition,
-      instance: definition.create({ scene, parent, anchor, uniforms }),
+      instance: definition.create({ scene, bus, parent, positionSource, ground, anchor, uniforms }),
       ready: false,
     };
     entries.set(definition.id, entry);

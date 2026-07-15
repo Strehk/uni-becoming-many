@@ -323,11 +323,12 @@ renderer.scene.add(player.rig);
 // close past the camera on an authored route). Triggered by Theatre pulses
 // (arc.events.*, rising edge) or the dev panel — both over the same
 // `event:trigger` bus channel; the module wires its own `bus.when` crossings.
-// Routes anchor in WORLD space at the camera pose when triggered (they never
-// follow the camera) — the fly-by geometry is tuned against the player's
-// constant 6 m/s glide (see definitions/bird-circle.ts).
+// birdCircle follows only the player rig's XYZ translation. Its route keeps a
+// fixed world orientation and ignores rig, camera and headset rotation.
 const events = createEvents({
   scene: renderer.scene,
+  positionSource: player.rig,
+  ground: (x, z) => world.groundHeightAt(x, z),
   renderer: renderer.instance,
   camera: renderer.camera,
   bus,

@@ -39,6 +39,8 @@ export type SenseAuthority = "manual" | "theatre";
 function createEventCells(): Record<EventId, Signal<number>> {
   return {
     birdCircle: signal(0),
+    batFlight: signal(0),
+    mosquitoSwarm: signal(0),
   };
 }
 

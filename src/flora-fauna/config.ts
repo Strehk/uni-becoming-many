@@ -137,12 +137,31 @@ export interface FloraConfig {
 export interface FaunaConfig {
   /** Number of independent bird flocks (rebuild on change). */
   readonly flockCount: number;
-  /** Birds in each flock (rebuild on change). */
-  readonly birdsPerFlock: number;
+  /** Inclusive random bird-count range rolled independently per flock. */
+  readonly birdMinPerFlock: number;
+  readonly birdMaxPerFlock: number;
   /** Multiplier on the flock roam-ring radii (live). */
   readonly roamScale: number;
   /** Multiplier on min/max flight speed (live). */
   readonly flightSpeed: number;
+  /** Number of independent bat flocks (rebuild on change). */
+  readonly batFlockCount: number;
+  /** Inclusive random bat-count range rolled independently per flock. */
+  readonly batMinPerFlock: number;
+  readonly batMaxPerFlock: number;
+  /** Bat roam-ring multiplier (live). */
+  readonly batRoamScale: number;
+  /** Bat min/max flight-speed multiplier (live). */
+  readonly batFlightSpeed: number;
+  /** Number of persistent, ground-near mosquito swarms. */
+  readonly mosquitoSwarmCount: number;
+  /** Inclusive random mosquito-count range rolled independently per swarm. */
+  readonly mosquitoMinPerSwarm: number;
+  readonly mosquitoMaxPerSwarm: number;
+  /** Multiplier on the compact local mosquito-cloud radius (live). */
+  readonly mosquitoSpread: number;
+  /** Multiplier on the mosquitoes' internal buzzing speed (live). */
+  readonly mosquitoFlightSpeed: number;
   /** Mushroom spawn-point count (live: re-scatter). */
   readonly mushroomCount: number;
   /** Mushroom scatter radius in metres (live). */
@@ -209,9 +228,20 @@ export const DEFAULT_CONFIG: FloraFaunaConfig = {
   },
   fauna: {
     flockCount: 4,
-    birdsPerFlock: 24,
+    birdMinPerFlock: 18,
+    birdMaxPerFlock: 30,
     roamScale: 1,
     flightSpeed: 1,
+    batFlockCount: 2,
+    batMinPerFlock: 8,
+    batMaxPerFlock: 16,
+    batRoamScale: 1,
+    batFlightSpeed: 1,
+    mosquitoSwarmCount: 4,
+    mosquitoMinPerSwarm: 80,
+    mosquitoMaxPerSwarm: 160,
+    mosquitoSpread: 1,
+    mosquitoFlightSpeed: 1,
     mushroomCount: 24,
     mushroomRadius: 90,
     deerCount: 3,
