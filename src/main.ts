@@ -1,6 +1,7 @@
 import { time } from "three/tsl";
 import { createAtmosphere } from "./atmosphere/index.ts";
 import { SoundBus, SoundDirector } from "./audio/index.ts";
+import { createMovementScore } from "./audio/movements.ts";
 import { createCreatures } from "./creatures/index.ts";
 import { createFloraFaunaControls } from "./dev-console/flora-fauna-controls.ts";
 import { createDevConsole } from "./dev-console/index.ts";
@@ -338,6 +339,13 @@ for (const senseId of SENSE_ORDER) {
 }
 window.addEventListener("pagehide", () => director.dispose());
 
+// The score: the eight authored movements (public/audio/movements/*.mp3), each a keyable 0..1
+// volume envelope on `arc.tracks.<id>`. The score reads those envelopes every frame and drives
+// play / live gain / stop on the same sound bus (see src/audio/movements.ts). Studio draws each
+// envelope as a length-bar on the timeline; state.json ships them pre-placed at their real lengths.
+const score = createMovementScore(soundBus, () => theatre.arc.value.tracks);
+window.addEventListener("pagehide", () => score.dispose());
+
 // Dev console: press "C" for a live FPS / render-stats overlay.
 const devConsole = createDevConsole(renderer.instance, { label: "becoming-many" });
 window.addEventListener("pagehide", () => devConsole.dispose());
@@ -503,6 +511,7 @@ renderer.start((dtSeconds) => {
   }
   wasClockRunning = clock.running;
   pumpAuthored(theatre.arc); // 3. authored Theatre values → authored signals (the one-writer bridge)
+  score.update(); // authored movement envelopes → sound-bus transport (play / gain / stop)
 
   keyboard.update(dtSeconds); // 4. input → player → emergent signals
   const { locomotion } = keyboard;

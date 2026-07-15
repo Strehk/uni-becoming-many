@@ -29,6 +29,7 @@
  */
 import { getProject, onChange, types } from "@theatre/core";
 import type { ISheet, ISheetObject } from "@theatre/core";
+import { MOVEMENTS } from "../audio/movements.ts";
 import projectState from "./state.json";
 
 const PROJECT_ID = "Becoming Many";
@@ -46,11 +47,22 @@ const SENSE_ENVELOPES = {
   rundum: types.number(0, { range: [0, 1] }),
 };
 
+/**
+ * One authored 0..1 volume envelope per movement (keys = {@link MOVEMENTS} ids). Keyframing a
+ * fade-in → plateau → fade-out shape lays the clip on the timeline as a length-bar (Theatre draws
+ * the line between keyframes) and doubles as its live gain — the closest fit to a per-clip audio
+ * track, since Theatre has no native waveform lane. Consumed by `createMovementScore`.
+ */
+const MOVEMENT_ENVELOPES = Object.fromEntries(
+  MOVEMENTS.map((m) => [m.id, types.number(0, { range: [0, 1], label: m.label })]),
+) as Record<(typeof MOVEMENTS)[number]["id"], ReturnType<typeof types.number>>;
+
 /** The authored macro-envelope object's props. Extend as the dramaturgy grows. */
 const ARC_PROPS = {
   unrest: types.number(0, { range: [0, 1] }),
   intensity: types.number(0, { range: [0, 1] }),
   senses: types.compound(SENSE_ENVELOPES),
+  tracks: types.compound(MOVEMENT_ENVELOPES),
 };
 
 export type ArcObject = ISheetObject<typeof ARC_PROPS>;

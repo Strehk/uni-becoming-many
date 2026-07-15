@@ -32,6 +32,13 @@ export interface SoundDef {
   fadeIn?: number;
   /** Default fade-out seconds on stop (default 0). */
   fadeOut?: number;
+  /**
+   * Honour a {@link SoundBus.play} that arrived before the buffer finished decoding, even for a
+   * one-shot (loops already do this). Set for long *sustained* clips (e.g. the timeline movements)
+   * whose start moment is authored, so a still-decoding buffer starts as soon as it's ready instead
+   * of silently missing its cue. Off by default so a late-decoding chirp can't fire past its moment.
+   */
+  deferPlay?: boolean;
 }
 
 interface LoadedSound {
@@ -137,6 +144,23 @@ export class SoundBus {
     }
   }
 
+  /**
+   * Set the live playback gain of a sound's currently-ringing source(s) — the hook a continuous
+   * volume *envelope* drives (e.g. Theatre-authored movement tracks). Smoothed with
+   * `setTargetAtTime` so per-frame updates don't zipper. No-op if the clip isn't playing yet
+   * (its buffer may still be decoding), which is fine: the envelope keeps calling until it is.
+   */
+  setGain(id: string, value: number): void {
+    const entry = this.sounds.get(id);
+    if (!entry || !this.ctx) {
+      return;
+    }
+    const now = this.ctx.currentTime;
+    for (const { gain } of entry.active) {
+      gain.gain.setTargetAtTime(Math.max(0, value), now, 0.02);
+    }
+  }
+
   async resume(): Promise<void> {
     if (this.ctx && this.ctx.state === "suspended") {
       await this.ctx.resume();
@@ -197,9 +221,10 @@ export class SoundBus {
       const res = await fetch(entry.def.src);
       const data = await res.arrayBuffer();
       entry.buffer = await this.ctx.decodeAudioData(data);
-      // Honour a play() that arrived before decode finished — loops only, so a late-decoding
-      // one-shot can't fire long after its moment.
-      if (entry.wantsPlay && entry.def.loop) {
+      // Honour a play() that arrived before decode finished — loops and opt-in `deferPlay` clips
+      // (the sustained timeline movements), so a late-decoding one-shot chirp can't fire long
+      // after its moment while an authored movement still starts as soon as it's ready.
+      if (entry.wantsPlay && (entry.def.loop || entry.def.deferPlay)) {
         entry.wantsPlay = false;
         this.start(entry);
       }
