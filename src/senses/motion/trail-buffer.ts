@@ -24,6 +24,7 @@ import type { MotionTarget } from "./target-adapters.ts";
 const _vertex = new THREE.Vector3();
 const _previous = new THREE.Vector3();
 const _direction = new THREE.Vector3();
+const _center = new THREE.Vector3();
 
 export interface TrailBufferOptions {
   lifetimeFrames?: number;
@@ -230,6 +231,76 @@ export class ParticleTrailBuffer {
         this.spawnIntensities[particleIndex] = intensity;
       }
       localOffset += sampler.vertexCount;
+    }
+
+    this.updateTrailSlots(slot);
+    this.positionAttribute.needsUpdate = true;
+    this.colorAttribute.needsUpdate = true;
+    this.frame++;
+  }
+
+  /** Spawn trails directly from world-space points. Used by model-free moving
+   * actors while retaining the same ring buffer, controls and visual language. */
+  spawnFromWorldPoints(worldPositions: Float32Array): void {
+    const pointCount = Math.floor(worldPositions.length / 3);
+    if (pointCount !== this.totalVertexCount) {
+      this.resize(pointCount);
+    }
+    if (!pointCount) {
+      return;
+    }
+
+    _center.set(0, 0, 0);
+    for (let i = 0; i < pointCount; i++) {
+      const src = i * 3;
+      _center.x += worldPositions[src] ?? 0;
+      _center.y += worldPositions[src + 1] ?? 0;
+      _center.z += worldPositions[src + 2] ?? 0;
+    }
+    _center.divideScalar(pointCount);
+
+    const slot = this.frame % this.lifetimeFrames;
+    const slotOffset = slot * pointCount;
+    for (let i = 0; i < pointCount; i++) {
+      const src = i * 3;
+      _vertex.set(
+        worldPositions[src] ?? 0,
+        worldPositions[src + 1] ?? 0,
+        worldPositions[src + 2] ?? 0,
+      );
+      const distance =
+        this.previousReady[i] === 1
+          ? _vertex.distanceTo(
+              _previous.set(
+                this.previousLocalPositions[src] ?? 0,
+                this.previousLocalPositions[src + 1] ?? 0,
+                this.previousLocalPositions[src + 2] ?? 0,
+              ),
+            )
+          : 0;
+      this.previousLocalPositions[src] = _vertex.x;
+      this.previousLocalPositions[src + 1] = _vertex.y;
+      this.previousLocalPositions[src + 2] = _vertex.z;
+      this.previousReady[i] = 1;
+
+      const particleIndex = slotOffset + i;
+      if (particleIndex >= this.maxCapacity) {
+        continue;
+      }
+      if (!this.spawns(i)) {
+        this.spawnIntensities[particleIndex] = 0;
+        continue;
+      }
+
+      const dst = particleIndex * 3;
+      _direction.subVectors(_vertex, _center).normalize();
+      this.basePositions[dst] = _vertex.x;
+      this.basePositions[dst + 1] = _vertex.y;
+      this.basePositions[dst + 2] = _vertex.z;
+      this.expansionDirections[dst] = _direction.x;
+      this.expansionDirections[dst + 1] = _direction.y;
+      this.expansionDirections[dst + 2] = _direction.z;
+      this.spawnIntensities[particleIndex] = clamp(distance * this.motionGain, 0.04, 1);
     }
 
     this.updateTrailSlots(slot);

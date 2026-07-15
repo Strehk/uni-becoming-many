@@ -23,7 +23,7 @@
 import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import * as THREE from "three/webgpu";
-import type { AnchorPose } from "./types.ts";
+import type { AnchorPose, EventGroundSource } from "./types.ts";
 
 /** A bird model handed over by the host — a dedicated instance for this event. */
 export interface LoadedBirdModel {
@@ -36,6 +36,16 @@ export interface BirdFlightOptions {
   getBirdModel: () => Promise<LoadedBirdModel>;
   /** Presenting-camera pose provider — the route anchors here on `play()`. */
   anchor: AnchorPose;
+  /** Optional world-position source followed every frame. When present, only
+   * XYZ is copied; its rotation and the camera pose are ignored. */
+  positionSource?: THREE.Object3D | undefined;
+  /** Capture the presenting view's horizontal heading on play while still
+   * taking translation exclusively from positionSource. */
+  alignToAnchorHeading?: boolean;
+  /** Optional terrain query used to lift path samples that would be underground. */
+  ground?: EventGroundSource | undefined;
+  /** Minimum actor-origin height above terrain when ground is supplied. */
+  groundClearance?: number;
   /** Where the flight root lives; defaults to the scene. Pass the player rig
    *  so the route travels with the gliding player (see EventContext.parent). */
   parent?: THREE.Object3D | undefined;
@@ -43,10 +53,17 @@ export interface BirdFlightOptions {
   pathUrl?: string;
   /** Seconds the authored route is stretched/compressed to. */
   routeDuration?: number;
+  /** Optional entry flight before the authored route. The supplied local-space
+   *  points start behind/around the camera; BirdFlight adds a tangent-matched
+   *  hand-off point and the authored route start automatically. */
+  approachDuration?: number;
+  approachPoints?: readonly THREE.Vector3[];
   /** Seconds of the outward exit flight after the route ends. */
   exitDuration?: number;
   /** Authored route units → metres. */
   routeScale?: number;
+  /** Fixed rotation applied to route deltas before routeStart is added. */
+  routeRotation?: THREE.Quaternion;
   /** Route origin in the camera-anchored frame (route start sits here). */
   routeStart?: THREE.Vector3;
   /** Uniform model scale. Omit to keep the scale `getBirdModel` returned. */
@@ -69,6 +86,7 @@ export interface BirdFlightOptions {
 const DEFAULTS = {
   pathUrl: undefined as string | undefined,
   routeDuration: 9,
+  approachDuration: 0,
   exitDuration: 4.8,
   routeScale: 0.0015,
   scale: undefined as number | undefined,
@@ -79,6 +97,8 @@ const DEFAULTS = {
   flapTimeScale: 1,
   introReverse: false,
   debugRoute: false,
+  alignToAnchorHeading: false,
+  groundClearance: 0,
 };
 
 /** The route frame sits slightly in front of the eye, along the camera's view. */
@@ -88,6 +108,8 @@ const EXIT_HIDE_PROGRESS = 0.94;
 /** Freeze the flight direction over the route's last moments (stable hand-off
  *  into the exit curve — the authored track can wiggle at its very end). */
 const END_DIRECTION_LOCK_SECONDS = 0.45;
+/** Time used to ease approach rotation and speed into the authored route. */
+const APPROACH_HANDOFF_BLEND_SECONDS = 2.4;
 
 /** An authored position(+quaternion) clip, resampled in route space. */
 interface AnimatedRoute {
@@ -102,10 +124,17 @@ export class BirdFlight {
   private readonly options: {
     getBirdModel: () => Promise<LoadedBirdModel>;
     anchor: AnchorPose;
+    positionSource: THREE.Object3D | undefined;
+    alignToAnchorHeading: boolean;
+    ground: EventGroundSource | undefined;
+    groundClearance: number;
     pathUrl: string | undefined;
     routeDuration: number;
+    approachDuration: number;
+    approachPoints: THREE.Vector3[];
     exitDuration: number;
     routeScale: number;
+    routeRotation: THREE.Quaternion;
     routeStart: THREE.Vector3;
     scale: number | undefined;
     modelForward: THREE.Vector3;
@@ -132,7 +161,10 @@ export class BirdFlight {
   private introPath: THREE.Vector3[] | null = null;
   private introTimes: number[] = [];
   private introDuration = 0;
+  private introDistance = 0;
   private animatedRoute: AnimatedRoute | null = null;
+  private approachCurve: THREE.CatmullRomCurve3 | null = null;
+  private routeHandoffQuaternion: THREE.Quaternion | null = null;
 
   private exitStarted = false;
   private exitCurve: THREE.CatmullRomCurve3 | null = null;
@@ -149,13 +181,19 @@ export class BirdFlight {
   private readonly _scratchUp = new THREE.Vector3();
   private readonly _scratchBinormal = new THREE.Vector3();
   private readonly _scratchMatrix = new THREE.Matrix4();
+  private readonly _scratchWorldPosition = new THREE.Vector3();
+  private readonly _positionSourceQuaternion = new THREE.Quaternion();
 
   constructor(scene: THREE.Scene, options: BirdFlightOptions) {
     this.scene = scene;
     this.options = {
       ...DEFAULTS,
       ...options,
+      positionSource: options.positionSource,
+      ground: options.ground,
+      approachPoints: (options.approachPoints ?? []).map((point) => point.clone()),
       routeStart: (options.routeStart ?? new THREE.Vector3(-6.6, 0.72, -7.2)).clone(),
+      routeRotation: options.routeRotation?.clone() ?? new THREE.Quaternion(),
       modelForward: (options.modelForward ?? new THREE.Vector3(1, 0, 0)).clone(),
     };
     this.fileLoader.setResponseType("arraybuffer");
@@ -209,6 +247,7 @@ export class BirdFlight {
     if (!this.introPath) {
       this.createFallbackIntroPath();
     }
+    this.createApproachCurve();
     this.createRouteDebugLine();
   }
 
@@ -221,7 +260,8 @@ export class BirdFlight {
     this.anchorRootAtCamera();
     this.mixer?.stopAllAction();
     this.wingAction?.reset().play();
-    this.applyIntroPathAt(0);
+    this.routeHandoffQuaternion = null;
+    this.applyFlightPathAt(0);
     this.elapsed = 0;
     this.exitStarted = false;
     this.exitCurve = null;
@@ -238,13 +278,15 @@ export class BirdFlight {
 
     this.elapsed += deltaSeconds;
     this.mixer?.update(deltaSeconds);
+    this.syncPositionSource();
 
-    if (!this.exitStarted && this.elapsed >= this.introDuration) {
+    const flightDuration = this.options.approachDuration + this.introDuration;
+    if (!this.exitStarted && this.elapsed >= flightDuration) {
       this.startExitFlight();
     }
 
     if (!this.exitStarted) {
-      this.applyIntroPathAt(this.elapsed);
+      this.applyFlightPathAt(this.elapsed);
       return;
     }
 
@@ -252,13 +294,15 @@ export class BirdFlight {
       return;
     }
 
-    const exitElapsed = this.elapsed - this.introDuration;
+    const exitElapsed = this.elapsed - flightDuration;
     const segmentRawProgress = THREE.MathUtils.clamp(exitElapsed / this.options.exitDuration, 0, 1);
     const progress = easeInExit(segmentRawProgress);
 
     this.exitCurve.getPointAt(progress, this._scratchPosition);
     const lookProgress = Math.min(progress + 0.08, 1);
     this.exitCurve.getPointAt(lookProgress, this._scratchLookAt);
+    this.liftPathPointAboveGround(this._scratchPosition);
+    this.liftPathPointAboveGround(this._scratchLookAt);
 
     this.carrier.position.copy(this._scratchPosition);
     this._scratchDirection.subVectors(this._scratchLookAt, this._scratchPosition);
@@ -299,6 +343,24 @@ export class BirdFlight {
    * travels with the rig from then on.
    */
   private anchorRootAtCamera(): void {
+    if (this.options.positionSource) {
+      this._positionSourceQuaternion.identity();
+      if (this.options.alignToAnchorHeading) {
+        this.options.anchor(this._scratchPosition, this._scratchQuaternion);
+        this._scratchDirection.set(0, 0, -1).applyQuaternion(this._scratchQuaternion);
+        this._scratchDirection.y = 0;
+        if (this._scratchDirection.lengthSq() > 0.0001) {
+          this._scratchDirection.normalize();
+          this._positionSourceQuaternion.setFromUnitVectors(
+            new THREE.Vector3(0, 0, -1),
+            this._scratchDirection,
+          );
+        }
+      }
+      this.syncPositionSource();
+      return;
+    }
+
     this.options.anchor(this.root.position, this._scratchQuaternion);
     this.root.position.add(
       this._scratchDirection.copy(CAMERA_FORWARD_OFFSET).applyQuaternion(this._scratchQuaternion),
@@ -312,6 +374,52 @@ export class BirdFlight {
       parent.getWorldQuaternion(this._scratchParentQuaternion).invert();
       this.root.quaternion.premultiply(this._scratchParentQuaternion);
     }
+  }
+
+  /** Follow source translation in world space while keeping the route's world
+   * rotation fixed. Camera pose and source quaternion never enter this path. */
+  private syncPositionSource(): void {
+    const source = this.options.positionSource;
+    if (!source) {
+      return;
+    }
+
+    source.updateWorldMatrix(true, false);
+    source.getWorldPosition(this.root.position);
+    this.root.quaternion.copy(this._positionSourceQuaternion);
+
+    const parent = this.root.parent;
+    if (parent && parent !== this.scene) {
+      parent.updateWorldMatrix(true, false);
+      parent.worldToLocal(this.root.position);
+      parent.getWorldQuaternion(this._scratchParentQuaternion).invert();
+      this.root.quaternion.copy(this._scratchParentQuaternion);
+    }
+  }
+
+  /** Lift one root-local path sample only when it would put the actor below
+   * streamed terrain. Above-ground samples remain untouched. */
+  private liftPathPointAboveGround(point: THREE.Vector3): void {
+    const ground = this.options.ground;
+    if (!ground) {
+      return;
+    }
+
+    this._scratchWorldPosition.copy(point);
+    this.root.localToWorld(this._scratchWorldPosition);
+    const terrainY = ground(this._scratchWorldPosition.x, this._scratchWorldPosition.z);
+    if (terrainY === null) {
+      return;
+    }
+
+    const minimumY = terrainY + this.options.groundClearance;
+    if (this._scratchWorldPosition.y >= minimumY) {
+      return;
+    }
+
+    this._scratchWorldPosition.y = minimumY;
+    this.root.worldToLocal(this._scratchWorldPosition);
+    point.copy(this._scratchWorldPosition);
   }
 
   /**
@@ -438,7 +546,11 @@ export class BirdFlight {
     for (let index = 0; index < values.length; index += 3) {
       const sourcePoint = new THREE.Vector3(values[index], values[index + 1], values[index + 2]);
       positions.push(
-        sourcePoint.sub(start).multiplyScalar(this.options.routeScale).add(this.options.routeStart),
+        sourcePoint
+          .sub(start)
+          .multiplyScalar(this.options.routeScale)
+          .applyQuaternion(this.options.routeRotation)
+          .add(this.options.routeStart),
       );
     }
 
@@ -524,6 +636,7 @@ export class BirdFlight {
     }
 
     const totalDistance = Math.max(distances[distances.length - 1] ?? 0, 0.0001);
+    this.introDistance = totalDistance;
     this.introTimes = sourceTimes
       ? [...sourceTimes]
       : distances.map((distance) => (distance / totalDistance) * duration);
@@ -545,12 +658,50 @@ export class BirdFlight {
     );
   }
 
+  /** Build a camera-local entry arc whose final tangent matches the authored
+   * route's initial direction. This keeps position and heading continuous at
+   * the hand-off, including for a reversed authored route. */
+  private createApproachCurve(): void {
+    const path = this.introPath;
+    const configured = this.options.approachPoints;
+    if (this.options.approachDuration <= 0 || configured.length === 0 || !path?.length) {
+      this.approachCurve = null;
+      return;
+    }
+
+    const entryIndex = this.options.introReverse ? path.length - 1 : 0;
+    const nextIndex = this.options.introReverse ? Math.max(entryIndex - 1, 0) : 1;
+    const entry = path[entryIndex];
+    const next = path[nextIndex];
+    if (!entry || !next) {
+      this.approachCurve = null;
+      return;
+    }
+
+    const routeDirection = next.clone().sub(entry);
+    if (routeDirection.lengthSq() < 0.0001) {
+      routeDirection.set(0, 0, -1);
+    } else {
+      routeDirection.normalize();
+    }
+    const handoff = entry.clone().addScaledVector(routeDirection, -2.5);
+    const points = configured.map((point) => point.clone());
+    const lastConfigured = points[points.length - 1];
+    if (!lastConfigured || lastConfigured.distanceToSquared(handoff) > 0.01) {
+      points.push(handoff);
+    }
+    points.push(entry.clone());
+    this.approachCurve = new THREE.CatmullRomCurve3(points, false, "centripetal", 0.35);
+  }
+
   private createRouteDebugLine(): void {
     if (!this.options.debugRoute || !this.introPath || this.routeLine) {
       return;
     }
 
-    const geometry = new THREE.BufferGeometry().setFromPoints(this.introPath);
+    const approachPoints = this.approachCurve?.getPoints(32) ?? [];
+    const routePoints = this.options.introReverse ? [...this.introPath].reverse() : this.introPath;
+    const geometry = new THREE.BufferGeometry().setFromPoints([...approachPoints, ...routePoints]);
     const material = new THREE.LineBasicMaterial({
       color: 0xff8a00,
       transparent: true,
@@ -587,6 +738,41 @@ export class BirdFlight {
 
   // ── route playback ─────────────────────────────────────────────
 
+  private applyFlightPathAt(time: number): void {
+    if (this.approachCurve && time < this.options.approachDuration) {
+      this.applyApproachPathAt(time);
+      return;
+    }
+
+    // Preserve the last orientation that was actually displayed on the
+    // approach. The authored route blends away from it instead of replacing it
+    // on the first frame after the phase boundary.
+    if (this.approachCurve && !this.routeHandoffQuaternion && this.carrier) {
+      this.routeHandoffQuaternion = this.carrier.quaternion.clone();
+    }
+    this.applyIntroPathAt(time - this.options.approachDuration);
+  }
+
+  /** Constant-speed sampling over the entry arc; the curve itself carries the
+   * smooth bend, while the authored route owns the motion after the hand-off. */
+  private applyApproachPathAt(time: number): void {
+    if (!this.approachCurve || !this.carrier) {
+      return;
+    }
+    const progress = THREE.MathUtils.clamp(
+      time / Math.max(this.options.approachDuration, 0.0001),
+      0,
+      1,
+    );
+    this.approachCurve.getPointAt(progress, this._scratchPosition);
+    this.approachCurve.getPointAt(Math.min(progress + 0.035, 1), this._scratchLookAt);
+    this.liftPathPointAboveGround(this._scratchPosition);
+    this.liftPathPointAboveGround(this._scratchLookAt);
+    this.carrier.position.copy(this._scratchPosition);
+    this._scratchDirection.subVectors(this._scratchLookAt, this._scratchPosition);
+    this.setCarrierForwardDirection(this._scratchDirection);
+  }
+
   private applyIntroPathAt(time: number): void {
     if (!this.introPath || this.introPath.length === 0 || !this.carrier) {
       return;
@@ -597,24 +783,42 @@ export class BirdFlight {
 
     if (this.animatedRoute) {
       this.sampleAnimatedRouteAt(clampedTime);
+      this.blendRouteStartOrientation(time);
       return;
     }
 
     const lookAheadTime = Math.min(clampedTime + 0.08, this.introDuration);
     this.sampleIntroPathAt(clampedTime, this._scratchPosition);
     this.sampleIntroPathAt(lookAheadTime, this._scratchLookAt);
+    this.liftPathPointAboveGround(this._scratchPosition);
+    this.liftPathPointAboveGround(this._scratchLookAt);
     if (this._scratchLookAt.distanceToSquared(this._scratchPosition) < 0.0001) {
       // Route end: extrapolate the look-ahead from the last motion instead.
       const lookBackTime = Math.max(clampedTime - 0.14, 0);
       this.sampleIntroPathAt(lookBackTime, this._scratchLookAt);
+      this.liftPathPointAboveGround(this._scratchLookAt);
       this._scratchLookAt.copy(
         this._scratchPosition.clone().sub(this._scratchLookAt).add(this._scratchPosition),
       );
+      this.liftPathPointAboveGround(this._scratchLookAt);
     }
 
     this.carrier.position.copy(this._scratchPosition);
     this._scratchDirection.subVectors(this._scratchLookAt, this._scratchPosition);
     this.setCarrierForwardDirection(this._scratchDirection);
+    this.blendRouteStartOrientation(time);
+  }
+
+  /** Keep the last approach rotation at the boundary, then ease it into the
+   * authored route's independently sampled heading. */
+  private blendRouteStartOrientation(time: number): void {
+    if (!this.carrier || !this.routeHandoffQuaternion || time >= APPROACH_HANDOFF_BLEND_SECONDS) {
+      return;
+    }
+
+    const blend = THREE.MathUtils.smoothstep(time, 0, APPROACH_HANDOFF_BLEND_SECONDS);
+    this._scratchQuaternion.copy(this.carrier.quaternion);
+    this.carrier.quaternion.copy(this.routeHandoffQuaternion).slerp(this._scratchQuaternion, blend);
   }
 
   private sampleAnimatedRouteAt(time: number): void {
@@ -622,39 +826,23 @@ export class BirdFlight {
     if (!route || !this.carrier) {
       return;
     }
-    const sourceTime = this.getAnimatedRouteSourceTime(time);
 
-    sampleVectorTrackAt(route.positionTrack, sourceTime, this._scratchPosition);
-    this._scratchPosition
-      .sub(route.start)
-      .multiplyScalar(this.options.routeScale)
-      .add(this.options.routeStart);
+    const sampledTime = this.getSpeedMatchedRouteTime(time);
+    this.sampleIntroPathAt(sampledTime, this._scratchPosition);
+    this.liftPathPointAboveGround(this._scratchPosition);
     this.carrier.position.copy(this._scratchPosition);
 
-    const lookAheadTime = Math.min(time + 0.08, this.introDuration);
-    sampleVectorTrackAt(
-      route.positionTrack,
-      this.getAnimatedRouteSourceTime(lookAheadTime),
-      this._scratchLookAt,
-    );
-    this._scratchLookAt
-      .sub(route.start)
-      .multiplyScalar(this.options.routeScale)
-      .add(this.options.routeStart);
+    const lookAheadTime = this.getSpeedMatchedRouteTime(Math.min(time + 0.08, this.introDuration));
+    this.sampleIntroPathAt(lookAheadTime, this._scratchLookAt);
+    this.liftPathPointAboveGround(this._scratchLookAt);
     if (this._scratchLookAt.distanceToSquared(this._scratchPosition) < 0.0001) {
-      const lookBackTime = Math.max(time - 0.14, 0);
-      sampleVectorTrackAt(
-        route.positionTrack,
-        this.getAnimatedRouteSourceTime(lookBackTime),
-        this._scratchLookAt,
-      );
-      this._scratchLookAt
-        .sub(route.start)
-        .multiplyScalar(this.options.routeScale)
-        .add(this.options.routeStart);
+      const lookBackTime = this.getSpeedMatchedRouteTime(Math.max(time - 0.14, 0));
+      this.sampleIntroPathAt(lookBackTime, this._scratchLookAt);
+      this.liftPathPointAboveGround(this._scratchLookAt);
       this._scratchLookAt.copy(
         this._scratchPosition.clone().sub(this._scratchLookAt).add(this._scratchPosition),
       );
+      this.liftPathPointAboveGround(this._scratchLookAt);
     }
 
     this._scratchDirection.subVectors(this._scratchLookAt, this._scratchPosition);
@@ -664,13 +852,38 @@ export class BirdFlight {
     this.setCarrierForwardDirection(this._scratchDirection);
   }
 
-  private getAnimatedRouteSourceTime(time: number): number {
-    const route = this.animatedRoute;
-    if (!route) {
-      return 0;
+  /** Convert playback time to a distance-linear route sample. The first part
+   * starts at the approach velocity and eases to a cruise velocity chosen so
+   * the route still finishes at its configured duration. */
+  private getSpeedMatchedRouteTime(time: number): number {
+    const duration = Math.max(this.introDuration, 0.0001);
+    const clampedTime = THREE.MathUtils.clamp(time, 0, duration);
+    if (!this.approachCurve || this.options.approachDuration <= 0 || this.introDistance <= 0) {
+      return this.options.introReverse ? duration - clampedTime : clampedTime;
     }
-    const progress = THREE.MathUtils.clamp(time / Math.max(this.introDuration, 0.0001), 0, 1);
-    return progress * route.sourceDuration;
+
+    const blendDuration = Math.min(APPROACH_HANDOFF_BLEND_SECONDS, duration);
+    const maximumStartSpeed = (this.introDistance * 1.9) / Math.max(blendDuration, 0.0001);
+    const startSpeed = Math.min(
+      this.approachCurve.getLength() / this.options.approachDuration,
+      maximumStartSpeed,
+    );
+    const cruiseSpeed =
+      (this.introDistance - startSpeed * blendDuration * 0.5) /
+      Math.max(duration - blendDuration * 0.5, 0.0001);
+
+    let distance: number;
+    if (clampedTime < blendDuration) {
+      const acceleration = (cruiseSpeed - startSpeed) / Math.max(blendDuration, 0.0001);
+      distance = startSpeed * clampedTime + acceleration * clampedTime * clampedTime * 0.5;
+    } else {
+      const blendDistance = (startSpeed + cruiseSpeed) * blendDuration * 0.5;
+      distance = blendDistance + cruiseSpeed * (clampedTime - blendDuration);
+    }
+
+    const routeTime =
+      THREE.MathUtils.clamp(distance / this.introDistance, 0, 1) * this.introDuration;
+    return this.options.introReverse ? duration - routeTime : routeTime;
   }
 
   private getStableAnimatedRouteEndDirection(
@@ -685,8 +898,16 @@ export class BirdFlight {
 
     sampleVectorTrackAt(positionTrack, fromTime, fromPoint);
     sampleVectorTrackAt(positionTrack, toTime, toPoint);
-    fromPoint.sub(start).multiplyScalar(this.options.routeScale).add(this.options.routeStart);
-    toPoint.sub(start).multiplyScalar(this.options.routeScale).add(this.options.routeStart);
+    fromPoint
+      .sub(start)
+      .multiplyScalar(this.options.routeScale)
+      .applyQuaternion(this.options.routeRotation)
+      .add(this.options.routeStart);
+    toPoint
+      .sub(start)
+      .multiplyScalar(this.options.routeScale)
+      .applyQuaternion(this.options.routeRotation)
+      .add(this.options.routeStart);
 
     const direction = toPoint.sub(fromPoint);
     if (direction.lengthSq() < 0.0001) {

@@ -50,6 +50,7 @@ import {
   makeHeightEntry,
   sampleEntry,
 } from "../terrain/index.ts";
+import { type MosquitoFlocks, createMosquitoFlocks } from "./mosquito-flocks.ts";
 
 // ── Flock layout ──
 // Each flock roams its own distance RING around the player: the near flocks stay
@@ -99,6 +100,10 @@ const DEER_MODEL_URL = "/creatures/deer_walk.glb";
 const FOX_MODEL_URL = "/creatures/fox.glb";
 /** Target wingspan in metres (the file spans ~17.4 units). */
 const BIRD_WINGSPAN = 1.05;
+/** Rigged bat added to the same flock/sense substrate as the birds. */
+const BAT_MODEL_URL = "/creatures/bat_BS_rig.glb";
+const BAT_WINGSPAN = 0.7;
+const BAT_FLAP_CLIP = "Armature.001Action";
 const DEER_TARGET_HEIGHT = 1.75;
 const FOX_TARGET_HEIGHT = 0.65;
 const DEER_WAYPOINT_REACHED = 3;
@@ -137,6 +142,8 @@ export interface Creatures {
   /** Scene parent of all fauna meshes. */
   readonly group: THREE.Group;
   readonly birds: readonly BirdActor[];
+  /** Persistent particle mosquitoes, grouped into compact ground-near swarms. */
+  readonly mosquitoes: MosquitoFlocks;
   /** Mushroom positions (world space). Mutated on re-anchor; listen for the
    *  `creatures:mushrooms-changed` bus event to rebuild dependents. */
   readonly mushrooms: readonly THREE.Vector3[];
@@ -184,11 +191,15 @@ interface Bird extends BirdActor {
   readonly mixer: THREE.AnimationMixer;
   /** Which flock this bird belongs to — neighbours are flock-internal. */
   readonly flock: number;
+  readonly kind: "bird" | "bat";
 }
 
 /** One flock's shared state: the wandering goal its members seek. */
 interface Flock {
   readonly waypoint: THREE.Vector3;
+  readonly kind: "bird" | "bat";
+  readonly ringIndex: number;
+  readonly ringCount: number;
   /** Seconds since the waypoint was rolled (drives the timeout re-roll). */
   age: number;
 }
@@ -222,32 +233,56 @@ export async function createCreatures(
   group.add(birdGroup, groundFaunaGroup);
   scene.add(group);
 
-  // ── the bird asset ──
-  const [gltf, deerGltf, foxGltf] = await Promise.all([
-    new GLTFLoader().loadAsync(BIRD_MODEL_URL),
-    new GLTFLoader().loadAsync(DEER_MODEL_URL),
-    new GLTFLoader().loadAsync(FOX_MODEL_URL),
+  // ── fauna assets ──
+  const loader = new GLTFLoader();
+  const [birdGltf, batGltf, deerGltf, foxGltf] = await Promise.all([
+    loader.loadAsync(BIRD_MODEL_URL),
+    loader.loadAsync(BAT_MODEL_URL),
+    loader.loadAsync(DEER_MODEL_URL),
+    loader.loadAsync(FOX_MODEL_URL),
   ]);
-  const flapClip = gltf.animations[0];
-  const birdBounds = new THREE.Box3().setFromObject(gltf.scene);
-  const span = birdBounds.getSize(new THREE.Vector3()).x;
-  const sharedModelRadius = Math.hypot(
-    Math.max(Math.abs(birdBounds.min.x), Math.abs(birdBounds.max.x)),
-    Math.max(Math.abs(birdBounds.min.y), Math.abs(birdBounds.max.y)),
-    Math.max(Math.abs(birdBounds.min.z), Math.abs(birdBounds.max.z)),
-  );
-  const modelScale = BIRD_WINGSPAN / Math.max(span, 1e-4);
+  const birdFlapClip = birdGltf.animations[0];
+  const batFlapClip =
+    THREE.AnimationClip.findByName(batGltf.animations, BAT_FLAP_CLIP) ?? undefined;
+
+  interface FlyingAsset {
+    readonly scene: THREE.Group;
+    readonly flapClip: THREE.AnimationClip | undefined;
+    readonly scale: number;
+    readonly radius: number;
+  }
+
+  const prepareAsset = (
+    sceneRoot: THREE.Group,
+    flapClip: THREE.AnimationClip | undefined,
+    wingspan: number,
+  ): FlyingAsset => {
+    const bounds = new THREE.Box3().setFromObject(sceneRoot);
+    const span = bounds.getSize(new THREE.Vector3()).x;
+    const radius = Math.hypot(
+      Math.max(Math.abs(bounds.min.x), Math.abs(bounds.max.x)),
+      Math.max(Math.abs(bounds.min.y), Math.abs(bounds.max.y)),
+      Math.max(Math.abs(bounds.min.z), Math.abs(bounds.max.z)),
+    );
+    const scale = wingspan / Math.max(span, 1e-4);
+
+    // Every mesh part receives the whole actor radius, keeping the thermal
+    // centre gradient continuous across skinned/material boundaries.
+    sceneRoot.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), radius);
+      }
+    });
+    return { scene: sceneRoot, flapClip, scale, radius };
+  };
+
+  const birdAsset = prepareAsset(birdGltf.scene, birdFlapClip, BIRD_WINGSPAN);
+  const batAsset = prepareAsset(batGltf.scene, batFlapClip, BAT_WINGSPAN);
 
   // All four bird parts sit at the same model origin, but their individual geometry
   // spheres have different radii. modelPosition is therefore already shared; give
   // every part the full-bird radius so modelRadius also describes the whole bird and
   // the screen-space thermal gradient cannot restart at a material/mesh boundary.
-  gltf.scene.traverse((child) => {
-    if (child instanceof THREE.Mesh) {
-      child.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), sharedModelRadius);
-    }
-  });
-
   // UNLIT (the scene has no lights — a standard material would render black, see
   // src/life/material.ts), composited through the sense layers like flora: the
   // model's own part colours (plumage, belly, beak) are the `farben` albedo,
@@ -309,13 +344,17 @@ export async function createCreatures(
     for (const entry of materials.values()) entry.rewire();
   });
 
-  /** One skinned bird instance: cloned armature, our sense materials, jittered
-   *  flap phase/tempo. The wrapper turns the file's −Z head to our +Z forward. */
-  const buildBird = (): { root: THREE.Group; mixer: THREE.AnimationMixer } => {
-    const model = cloneSkeleton(gltf.scene);
+  /** One skinned flying animal with shared sense materials and jittered flap.
+   * Birds face file −Z; bats face file +X with +Y as their back/up axis. Both
+   * are converted to the boid root's +Z lookAt-forward convention. */
+  const buildAnimal = (
+    kind: "bird" | "bat",
+  ): { root: THREE.Group; mixer: THREE.AnimationMixer } => {
+    const asset = kind === "bat" ? batAsset : birdAsset;
+    const model = cloneSkeleton(asset.scene);
     const thermalVariation = Math.random() * 2 - 1;
-    model.rotation.y = Math.PI;
-    model.scale.setScalar(modelScale);
+    model.rotation.y = kind === "bat" ? -Math.PI / 2 : Math.PI;
+    model.scale.setScalar(asset.scale);
     model.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return;
       const source = Array.isArray(child.material) ? child.material[0] : child.material;
@@ -327,10 +366,10 @@ export async function createCreatures(
     root.add(model);
 
     const mixer = new THREE.AnimationMixer(model);
-    if (flapClip) {
-      const action = mixer.clipAction(flapClip);
+    if (asset.flapClip) {
+      const action = mixer.clipAction(asset.flapClip);
       action.play();
-      action.time = Math.random() * flapClip.duration;
+      action.time = Math.random() * asset.flapClip.duration;
       action.timeScale = 0.9 + Math.random() * 0.4;
     }
     return { root, mixer };
@@ -453,49 +492,91 @@ export async function createCreatures(
   // `creatures:birds-changed` event that `rebuildFlocks` emits.
   const birds: Bird[] = [];
 
-  /** (Re)build the flock set from `fauna.flockCount × fauna.birdsPerFlock`.
-   *  Disposes any prior birds, repopulates `flocks`/`birds` in place. */
+  const randomFlockSize = (rawMin: number, rawMax: number): number => {
+    const a = Math.max(1, Math.round(rawMin));
+    const b = Math.max(1, Math.round(rawMax));
+    const min = Math.min(a, b);
+    const max = Math.max(a, b);
+    return min + Math.floor(Math.random() * (max - min + 1));
+  };
+
+  /** Rebuild bird and bat flocks from their mirrored fauna controls. */
   const rebuildFlocks = (emit: boolean): void => {
     for (const b of birds) b.object.removeFromParent();
     birds.length = 0;
     flocks.length = 0;
 
-    const count = Math.max(1, Math.round(fauna.flockCount));
-    const perFlock = Math.max(1, Math.round(fauna.birdsPerFlock));
-    for (let f = 0; f < count; f++) {
-      const ring = ringFor(f, count, fauna.roamScale);
-      const flock: Flock = { waypoint: new THREE.Vector3(), age: 0 };
-      rollWaypoint(flock.waypoint, ring);
-      flocks.push(flock);
+    const addFlocks = (
+      kind: "bird" | "bat",
+      rawCount: number,
+      rawMinPerFlock: number,
+      rawMaxPerFlock: number,
+      roamScale: number,
+    ): void => {
+      const count = Math.max(1, Math.round(rawCount));
+      for (let f = 0; f < count; f++) {
+        const perFlock = randomFlockSize(rawMinPerFlock, rawMaxPerFlock);
+        const ring = ringFor(f, count, roamScale);
+        const flockIndex = flocks.length;
+        const flock: Flock = {
+          waypoint: new THREE.Vector3(),
+          age: 0,
+          kind,
+          ringIndex: f,
+          ringCount: count,
+        };
+        rollWaypoint(flock.waypoint, ring);
+        flocks.push(flock);
 
-      // The flock spawns as a loose cloud somewhere in its ring.
-      const a = Math.random() * Math.PI * 2;
-      const r = ring.min + Math.random() * (ring.max - ring.min) * 0.7;
-      const cx = pose.x + Math.cos(a) * r;
-      const cz = pose.z + Math.sin(a) * r;
-      for (let i = 0; i < perFlock; i++) {
-        const { root, mixer } = buildBird();
-        root.position.set(
-          cx + (Math.random() - 0.5) * 24,
-          pose.y + 14 + Math.random() * 22,
-          cz + (Math.random() - 0.5) * 24,
-        );
-        birdGroup.add(root);
-        birds.push({
-          object: root,
-          position: root.position,
-          velocity: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5)
-            .normalize()
-            .multiplyScalar(MIN_SPEED + 2),
-          flapPhase: Math.random() * Math.PI * 2,
-          mixer,
-          flock: f,
-        });
+        // Each flock spawns as a loose, species-pure cloud in its own ring.
+        const a = Math.random() * Math.PI * 2;
+        const r = ring.min + Math.random() * (ring.max - ring.min) * 0.7;
+        const cx = pose.x + Math.cos(a) * r;
+        const cz = pose.z + Math.sin(a) * r;
+        for (let i = 0; i < perFlock; i++) {
+          const { root, mixer } = buildAnimal(kind);
+          root.position.set(
+            cx + (Math.random() - 0.5) * 24,
+            pose.y + 14 + Math.random() * 22,
+            cz + (Math.random() - 0.5) * 24,
+          );
+          birdGroup.add(root);
+          birds.push({
+            object: root,
+            position: root.position,
+            velocity: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5)
+              .normalize()
+              .multiplyScalar(MIN_SPEED + 2),
+            flapPhase: Math.random() * Math.PI * 2,
+            mixer,
+            flock: flockIndex,
+            kind,
+          });
+        }
       }
-    }
+    };
+
+    addFlocks(
+      "bird",
+      fauna.flockCount,
+      fauna.birdMinPerFlock,
+      fauna.birdMaxPerFlock,
+      fauna.roamScale,
+    );
+    addFlocks(
+      "bat",
+      fauna.batFlockCount,
+      fauna.batMinPerFlock,
+      fauna.batMaxPerFlock,
+      fauna.batRoamScale,
+    );
     if (emit) bus.emit("creatures:birds-changed");
   };
   rebuildFlocks(false);
+
+  // Model-free world mosquitoes: compact, ground-near swarms whose anchors
+  // remain fixed until the player has travelled far beyond their area.
+  const mosquitoes = createMosquitoFlocks(group, ground, fauna);
 
   // ── mushrooms ──
   const mushrooms: THREE.Vector3[] = [];
@@ -782,6 +863,7 @@ export async function createCreatures(
   return {
     group,
     birds,
+    mosquitoes,
     mushrooms,
     setVisibility(birdsVisible: boolean, groundFaunaVisible: boolean): void {
       // Simulations keep advancing while hidden, so perception modules continue
@@ -806,7 +888,12 @@ export async function createCreatures(
     },
     reconfigure(next: FaunaConfig): void {
       const birdCountsChanged =
-        next.flockCount !== fauna.flockCount || next.birdsPerFlock !== fauna.birdsPerFlock;
+        next.flockCount !== fauna.flockCount ||
+        next.birdMinPerFlock !== fauna.birdMinPerFlock ||
+        next.birdMaxPerFlock !== fauna.birdMaxPerFlock ||
+        next.batFlockCount !== fauna.batFlockCount ||
+        next.batMinPerFlock !== fauna.batMinPerFlock ||
+        next.batMaxPerFlock !== fauna.batMaxPerFlock;
       const mushroomsChanged =
         next.mushroomCount !== fauna.mushroomCount || next.mushroomRadius !== fauna.mushroomRadius;
       const deerCountChanged = next.deerCount !== fauna.deerCount;
@@ -814,6 +901,7 @@ export async function createCreatures(
       const deerAnchorsChanged = next.deerTreeClearance !== fauna.deerTreeClearance;
       const foxCountChanged = next.foxCount !== fauna.foxCount;
       const foxScatterChanged = next.foxScatterRadius !== fauna.foxScatterRadius;
+      mosquitoes.reconfigure(next);
       fauna = structuredClone(next);
       // roam/speed are read live in `update` — nothing to do for those.
       if (birdCountsChanged) rebuildFlocks(true); // emits creatures:birds-changed
@@ -896,6 +984,7 @@ export async function createCreatures(
         return;
       }
       elapsed += dt;
+      mosquitoes.update(dt);
 
       // Mushrooms: initial scatter + re-anchor when the player flew on.
       if (!mushroomAnchor) {
@@ -1005,13 +1094,10 @@ export async function createCreatures(
         deer.mixer.update(dt);
       }
 
-      const flockCount = flocks.length;
-      const minSpeed = MIN_SPEED * fauna.flightSpeed;
-      const maxSpeed = MAX_SPEED * fauna.flightSpeed;
-
       // ── Flock goals: reached / stale / left-behind waypoints get re-rolled ──
       for (const [f, flock] of flocks.entries()) {
-        const ring = ringFor(f, flockCount, fauna.roamScale);
+        const roamScale = flock.kind === "bat" ? fauna.batRoamScale : fauna.roamScale;
+        const ring = ringFor(flock.ringIndex, flock.ringCount, roamScale);
         flock.age += dt;
 
         centre.set(0, 0, 0);
@@ -1037,6 +1123,9 @@ export async function createCreatures(
       for (const b of birds) {
         const flock = flocks[b.flock];
         if (!flock) continue;
+        const speedScale = b.kind === "bat" ? fauna.batFlightSpeed : fauna.flightSpeed;
+        const minSpeed = MIN_SPEED * speedScale;
+        const maxSpeed = MAX_SPEED * speedScale;
         steer.set(0, 0, 0);
 
         // The three Reynolds rules against FLOCKmates (juanuys/boids ranges,
@@ -1080,7 +1169,8 @@ export async function createCreatures(
         }
 
         // Boundary (juanuys: outside the sphere the return urge dominates).
-        const boundary = ringFor(b.flock, flockCount, fauna.roamScale).max + BOUNDARY_MARGIN;
+        const roamScale = flock.kind === "bat" ? fauna.batRoamScale : fauna.roamScale;
+        const boundary = ringFor(flock.ringIndex, flock.ringCount, roamScale).max + BOUNDARY_MARGIN;
         diff.set(pose.x - b.position.x, 0, pose.z - b.position.z);
         const fromPlayer = diff.length();
         if (fromPlayer > boundary) {
@@ -1129,6 +1219,7 @@ export async function createCreatures(
     },
     dispose(): void {
       unsubscribeLayers?.();
+      mosquitoes.dispose();
       group.removeFromParent();
       for (const entry of materials.values()) entry.material.dispose();
       materials.clear();
@@ -1136,7 +1227,7 @@ export async function createCreatures(
       const geometries = new Set<THREE.BufferGeometry>();
       const sourceMaterials = new Set<THREE.Material>();
       const textures = new Set<THREE.Texture>();
-      for (const asset of [gltf, deerGltf, foxGltf]) {
+      for (const asset of [birdGltf, batGltf, deerGltf, foxGltf]) {
         asset.scene.traverse((child) => {
           if (!(child instanceof THREE.Mesh)) return;
           geometries.add(child.geometry);

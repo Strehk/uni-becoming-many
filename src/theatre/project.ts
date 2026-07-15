@@ -66,6 +66,8 @@ const MOVEMENT_ENVELOPES = Object.fromEntries(
  *  plateau (~1–2 s at 1), not a one-frame spike, so scrubs into it still fire. */
 const EVENT_TRIGGERS = {
   birdCircle: types.number(0, { range: [0, 1] }),
+  batFlight: types.number(0, { range: [0, 1] }),
+  mosquitoSwarm: types.number(0, { range: [0, 1] }),
 };
 
 /** The authored macro-envelope object's props. Extend as the dramaturgy grows. */

@@ -82,23 +82,27 @@ export const birdCircleEvent: EventDefinition = {
       getBirdModel: () => loadEventBird(ctx.uniforms),
       anchor: ctx.anchor,
       parent: ctx.parent,
+      positionSource: ctx.positionSource,
       pathUrl: ROUTE_URL,
-      // Fly-by framing, fitted against the player's constant 6 m/s forward
-      // glide (the bird_intro demo camera crept at 0.65 m/s, so its values
-      // don't transfer): the route is WORLD-anchored at the trigger pose, the
-      // bird approaches from front-left (~10 m), sweeps past ~2 m over the
-      // head at t≈1.5 s and stays 2–4.5 m beside the flight line until the
-      // exit — computed by sampling the authored track against the camera
-      // path (see the fit in the module history; re-fit when player speed or
-      // the route FBX changes).
-      routeDuration: 3,
-      exitDuration: 4.8,
+      // Begin behind the player, sweep around the right side and join the
+      // authored front-left route on a tangent-matched arc. The route follows
+      // player XYZ only and keeps a fixed world rotation independent of view.
+      // 40 % of the previous flight speed: every phase lasts 2.5× as long,
+      // preserving the relative timing and the smooth hand-offs.
+      approachDuration: 6,
+      approachPoints: [
+        new THREE.Vector3(0.8, 0.25, 6.2),
+        new THREE.Vector3(4.2, 0.75, 2.4),
+        new THREE.Vector3(3.3, 1.15, -2.8),
+      ],
+      routeDuration: 7.5,
+      exitDuration: 12,
       routeScale: 0.00125,
-      routeStart: new THREE.Vector3(-5.44, 0.0, -9.13),
+      routeStart: new THREE.Vector3(-3.264, 0.0, -5.478),
       // bird_erasmus.glb: head faces −Z (see src/creatures/index.ts) — align
       // that to the flight forward; roll offset re-tuned for this model.
       modelForward: new THREE.Vector3(0, 0, -1),
-      modelRollOffset: 0,
+      modelRollOffset: Math.PI,
     });
 
     return {

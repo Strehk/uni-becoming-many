@@ -7,8 +7,8 @@
 // counts → flock/mushroom rebuild), debounced.
 //
 // Widgets by shape (not everything is a slider): continuous multipliers are RANGE
-// sliders; discrete spawn COUNTS (flocks, birds, mushrooms, per-species caps) are
-// editable NUMBER fields — exact, and free to go past the slider-style ceiling.
+// sliders; standalone spawn COUNTS (flocks, mushrooms, per-species caps) are
+// editable NUMBER fields. Per-swarm animal ranges use paired integer sliders.
 
 import { DEFAULT_CONFIG, type FloraFaunaConfig } from "../flora-fauna/config.ts";
 import { SPECIES, SPECIES_IDS } from "../life/species.ts";
@@ -255,14 +255,22 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    title: "Fauna · Schwärme",
+    title: "Fauna · Vögel",
     open: true,
     specs: [
       { kind: "number", key: "fauna.flockCount", label: "Schwärme", min: 1, max: 12, step: 1 },
       {
-        kind: "number",
-        key: "fauna.birdsPerFlock",
-        label: "Vögel / Schwarm",
+        kind: "slider",
+        key: "fauna.birdMinPerFlock",
+        label: "Vögel / Schwarm · Min",
+        min: 1,
+        max: 80,
+        step: 1,
+      },
+      {
+        kind: "slider",
+        key: "fauna.birdMaxPerFlock",
+        label: "Vögel / Schwarm · Max",
         min: 1,
         max: 80,
         step: 1,
@@ -279,6 +287,98 @@ const GROUPS: Group[] = [
         kind: "slider",
         key: "fauna.flightSpeed",
         label: "Fluggeschw. ×",
+        min: 0.3,
+        max: 3,
+        step: 0.05,
+      },
+    ],
+  },
+  {
+    title: "Fauna · Fledermäuse",
+    open: true,
+    specs: [
+      {
+        kind: "number",
+        key: "fauna.batFlockCount",
+        label: "Schwärme",
+        min: 1,
+        max: 12,
+        step: 1,
+      },
+      {
+        kind: "slider",
+        key: "fauna.batMinPerFlock",
+        label: "Fledermäuse / Schwarm · Min",
+        min: 1,
+        max: 80,
+        step: 1,
+      },
+      {
+        kind: "slider",
+        key: "fauna.batMaxPerFlock",
+        label: "Fledermäuse / Schwarm · Max",
+        min: 1,
+        max: 80,
+        step: 1,
+      },
+      {
+        kind: "slider",
+        key: "fauna.batRoamScale",
+        label: "Streifradius ×",
+        min: 0.3,
+        max: 3,
+        step: 0.05,
+      },
+      {
+        kind: "slider",
+        key: "fauna.batFlightSpeed",
+        label: "Fluggeschw. ×",
+        min: 0.3,
+        max: 3,
+        step: 0.05,
+      },
+    ],
+  },
+  {
+    title: "Fauna · Mücken",
+    open: true,
+    specs: [
+      {
+        kind: "number",
+        key: "fauna.mosquitoSwarmCount",
+        label: "Schwärme",
+        min: 0,
+        max: 12,
+        step: 1,
+      },
+      {
+        kind: "slider",
+        key: "fauna.mosquitoMinPerSwarm",
+        label: "Mücken / Schwarm · Min",
+        min: 1,
+        max: 400,
+        step: 1,
+      },
+      {
+        kind: "slider",
+        key: "fauna.mosquitoMaxPerSwarm",
+        label: "Mücken / Schwarm · Max",
+        min: 1,
+        max: 400,
+        step: 1,
+      },
+      {
+        kind: "slider",
+        key: "fauna.mosquitoSpread",
+        label: "Schwarmradius ×",
+        min: 0.3,
+        max: 2,
+        step: 0.05,
+      },
+      {
+        kind: "slider",
+        key: "fauna.mosquitoFlightSpeed",
+        label: "Surrgeschw. ×",
         min: 0.3,
         max: 3,
         step: 0.05,
