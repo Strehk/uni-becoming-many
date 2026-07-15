@@ -81,7 +81,7 @@ function numberValue(
     const v = Number.parseFloat(input.value);
     if (Number.isFinite(v)) onCommit(v);
   });
-  input.addEventListener("keydown", (e) => e.stopPropagation()); // digits ≠ sense hotkeys
+  input.addEventListener("keydown", (e) => e.stopPropagation()); // typing here ≠ global hotkeys
   return {
     input,
     show(v: number): void {

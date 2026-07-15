@@ -3,18 +3,14 @@
  *
  * Since the module integration, senses are **layers**, not exclusive modes: each of the
  * nine {@link SenseId}s has an intensity signal `signals.sense[id]` (0..1) and any
- * combination may be active at once. This module owns three things:
+ * combination may be active at once. This module owns two things:
  *
  *   - the {@link createSenseDirector} wiring (bus commands → sense signals, dominant
  *     sense, `sense:changed` mirror) — see `director.ts`;
  *   - the **atmosphere** state machine below: fog / view-reveal / rim uniforms that the
  *     terrain + water materials read. The atmosphere can't blend nine ways at once, so it
  *     eases toward the profile of the *dominant* sense (`signals.activeSense`, written by
- *     the director), falling back to the white-out "none" profile when all layers are off;
- *   - the manual key bindings: **1** clears to Luft, **2–9** and **0** toggle the nine
- *     keyed sense layers (SENSE_KEY_ORDER slots 2–10). Keys emit bus commands
- *     (`sense:toggle` / `sense:clear`), never write signals —
- *     the same path the dev UI uses, and the same signals Theatre drives.
+ *     the director), falling back to the white-out "none" profile when all layers are off.
  *
  * The per-sense *color* layers (ShaderSinneModul port) live in `senses/shader/` and are
  * composited inside the terrain material; this module only steers the shared atmosphere.
@@ -24,7 +20,7 @@ import { Color } from "three/webgpu";
 import type { Bus } from "../signals/index.ts";
 import { signals } from "../signals/index.ts";
 import { createSenseDirector } from "./director.ts";
-import { SENSE_KEY_ORDER, SENSE_LABELS, type SenseId } from "./ids.ts";
+import { SENSE_LABELS, type SenseId } from "./ids.ts";
 import { type ShaderSenses, createShaderSenses } from "./shader/index.ts";
 
 export {
@@ -450,24 +446,19 @@ export interface Senses {
 export interface SensesOptions {
   /** Sense layers to start with (intensity 1). Defaults to `[]` — the piece opens in the
    *  white sensory void (all senses off ⇒ white world); the player / Theatre timeline
-   *  reveal the perceptions from there. Press 1–9 to layer them in. */
+   *  reveal the perceptions from there. */
   start?: readonly SenseId[];
-  /** Where to attach the switch-key listener. Defaults to `window`. */
-  target?: Window | HTMLElement;
 }
 
 /**
- * Wire the sense layer system to input and the signal substrate.
+ * Wire the sense layer system to the signal substrate.
  *
- * Key **1** switches to Luft (all layers off), **2–9** toggle the keyed sense layers,
- * and **0** also switches everything off. Keys emit bus commands — the same channel the dev UI and any future controller use — and the
- * {@link createSenseDirector} turns commands into signal writes. The atmosphere manager
- * follows `signals.activeSense` (the dominant layer), so switching is fully decoupled from
- * *how* it was triggered.
+ * Senses are toggled via bus commands — the channel the dev UI, the Theatre timeline and any
+ * future controller use — and the {@link createSenseDirector} turns commands into signal writes.
+ * The atmosphere manager follows `signals.activeSense` (the dominant layer), so switching is fully
+ * decoupled from *how* it was triggered.
  */
 export function createSenses(bus: Bus, options: SensesOptions = {}): Senses {
-  const target = options.target ?? window;
-
   const director = createSenseDirector(bus);
 
   // Seed the starting layers (default: none — the white void).
@@ -482,43 +473,6 @@ export function createSenses(bus: Bus, options: SensesOptions = {}): Senses {
   // The manager follows the dominant sense — the one place atmosphere becomes a transition.
   const unsubscribe = signals.activeSense.subscribe((id) => manager.switchTo(id));
 
-  const isTyping = (): boolean => {
-    const el = document.activeElement;
-    return (
-      el instanceof HTMLInputElement ||
-      el instanceof HTMLTextAreaElement ||
-      (el instanceof HTMLElement && el.isContentEditable)
-    );
-  };
-
-  const onKeyDown = (event: Event): void => {
-    if (!(event instanceof KeyboardEvent)) {
-      return;
-    }
-    if (event.metaKey || event.ctrlKey || event.altKey || isTyping()) {
-      return;
-    }
-    // The digit row walks SENSE_KEY_ORDER: Digit1 → Luft / all off,
-    // Digit2..Digit9 → slots 2–9, Digit0 → slot 10 (ten slots, ten keys).
-    const digit = /^Digit([0-9])$/.exec(event.code);
-    if (digit) {
-      const idx = (Number(digit[1]) + 9) % 10;
-      const id = SENSE_KEY_ORDER[idx];
-      if (id === null) {
-        bus.emit("sense:clear");
-        event.preventDefault();
-        return;
-      }
-      if (id) {
-        bus.emit("sense:toggle", { id });
-        event.preventDefault();
-      }
-    }
-  };
-
-  const listener: EventTarget = target;
-  listener.addEventListener("keydown", onKeyDown);
-
   return {
     uniforms,
     manager,
@@ -531,7 +485,6 @@ export function createSenses(bus: Bus, options: SensesOptions = {}): Senses {
       unsubscribe();
       shader.dispose();
       director.dispose();
-      listener.removeEventListener("keydown", onKeyDown);
     },
   };
 }

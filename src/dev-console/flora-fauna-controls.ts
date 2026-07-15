@@ -391,7 +391,7 @@ export function createFloraFaunaControls(bus: Bus, config: FloraFaunaConfig): Fl
         input.value = String(clamp(v, spec.min, spec.max)); // slider display only
         emit(spec.key, v);
       });
-      value.addEventListener("keydown", (e) => e.stopPropagation()); // digits ≠ sense hotkeys
+      value.addEventListener("keydown", (e) => e.stopPropagation()); // typing here ≠ global hotkeys
       row.append(label, value, input);
       widgets.push({
         spec,
@@ -412,7 +412,7 @@ export function createFloraFaunaControls(bus: Bus, config: FloraFaunaConfig): Fl
         const v = Number.parseFloat(input.value);
         if (Number.isFinite(v)) emit(spec.key, v);
       });
-      input.addEventListener("keydown", (e) => e.stopPropagation()); // digits ≠ sense hotkeys
+      input.addEventListener("keydown", (e) => e.stopPropagation()); // typing here ≠ global hotkeys
       row.append(label, input);
       widgets.push({
         spec,
