@@ -132,6 +132,14 @@ export function createMovementScore(
         const v = env[m.id] ?? 0;
         const was = prev.get(m.id) ?? 0;
         if (was <= 0 && v > 0) {
+          // Movements are exclusive: a new cue silences any other that's still ringing, so
+          // overlapping bars (or a skip through the timeline crossing several) never stack. The
+          // silenced tracks keep prev > 0, so they don't re-trigger until their envelope resets.
+          for (const other of MOVEMENTS) {
+            if (other.id !== m.id) {
+              bus.stop(other.id, STOP_FADE);
+            }
+          }
           bus.play(m.id);
         }
         if (v > 0) {
