@@ -14,6 +14,7 @@ import {
   saveExperienceConfig,
 } from "./experience/config.ts";
 import { createInterfaceModeController } from "./experience/interface-mode.ts";
+import { type StartGate, createStartGate } from "./experience/start-gate.ts";
 import { createStartMenu } from "./experience/start-menu.ts";
 import { createFloraFaunaController } from "./flora-fauna/index.ts";
 import {
@@ -363,6 +364,12 @@ window.addEventListener("pagehide", () => interfaceMode.dispose());
 // Start/config menu: normal runs play the Theatre timeline. The config UI is an editor shell;
 // the actual authored sense timeline remains Theatre's `arc.senses.*` tracks.
 // Theatre Studio remains available via ?studio=1 for advanced timeline editing.
+//
+// The start gate holds the clock paused after "start" until the audience presses Enter (or A
+// on an XR controller), so the piece begins on their cue instead of the instant the menu closes.
+// Armed in `onStart`, polled in the frame loop, disposed when it fires.
+let startGate: StartGate | undefined;
+window.addEventListener("pagehide", () => startGate?.dispose());
 if (!useTheatreStudio) {
   const startMenu = createStartMenu({
     config: experienceConfig,
@@ -395,10 +402,19 @@ if (!useTheatreStudio) {
       saveExperienceConfig(next);
       signals.senseAuthority.value = "theatre";
       clock.reset();
+      clock.pause(); // stay frozen at t=0 until the gate fires
       theatre.setPosition(0);
       signals.time.value = 0;
-      clock.resume();
       interfaceMode.setMode("playback");
+      // Hold the timeline until Enter / controller-A; only then does the clock start.
+      startGate?.dispose();
+      startGate = createStartGate({
+        getSession: () => renderer.instance.xr.getSession(),
+        onTrigger() {
+          clock.resume();
+          startGate = undefined;
+        },
+      });
     },
   });
   window.addEventListener("pagehide", () => startMenu.dispose());
@@ -502,6 +518,7 @@ window.addEventListener("pagehide", () => {
 let wasClockRunning = clock.running;
 renderer.start((dtSeconds) => {
   // ── PRODUCE ──
+  startGate?.poll(); // gate: an XR controller A-press resumes the clock (Enter is event-driven)
   clock.advance(dtSeconds); // 1. spine advances; time-cues fire
   signals.time.value = clock.now; // publish time onto the substrate (the one clock→signals bridge)
   if (clock.running) {
