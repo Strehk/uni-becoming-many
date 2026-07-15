@@ -301,6 +301,47 @@ const GROUPS: Group[] = [
     ],
   },
   {
+    title: "Fauna · Hirsch",
+    open: true,
+    specs: [
+      { kind: "number", key: "fauna.deerCount", label: "Anzahl", min: 0, max: 16, step: 1 },
+      { kind: "slider", key: "fauna.deerScale", label: "Größe ×", min: 0.4, max: 2, step: 0.05 },
+      { kind: "slider", key: "fauna.deerSpeed", label: "Tempo (m/s)", min: 0.3, max: 3, step: 0.1 },
+      {
+        kind: "slider",
+        key: "fauna.deerRoamRadius",
+        label: "Streifradius (m)",
+        min: 30,
+        max: 260,
+        step: 5,
+      },
+      {
+        kind: "slider",
+        key: "fauna.deerTreeClearance",
+        label: "Baumabstand (m)",
+        min: 1,
+        max: 10,
+        step: 0.25,
+      },
+    ],
+  },
+  {
+    title: "Fauna · Fuchs",
+    open: true,
+    specs: [
+      { kind: "number", key: "fauna.foxCount", label: "Anzahl", min: 0, max: 24, step: 1 },
+      { kind: "slider", key: "fauna.foxScale", label: "Größe ×", min: 0.4, max: 2, step: 0.05 },
+      {
+        kind: "slider",
+        key: "fauna.foxScatterRadius",
+        label: "Streuradius (m)",
+        min: 20,
+        max: 260,
+        step: 5,
+      },
+    ],
+  },
+  {
     // Advanced: absolute per-species cap overrides — bypass the category maths.
     title: "Erweitert · pro Art",
     open: false,

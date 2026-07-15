@@ -30,17 +30,26 @@ import {
   modelRadius,
   normalWorld,
   positionView,
+  texture,
   uniform,
+  uv,
   vec3,
 } from "three/tsl";
 import * as THREE from "three/webgpu";
 import type { Node } from "three/webgpu";
 import { DEFAULT_CONFIG, type FaunaConfig } from "../flora-fauna/config.ts";
 import type { FloraLayerCompositor } from "../life/material.ts";
+import { chunkSeed, mulberry32 } from "../life/matrix.ts";
 import { distanceFog, viewReveal } from "../render/tsl-kit.ts";
 import type { KitUniforms } from "../render/uniforms.ts";
 import type { Bus } from "../signals/index.ts";
 import { signals } from "../signals/index.ts";
+import {
+  type ChunkBuiltInfo,
+  type ChunkCell,
+  makeHeightEntry,
+  sampleEntry,
+} from "../terrain/index.ts";
 
 // ── Flock layout ──
 // Each flock roams its own distance RING around the player: the near flocks stay
@@ -86,12 +95,36 @@ const MAX_ALTITUDE = 60;
  *  wrapper is turned 180° so our +Z flight forward matches; the armature's
  *  single clip (flap cycle) plays per bird with jittered phase/tempo. */
 const BIRD_MODEL_URL = "/creatures/bird_erasmus.glb";
+const DEER_MODEL_URL = "/creatures/deer_walk.glb";
+const FOX_MODEL_URL = "/creatures/fox.glb";
 /** Target wingspan in metres (the file spans ~17.4 units). */
 const BIRD_WINGSPAN = 1.05;
+const DEER_TARGET_HEIGHT = 1.75;
+const FOX_TARGET_HEIGHT = 0.65;
+const DEER_WAYPOINT_REACHED = 3;
+const DEER_WAYPOINT_TIMEOUT = 34;
+const DEER_LOOK_AHEAD = 7;
+/** Maximum yaw change keeps paths broad and readable instead of twitchy. */
+const DEER_MAX_TURN_RATE = 0.22;
+/** Movement speed at which the authored walk clip plays at its native tempo. */
+const DEER_WALK_REFERENCE_SPEED = 1.4;
+const MAX_GROUND_SLOPE = 0.65;
 /** Re-scatter the mushrooms when the player is farther than this from their anchor. */
 const MUSHROOM_REANCHOR = 110;
 
 export type GroundSource = (x: number, z: number) => number | null;
+
+export interface GroundObstacle {
+  readonly x: number;
+  readonly z: number;
+  readonly radius: number;
+}
+
+export type GroundObstacleSource = (
+  x: number,
+  z: number,
+  radius: number,
+) => readonly GroundObstacle[];
 
 export interface BirdActor {
   /** Root object — what the motion sense samples and the network reads. */
@@ -101,19 +134,45 @@ export interface BirdActor {
 }
 
 export interface Creatures {
-  /** Scene parent of all bird meshes. */
+  /** Scene parent of all fauna meshes. */
   readonly group: THREE.Group;
   readonly birds: readonly BirdActor[];
   /** Mushroom positions (world space). Mutated on re-anchor; listen for the
    *  `creatures:mushrooms-changed` bus event to rebuild dependents. */
   readonly mushrooms: readonly THREE.Vector3[];
-  /** Show/hide the bird meshes (the motion sense recommends hiding its sources). */
-  setBirdsVisible(visible: boolean): void;
-  /** Apply new fauna config. Behavioural knobs (roam/speed/mushroom radius) take
-   *  effect live; changing flock/bird COUNTS rebuilds the flock (emits
-   *  `creatures:birds-changed`); changing the mushroom count re-scatters (emits
-   *  `creatures:mushrooms-changed`). */
+  /** Apply the sense visibility gates while simulations continue in the background. */
+  setVisibility(birdsVisible: boolean, groundFaunaVisible: boolean): void;
+  /** Terrain streaming hooks: ground fauna is scattered and released with chunks. */
+  onChunkBuilt(info: ChunkBuiltInfo): void;
+  onChunkDisposed(cell: ChunkCell): void;
+  /** Apply new fauna config. Behavioural knobs take effect live; count changes
+   *  rebuild only the affected fauna set and emit the corresponding bus event. */
   reconfigure(config: FaunaConfig): void;
+  /** Concise live state for the browser test/debug bridge. */
+  debugSnapshot(): {
+    readonly visibility: { readonly birds: boolean; readonly groundFauna: boolean };
+    readonly streamedChunks: number;
+    readonly deer: readonly {
+      x: number;
+      y: number;
+      z: number;
+      homeX: number;
+      homeZ: number;
+      placed: boolean;
+      treeClearance: number | null;
+      animationTime: number;
+      heading: number;
+      waypointX: number;
+      waypointZ: number;
+    }[];
+    readonly foxes: readonly {
+      x: number;
+      y: number;
+      z: number;
+      placed: boolean;
+      homeKey: string;
+    }[];
+  };
   update(dt: number): void;
   dispose(): void;
 }
@@ -142,6 +201,8 @@ export interface CreatureSenseOptions {
   layers?: FloraLayerCompositor;
   /** Flock / speed / mushroom config. Defaults to `DEFAULT_CONFIG.fauna`. */
   config?: FaunaConfig;
+  /** Live tree-trunk query from the flora scatter. */
+  groundObstacles?: GroundObstacleSource;
 }
 
 export async function createCreatures(
@@ -152,13 +213,21 @@ export async function createCreatures(
 ): Promise<Creatures> {
   const group = new THREE.Group();
   group.name = "creatures";
-  // Creatures are perception-dependent: hidden in the white void by default, revealed
-  // by whichever sense perceives them (the host toggles this via `setBirdsVisible`).
-  group.visible = false;
+  const birdGroup = new THREE.Group();
+  birdGroup.name = "birds";
+  birdGroup.visible = false;
+  const groundFaunaGroup = new THREE.Group();
+  groundFaunaGroup.name = "ground-fauna";
+  groundFaunaGroup.visible = false;
+  group.add(birdGroup, groundFaunaGroup);
   scene.add(group);
 
   // ── the bird asset ──
-  const gltf = await new GLTFLoader().loadAsync(BIRD_MODEL_URL);
+  const [gltf, deerGltf, foxGltf] = await Promise.all([
+    new GLTFLoader().loadAsync(BIRD_MODEL_URL),
+    new GLTFLoader().loadAsync(DEER_MODEL_URL),
+    new GLTFLoader().loadAsync(FOX_MODEL_URL),
+  ]);
   const flapClip = gltf.animations[0];
   const birdBounds = new THREE.Box3().setFromObject(gltf.scene);
   const span = birdBounds.getSize(new THREE.Vector3()).x;
@@ -185,12 +254,18 @@ export async function createCreatures(
   // while `infrarot` reads a warm METABOLIC body temperature (~311 K — near the
   // thermal window's hot end, so living birds glow against ground and sky).
   const materials = new Map<string, { material: THREE.MeshBasicNodeMaterial; rewire(): void }>();
-  const materialFor = (source: THREE.Material): THREE.MeshBasicNodeMaterial => {
+  const materialFor = (
+    source: THREE.Material,
+    fallbackColor?: THREE.Color,
+  ): THREE.MeshBasicNodeMaterial => {
     const color =
-      "color" in source && source.color instanceof THREE.Color
+      fallbackColor ??
+      ("color" in source && source.color instanceof THREE.Color
         ? source.color
-        : new THREE.Color(0x8e98a8);
-    const key = color.getHexString();
+        : new THREE.Color(0x8e98a8));
+    const sourceMap =
+      "map" in source && source.map instanceof THREE.Texture ? source.map : undefined;
+    const key = `${source.uuid}:${color.getHexString()}`;
     const cached = materials.get(key);
     if (cached) return cached.material;
 
@@ -202,7 +277,8 @@ export async function createCreatures(
     });
     const rewire = (): void => {
       const { uniforms: u, layers } = senseOpts;
-      const albedo = vec3(color.r, color.g, color.b);
+      const tint = vec3(color.r, color.g, color.b);
+      const albedo = sourceMap ? texture(sourceMap, uv()).rgb.mul(tint) : tint;
       let base: Node<"vec3"> | Node<"color"> = albedo;
       if (layers) {
         const facing = normalWorld.dot(vec3(0.4, 0.75, 0.3).normalize()).clamp(0, 1);
@@ -260,11 +336,102 @@ export async function createCreatures(
     return { root, mixer };
   };
 
+  const deerSource = deerGltf.scene.getObjectByName("Deer_001_rig");
+  const foxSource = foxGltf.scene.getObjectByName("Plane");
+  if (!deerSource) throw new Error("[creatures] Deer_001_rig missing from deer_walk.glb");
+  if (!foxSource) throw new Error("[creatures] Plane missing from fox.glb");
+
+  interface ModelMetrics {
+    readonly baseScale: number;
+    readonly groundOffset: number;
+  }
+
+  const measureModel = (source: THREE.Object3D, targetHeight: number): ModelMetrics => {
+    source.updateWorldMatrix(true, true);
+    const bounds = new THREE.Box3().setFromObject(source);
+    const height = Math.max(bounds.max.y - bounds.min.y, 1e-4);
+    const baseScale = targetHeight / height;
+    return { baseScale, groundOffset: -bounds.min.y * baseScale };
+  };
+
+  const deerMetrics = measureModel(deerSource, DEER_TARGET_HEIGHT);
+  const foxMetrics = measureModel(foxSource, FOX_TARGET_HEIGHT);
+  const deerWalkClip = deerGltf.animations.find((clip) => clip.name === "Deer_001_walk");
+  if (!deerWalkClip) throw new Error("[creatures] Deer_001_walk animation missing");
+
+  const applyAnimalMaterials = (model: THREE.Object3D, fallbackColor?: THREE.Color): void => {
+    model.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return;
+      child.material = Array.isArray(child.material)
+        ? child.material.map((source) => materialFor(source, fallbackColor))
+        : materialFor(child.material, fallbackColor);
+      child.frustumCulled = false;
+    });
+  };
+
+  interface Deer {
+    readonly homeKey: string;
+    readonly home: THREE.Vector3;
+    readonly object: THREE.Group;
+    readonly model: THREE.Object3D;
+    readonly mixer: THREE.AnimationMixer;
+    readonly action: THREE.AnimationAction;
+    readonly waypoint: THREE.Vector3;
+    readonly heading: THREE.Vector3;
+    placed: boolean;
+    routeReady: boolean;
+    waypointAge: number;
+    routeCheckAge: number;
+  }
+
+  interface Fox {
+    readonly homeKey: string;
+    readonly object: THREE.Group;
+    readonly model: THREE.Object3D;
+    placed: boolean;
+  }
+
+  const buildDeer = (homeKey: string, home: THREE.Vector3): Deer => {
+    const model = cloneSkeleton(deerSource);
+    // The deer mesh already faces the wrapper's +Z travel direction.
+    applyAnimalMaterials(model);
+    const object = new THREE.Group();
+    object.add(model);
+    const mixer = new THREE.AnimationMixer(model);
+    const action = mixer.clipAction(deerWalkClip);
+    action.play();
+    action.time = Math.random() * deerWalkClip.duration;
+    return {
+      homeKey,
+      home: home.clone(),
+      object,
+      model,
+      mixer,
+      action,
+      waypoint: new THREE.Vector3(),
+      heading: new THREE.Vector3(0, 0, 1),
+      placed: false,
+      routeReady: false,
+      waypointAge: 0,
+      routeCheckAge: 0,
+    };
+  };
+
+  const buildFox = (homeKey: string): Fox => {
+    const model = foxSource.clone(true);
+    applyAnimalMaterials(model, new THREE.Color(0xb85f35));
+    const object = new THREE.Group();
+    object.add(model);
+    return { homeKey, object, model, placed: false };
+  };
+
   const pose = signals.playerPose.peek();
 
   // Live fauna config — the update loop reads roam/speed from here; counts drive
   // the flock/mushroom rebuilds in `reconfigure`.
-  let fauna: FaunaConfig = senseOpts.config ?? DEFAULT_CONFIG.fauna;
+  // Keep a private snapshot: the coordinator mutates its live config object in
+  // place, while reconfigure needs the previous values to detect count changes.
+  let fauna: FaunaConfig = structuredClone(senseOpts.config ?? DEFAULT_CONFIG.fauna);
 
   // ── birds ──
   // A flock waypoint: somewhere in the flock's roam ring around the player, at
@@ -313,7 +480,7 @@ export async function createCreatures(
           pose.y + 14 + Math.random() * 22,
           cz + (Math.random() - 0.5) * 24,
         );
-        group.add(root);
+        birdGroup.add(root);
         birds.push({
           object: root,
           position: root.position,
@@ -358,11 +525,257 @@ export async function createCreatures(
     return true;
   };
 
+  // ── ground fauna ──
+  const deers: Deer[] = [];
+  const foxes: Fox[] = [];
+
+  interface GroundFaunaAnchor {
+    readonly key: string;
+    readonly position: THREE.Vector3;
+    readonly yaw: number;
+  }
+
+  interface GroundFaunaChunk {
+    readonly info: ChunkBuiltInfo;
+    readonly deer: readonly GroundFaunaAnchor[];
+    readonly fox: readonly GroundFaunaAnchor[];
+  }
+
+  const groundFaunaChunks = new Map<string, GroundFaunaChunk>();
+  const groundChunkKey = (gridX: number, gridZ: number): string => `${gridX},${gridZ}`;
+
+  const setAnimalScale = (model: THREE.Object3D, metrics: ModelMetrics, scale: number): void => {
+    model.scale.setScalar(metrics.baseScale * scale);
+    model.position.y = metrics.groundOffset * scale;
+  };
+
+  const slopeAt = (x: number, z: number): number | null => {
+    const d = 1.5;
+    const left = ground(x - d, z);
+    const right = ground(x + d, z);
+    const back = ground(x, z - d);
+    const front = ground(x, z + d);
+    if (left === null || right === null || back === null || front === null) return null;
+    return Math.hypot((right - left) / (2 * d), (front - back) / (2 * d));
+  };
+
+  const pointIsClear = (x: number, z: number, clearance: number): boolean => {
+    const obstacles = senseOpts.groundObstacles?.(x, z, clearance) ?? [];
+    return obstacles.every((obstacle) => {
+      const dx = x - obstacle.x;
+      const dz = z - obstacle.z;
+      const reach = clearance + obstacle.radius;
+      return dx * dx + dz * dz > reach * reach;
+    });
+  };
+
+  const routeIsClear = (
+    fromX: number,
+    fromZ: number,
+    toX: number,
+    toZ: number,
+    clearance: number,
+  ): boolean => {
+    const sx = toX - fromX;
+    const sz = toZ - fromZ;
+    const lengthSq = sx * sx + sz * sz;
+    const length = Math.sqrt(lengthSq);
+    const midX = (fromX + toX) * 0.5;
+    const midZ = (fromZ + toZ) * 0.5;
+    const obstacles = senseOpts.groundObstacles?.(midX, midZ, length * 0.5 + clearance) ?? [];
+    for (const obstacle of obstacles) {
+      const t =
+        lengthSq > 1e-4
+          ? Math.min(
+              1,
+              Math.max(0, ((obstacle.x - fromX) * sx + (obstacle.z - fromZ) * sz) / lengthSq),
+            )
+          : 0;
+      const dx = obstacle.x - (fromX + sx * t);
+      const dz = obstacle.z - (fromZ + sz * t);
+      const reach = clearance + obstacle.radius;
+      if (dx * dx + dz * dz <= reach * reach) return false;
+    }
+    return true;
+  };
+
+  const findOpenPoint = (
+    target: THREE.Vector3,
+    minRadius: number,
+    maxRadius: number,
+    clearance: number,
+    routeFrom?: THREE.Vector3,
+    centrePoint: { readonly x: number; readonly z: number } = pose,
+  ): boolean => {
+    for (let attempt = 0; attempt < 32; attempt++) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = minRadius + Math.sqrt(Math.random()) * Math.max(0, maxRadius - minRadius);
+      const x = centrePoint.x + Math.cos(angle) * radius;
+      const z = centrePoint.z + Math.sin(angle) * radius;
+      const y = ground(x, z);
+      const slope = slopeAt(x, z);
+      if (y === null || slope === null || slope > MAX_GROUND_SLOPE) continue;
+      if (!pointIsClear(x, z, clearance)) continue;
+      if (routeFrom && !routeIsClear(routeFrom.x, routeFrom.z, x, z, clearance)) continue;
+      target.set(x, y, z);
+      return true;
+    }
+    return false;
+  };
+
+  const rollDeerWaypoint = (deer: Deer): boolean => {
+    const found = findOpenPoint(
+      deer.waypoint,
+      12,
+      Math.max(18, fauna.deerRoamRadius),
+      fauna.deerTreeClearance,
+      deer.object.position,
+      deer.home,
+    );
+    if (found && !deer.routeReady) {
+      const dx = deer.waypoint.x - deer.object.position.x;
+      const dz = deer.waypoint.z - deer.object.position.z;
+      const length = Math.hypot(dx, dz) || 1;
+      deer.heading.set(dx / length, 0, dz / length);
+      deer.object.rotation.y = Math.atan2(deer.heading.x, deer.heading.z);
+      deer.routeReady = true;
+    }
+    deer.waypointAge = found ? 0 : DEER_WAYPOINT_TIMEOUT;
+    deer.routeCheckAge = 0;
+    return found;
+  };
+
+  const scatterGroundAnchor = (
+    info: ChunkBuiltInfo,
+    salt: number,
+    clearance: number,
+    clearingBias: number,
+  ): GroundFaunaAnchor | null => {
+    const rand = mulberry32(chunkSeed(info.gridX, info.gridZ, salt));
+    const entry = makeHeightEntry(info.gridX, info.gridZ, info.chunkSize, info.heightGrid);
+    const { fields } = info;
+    const originX = info.gridX * info.chunkSize;
+    const originZ = info.gridZ * info.chunkSize;
+    for (let attempt = 0; attempt < 96; attempt++) {
+      const u = 0.06 + rand() * 0.88;
+      const v = 0.06 + rand() * 0.88;
+      const cx = Math.min(fields.res - 1, Math.floor(u * fields.res));
+      const cz = Math.min(fields.res - 1, Math.floor(v * fields.res));
+      const cell = cz * fields.res + cx;
+      if ((fields.water[cell] ?? 1) !== 0) continue;
+      if ((fields.slope[cell] ?? 1) > MAX_GROUND_SLOPE * 0.75) continue;
+      if ((fields.vegetation[cell] ?? 1) > clearingBias && rand() < 0.82) continue;
+      const x = originX + u * info.chunkSize;
+      const z = originZ + v * info.chunkSize;
+      if (!pointIsClear(x, z, clearance)) continue;
+      return {
+        key: `${groundChunkKey(info.gridX, info.gridZ)}:${salt}`,
+        position: new THREE.Vector3(x, sampleEntry(entry, x, z), z),
+        yaw: rand() * Math.PI * 2,
+      };
+    }
+    return null;
+  };
+
+  const allGroundAnchors = (kind: "deer" | "fox"): GroundFaunaAnchor[] =>
+    [...groundFaunaChunks.values()]
+      .flatMap((chunk) => chunk[kind])
+      .sort((a, b) => {
+        const adx = a.position.x - pose.x;
+        const adz = a.position.z - pose.z;
+        const bdx = b.position.x - pose.x;
+        const bdz = b.position.z - pose.z;
+        return adx * adx + adz * adz - (bdx * bdx + bdz * bdz);
+      });
+
+  const deerAnchorsFor = (info: ChunkBuiltInfo): GroundFaunaAnchor[] =>
+    [0xd33, 0xd34]
+      .map((salt) => scatterGroundAnchor(info, salt, fauna.deerTreeClearance, 0.62))
+      .filter((anchor): anchor is GroundFaunaAnchor => anchor !== null);
+
+  const foxAnchorsFor = (info: ChunkBuiltInfo): GroundFaunaAnchor[] =>
+    [0xf09, 0xf0a]
+      .map((salt) => scatterGroundAnchor(info, salt, 1.2, 0.78))
+      .filter((anchor): anchor is GroundFaunaAnchor => anchor !== null);
+
+  const reconcileDeer = (emit: boolean): void => {
+    const target = Math.max(0, Math.round(fauna.deerCount));
+    const liveKeys = new Set(allGroundAnchors("deer").map((anchor) => anchor.key));
+    let changed = false;
+    for (let i = deers.length - 1; i >= 0; i--) {
+      const deer = deers[i];
+      if (!deer || (i < target && liveKeys.has(deer.homeKey))) continue;
+      deer.object.removeFromParent();
+      deers.splice(i, 1);
+      changed = true;
+    }
+    const used = new Set(deers.map((deer) => deer.homeKey));
+    for (const anchor of allGroundAnchors("deer")) {
+      if (deers.length >= target) break;
+      if (used.has(anchor.key)) continue;
+      const deer = buildDeer(anchor.key, anchor.position);
+      setAnimalScale(deer.model, deerMetrics, fauna.deerScale);
+      deer.object.position.copy(anchor.position);
+      deer.heading.set(Math.sin(anchor.yaw), 0, Math.cos(anchor.yaw));
+      deer.object.rotation.y = anchor.yaw;
+      deer.object.visible = true;
+      deer.placed = true;
+      deer.waypointAge = DEER_WAYPOINT_TIMEOUT;
+      groundFaunaGroup.add(deer.object);
+      deers.push(deer);
+      used.add(anchor.key);
+      changed = true;
+    }
+    if (emit && changed) bus.emit("creatures:ground-fauna-changed");
+  };
+
+  const reconcileFoxes = (emit: boolean): void => {
+    const target = Math.max(0, Math.round(fauna.foxCount));
+    const anchors = allGroundAnchors("fox");
+    const liveKeys = new Set(anchors.map((anchor) => anchor.key));
+    let changed = false;
+    for (let i = foxes.length - 1; i >= 0; i--) {
+      const fox = foxes[i];
+      if (!fox || (i < target && liveKeys.has(fox.homeKey))) continue;
+      fox.object.removeFromParent();
+      foxes.splice(i, 1);
+      changed = true;
+    }
+    const used = new Set(foxes.map((fox) => fox.homeKey));
+    const addAnchor = (anchor: GroundFaunaAnchor): void => {
+      const fox = buildFox(anchor.key);
+      setAnimalScale(fox.model, foxMetrics, fauna.foxScale);
+      fox.object.position.copy(anchor.position);
+      fox.object.rotation.y = anchor.yaw;
+      fox.object.visible = true;
+      fox.placed = true;
+      groundFaunaGroup.add(fox.object);
+      foxes.push(fox);
+      used.add(anchor.key);
+      changed = true;
+    };
+    for (const anchor of anchors) {
+      if (foxes.length >= target) break;
+      if (used.has(anchor.key)) continue;
+      const spaced = foxes.every(
+        (fox) => fox.object.position.distanceTo(anchor.position) >= fauna.foxScatterRadius,
+      );
+      if (spaced) addAnchor(anchor);
+    }
+    for (const anchor of anchors) {
+      if (foxes.length >= target) break;
+      if (!used.has(anchor.key)) addAnchor(anchor);
+    }
+    if (emit && changed) bus.emit("creatures:ground-fauna-changed");
+  };
+
   // Scratch vectors (no per-frame allocation).
   const centre = new THREE.Vector3();
   const steer = new THREE.Vector3();
   const diff = new THREE.Vector3();
   const align = new THREE.Vector3();
+  const desired = new THREE.Vector3();
+  const avoid = new THREE.Vector3();
 
   let elapsed = 0;
 
@@ -370,21 +783,113 @@ export async function createCreatures(
     group,
     birds,
     mushrooms,
-    setBirdsVisible(visible: boolean): void {
-      // Toggle the whole group — the flock is on/off as one. The boids + wing flap
-      // keep updating while hidden (motion samples the animation regardless), so the
-      // trails / network still read live positions.
-      group.visible = visible;
+    setVisibility(birdsVisible: boolean, groundFaunaVisible: boolean): void {
+      // Simulations keep advancing while hidden, so perception modules continue
+      // reading live positions and animation.
+      birdGroup.visible = birdsVisible;
+      groundFaunaGroup.visible = groundFaunaVisible;
+    },
+    onChunkBuilt(info: ChunkBuiltInfo): void {
+      const key = groundChunkKey(info.gridX, info.gridZ);
+      groundFaunaChunks.set(key, {
+        info,
+        deer: deerAnchorsFor(info),
+        fox: foxAnchorsFor(info),
+      });
+      reconcileDeer(true);
+      reconcileFoxes(true);
+    },
+    onChunkDisposed(cell: ChunkCell): void {
+      groundFaunaChunks.delete(groundChunkKey(cell.gridX, cell.gridZ));
+      reconcileDeer(true);
+      reconcileFoxes(true);
     },
     reconfigure(next: FaunaConfig): void {
-      const countsChanged =
+      const birdCountsChanged =
         next.flockCount !== fauna.flockCount || next.birdsPerFlock !== fauna.birdsPerFlock;
       const mushroomsChanged =
         next.mushroomCount !== fauna.mushroomCount || next.mushroomRadius !== fauna.mushroomRadius;
-      fauna = next;
+      const deerCountChanged = next.deerCount !== fauna.deerCount;
+      const deerRouteChanged = next.deerRoamRadius !== fauna.deerRoamRadius;
+      const deerAnchorsChanged = next.deerTreeClearance !== fauna.deerTreeClearance;
+      const foxCountChanged = next.foxCount !== fauna.foxCount;
+      const foxScatterChanged = next.foxScatterRadius !== fauna.foxScatterRadius;
+      fauna = structuredClone(next);
       // roam/speed are read live in `update` — nothing to do for those.
-      if (countsChanged) rebuildFlocks(true); // emits creatures:birds-changed
+      if (birdCountsChanged) rebuildFlocks(true); // emits creatures:birds-changed
       if (mushroomsChanged) scatterMushrooms(); // emits creatures:mushrooms-changed
+      if (deerAnchorsChanged) {
+        for (const [key, chunk] of groundFaunaChunks) {
+          groundFaunaChunks.set(key, { ...chunk, deer: deerAnchorsFor(chunk.info) });
+        }
+        for (const deer of deers) deer.object.removeFromParent();
+        deers.length = 0;
+        reconcileDeer(true);
+      } else if (deerCountChanged) {
+        reconcileDeer(true);
+      } else {
+        for (const deer of deers) {
+          setAnimalScale(deer.model, deerMetrics, fauna.deerScale);
+          if (deerRouteChanged) deer.waypointAge = DEER_WAYPOINT_TIMEOUT;
+        }
+      }
+      if (foxCountChanged) {
+        reconcileFoxes(true);
+      } else {
+        for (const fox of foxes) setAnimalScale(fox.model, foxMetrics, fauna.foxScale);
+        if (foxScatterChanged) {
+          for (const fox of foxes) {
+            fox.object.removeFromParent();
+          }
+          foxes.length = 0;
+          reconcileFoxes(true);
+        }
+      }
+    },
+    debugSnapshot() {
+      return {
+        visibility: { birds: birdGroup.visible, groundFauna: groundFaunaGroup.visible },
+        streamedChunks: groundFaunaChunks.size,
+        deer: deers.map((deer) => {
+          const nearby =
+            senseOpts.groundObstacles?.(
+              deer.object.position.x,
+              deer.object.position.z,
+              fauna.deerTreeClearance + 8,
+            ) ?? [];
+          const treeClearance = nearby.reduce(
+            (nearest, obstacle) =>
+              Math.min(
+                nearest,
+                Math.hypot(
+                  deer.object.position.x - obstacle.x,
+                  deer.object.position.z - obstacle.z,
+                ) - obstacle.radius,
+              ),
+            Number.POSITIVE_INFINITY,
+          );
+          return {
+            x: deer.object.position.x,
+            y: deer.object.position.y,
+            z: deer.object.position.z,
+            homeX: deer.home.x,
+            homeZ: deer.home.z,
+            placed: deer.placed,
+            treeClearance: Number.isFinite(treeClearance) ? treeClearance : null,
+            animationTime: deer.action.time,
+            heading: Math.atan2(deer.heading.x, deer.heading.z),
+            waypointX: deer.waypoint.x,
+            waypointZ: deer.waypoint.z,
+          };
+        }),
+        foxes: foxes.map((fox) => ({
+          x: fox.object.position.x,
+          y: fox.object.position.y,
+          z: fox.object.position.z,
+          placed: fox.placed,
+          homeKey: fox.homeKey,
+        })),
+      };
     },
     update(dt: number): void {
       if (dt <= 0) {
@@ -401,6 +906,103 @@ export async function createCreatures(
         if (dx * dx + dz * dz > MUSHROOM_REANCHOR * MUSHROOM_REANCHOR) {
           scatterMushrooms();
         }
+      }
+
+      // Deer select tree-free line segments through the actual streamed flora.
+      // A short look-ahead repulsion handles trunks near bends or newly re-scattered
+      // trees without snapping the animal to a new position.
+      for (const deer of deers) {
+        deer.waypointAge += dt;
+        deer.routeCheckAge += dt;
+        diff.copy(deer.waypoint).sub(deer.object.position);
+        diff.y = 0;
+        let targetDistance = diff.length();
+        const needsWaypoint =
+          targetDistance < DEER_WAYPOINT_REACHED || deer.waypointAge >= DEER_WAYPOINT_TIMEOUT;
+        const routeBlocked =
+          deer.routeCheckAge >= 1.25 &&
+          !routeIsClear(
+            deer.object.position.x,
+            deer.object.position.z,
+            deer.waypoint.x,
+            deer.waypoint.z,
+            fauna.deerTreeClearance,
+          );
+        if (needsWaypoint || routeBlocked) {
+          if (!rollDeerWaypoint(deer)) {
+            deer.action.timeScale = 0;
+            continue;
+          }
+          diff.copy(deer.waypoint).sub(deer.object.position);
+          diff.y = 0;
+          targetDistance = diff.length();
+        } else if (deer.routeCheckAge >= 1.25) {
+          deer.routeCheckAge = 0;
+        }
+
+        if (targetDistance < 1e-3) {
+          deer.action.timeScale = 0;
+          continue;
+        }
+        desired.copy(diff).divideScalar(targetDistance);
+        avoid.set(0, 0, 0);
+        const lookX = deer.object.position.x + desired.x * DEER_LOOK_AHEAD;
+        const lookZ = deer.object.position.z + desired.z * DEER_LOOK_AHEAD;
+        const nearby =
+          senseOpts.groundObstacles?.(
+            (deer.object.position.x + lookX) * 0.5,
+            (deer.object.position.z + lookZ) * 0.5,
+            DEER_LOOK_AHEAD + fauna.deerTreeClearance,
+          ) ?? [];
+        for (const obstacle of nearby) {
+          const awayX = deer.object.position.x - obstacle.x;
+          const awayZ = deer.object.position.z - obstacle.z;
+          const distance = Math.hypot(awayX, awayZ);
+          const influence = obstacle.radius + fauna.deerTreeClearance + DEER_LOOK_AHEAD;
+          if (distance >= influence) continue;
+          const strength = (influence - distance) / influence;
+          if (distance > 1e-3) {
+            avoid.x += (awayX / distance) * strength;
+            avoid.z += (awayZ / distance) * strength;
+          } else {
+            avoid.x += -desired.z;
+            avoid.z += desired.x;
+          }
+        }
+
+        steer.copy(desired).addScaledVector(avoid, 1.8);
+        if (steer.lengthSq() < 1e-4) steer.copy(desired);
+        steer.normalize();
+        const currentYaw = Math.atan2(deer.heading.x, deer.heading.z);
+        const targetYaw = Math.atan2(steer.x, steer.z);
+        const yawDelta = Math.atan2(
+          Math.sin(targetYaw - currentYaw),
+          Math.cos(targetYaw - currentYaw),
+        );
+        const maxYawStep = DEER_MAX_TURN_RATE * dt;
+        const yaw = currentYaw + Math.min(maxYawStep, Math.max(-maxYawStep, yawDelta));
+        deer.heading.set(Math.sin(yaw), 0, Math.cos(yaw));
+
+        const speed = Math.max(0, fauna.deerSpeed);
+        const step = speed * dt;
+        const nextX = deer.object.position.x + deer.heading.x * step;
+        const nextZ = deer.object.position.z + deer.heading.z * step;
+        const nextY = ground(nextX, nextZ);
+        const stepIsClear = pointIsClear(nextX, nextZ, fauna.deerTreeClearance);
+        if (
+          nextY === null ||
+          !stepIsClear ||
+          Math.abs(nextY - deer.object.position.y) > Math.max(0.5, step * MAX_GROUND_SLOPE)
+        ) {
+          deer.waypointAge = DEER_WAYPOINT_TIMEOUT;
+          deer.action.timeScale = 0;
+          continue;
+        }
+
+        deer.object.position.set(nextX, nextY, nextZ);
+        deer.object.rotation.y = yaw;
+        deer.action.timeScale = speed / DEER_WALK_REFERENCE_SPEED;
+        deer.mixer.update(dt);
       }
 
       const flockCount = flocks.length;
@@ -530,10 +1132,26 @@ export async function createCreatures(
       group.removeFromParent();
       for (const entry of materials.values()) entry.material.dispose();
       materials.clear();
-      // Skeleton clones share the source geometries — dispose them once.
-      gltf.scene.traverse((child) => {
-        if (child instanceof THREE.Mesh) child.geometry.dispose();
-      });
+      // Skeleton clones share source geometry and textures; dispose each resource once.
+      const geometries = new Set<THREE.BufferGeometry>();
+      const sourceMaterials = new Set<THREE.Material>();
+      const textures = new Set<THREE.Texture>();
+      for (const asset of [gltf, deerGltf, foxGltf]) {
+        asset.scene.traverse((child) => {
+          if (!(child instanceof THREE.Mesh)) return;
+          geometries.add(child.geometry);
+          const meshMaterials = Array.isArray(child.material) ? child.material : [child.material];
+          for (const material of meshMaterials) {
+            sourceMaterials.add(material);
+            if ("map" in material && material.map instanceof THREE.Texture) {
+              textures.add(material.map);
+            }
+          }
+        });
+      }
+      for (const geometry of geometries) geometry.dispose();
+      for (const material of sourceMaterials) material.dispose();
+      for (const sourceTexture of textures) sourceTexture.dispose();
     },
   };
 }

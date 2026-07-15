@@ -2,7 +2,7 @@ import { time } from "three/tsl";
 import { createAtmosphere } from "./atmosphere/index.ts";
 import { SoundBus, SoundDirector } from "./audio/index.ts";
 import { createMovementScore } from "./audio/movements.ts";
-import { createCreatures } from "./creatures/index.ts";
+import { type Creatures, createCreatures } from "./creatures/index.ts";
 import { createEventControls } from "./dev-console/event-controls.ts";
 import { createFloraFaunaControls } from "./dev-console/flora-fauna-controls.ts";
 import { createDevConsole } from "./dev-console/index.ts";
@@ -41,7 +41,6 @@ import { createMotionSense } from "./senses/motion/index.ts";
 import { createNetzwerkSense } from "./senses/netzwerk/index.ts";
 import { createRundumSense } from "./senses/rundum/index.ts";
 import { loadSenseState, savedSenseState, serializeSenseState } from "./senses/state.ts";
-import { createThermalSky } from "./senses/thermal_sicht/sky.js";
 import { bus, signals } from "./signals/index.ts";
 import { createSynthOverlay } from "./synth/index.ts";
 import { createTerrainWorld } from "./terrain/index.ts";
@@ -90,8 +89,6 @@ window.addEventListener("pagehide", () => senses.dispose());
 // as one uniform white world), near-black under echo, violet under UV, etc. This is the
 // live `fogColor` the SenseManager lerps, so the background transitions with the senses.
 renderer.scene.background = senses.uniforms.fogColor.value;
-const thermalSky = createThermalSky(renderer.scene, senses.uniforms.fogColor.value);
-window.addEventListener("pagehide", () => thermalSky.dispose());
 
 // Flora & Fauna tuning (density / forest shape / flocks / mushrooms), committed to
 // src/flora-fauna/state.json. Read once here and fed straight into flora + fauna so
@@ -121,11 +118,9 @@ window.addEventListener("pagehide", () => atmosphere.dispose());
 // It shares the senses' atmosphere uniforms (sense transitions restyle the world live),
 // composites the four shader-sense colour layers over the biome albedo, and fires the
 // chunk hooks that let flora grow on each chunk and be freed with it.
-// GPU grass shares the terrain's chunk hooks (fields cache) and sense look. Declared
-// before the world so its `onChunkBuilt`/`onChunkDisposed` can fan out alongside life's;
-// assigned just after (it needs `world.groundHeightAt` for the CPU→GPU height bridge).
-// biome-ignore lint/style/useConst: forward-referenced by the terrain chunk hooks below before assignment
-let grass: Grass | undefined;
+// GPU grass and fauna share the terrain's chunk hooks. The holder provides stable
+// forward references while both modules wait for the terrain world they depend on.
+const terrainDependents: { grass?: Grass; creatures?: Creatures } = {};
 const { world } = createTerrainWorld({
   scene: renderer.scene,
   uTime: time,
@@ -133,25 +128,28 @@ const { world } = createTerrainWorld({
   layers: senses.shader.compositor,
   onChunkBuilt: (info) => {
     life.onChunkBuilt(info);
-    grass?.onChunkBuilt(info);
+    terrainDependents.creatures?.onChunkBuilt(info);
+    terrainDependents.grass?.onChunkBuilt(info);
   },
   onChunkDisposed: (cell) => {
     life.onChunkDisposed(cell);
-    grass?.onChunkDisposed(cell);
+    terrainDependents.creatures?.onChunkDisposed(cell);
+    terrainDependents.grass?.onChunkDisposed(cell);
   },
 });
 
 // Compute-driven grass: a camera-centred field of bezier blades on grass-fitting biomes,
 // hidden in the void and revealed with the senses like the flora (see src/grass/).
-grass = createGrass({
+const grass = createGrass({
   scene: renderer.scene,
   renderer: renderer.instance,
   uniforms: senses.uniforms,
   layers: senses.shader.compositor,
   groundHeightAt: (x, z) => world.groundHeightAt(x, z),
 });
+terrainDependents.grass = grass;
 grass.applyConfig(floraFaunaConfig.flora); // committed blade height / biome density
-window.addEventListener("pagehide", () => grass?.dispose());
+window.addEventListener("pagehide", () => grass.dispose());
 
 // Restore the committed worldgen tuning (provider / config / param overrides) before
 // chunks stream — the dev-console World panel then opens on these values.
@@ -237,8 +235,27 @@ const creatures = await createCreatures(renderer.scene, bus, (x, z) => world.gro
   uniforms: senses.uniforms,
   layers: senses.shader.compositor,
   config: floraFaunaConfig.fauna,
+  groundObstacles: (x, z, radius) => life.treeObstaclesAround(x, z, radius),
 });
+terrainDependents.creatures = creatures;
 window.addEventListener("pagehide", () => creatures.dispose());
+
+// Concise state + deterministic fauna-step bridge for automated browser checks.
+// Normal runtime never calls advanceTime; the renderer remains the sole frame driver.
+const faunaTestBridge = window as Window & {
+  render_game_to_text?: () => string;
+  advanceTime?: (ms: number) => void;
+};
+faunaTestBridge.render_game_to_text = () =>
+  JSON.stringify({
+    coordinates: "world metres; +X east, +Y up, +Z south",
+    player: { x: pose.x, y: pose.y, z: pose.z },
+    fauna: creatures.debugSnapshot(),
+  });
+faunaTestBridge.advanceTime = (ms: number): void => {
+  const steps = Math.max(1, Math.round(ms / (1000 / 60)));
+  for (let i = 0; i < steps; i++) creatures.update(1 / 60);
+};
 
 // Flora & Fauna coordinator: owns the live config, applies `flora-fauna:param` bus
 // edits (density → re-scatter, counts → flock/mushroom rebuild), serializes for export.
@@ -597,7 +614,6 @@ renderer.start((dtSeconds) => {
   credits.update(theatre.credits.value.opacity);
 
   senses.update(dtSeconds); // writes senseProgress; eases the view uniforms
-  thermalSky.update(dtSeconds); // cold false-color sky, gated only by infrarot
   magnetfeld.update(dtSeconds); // sky dome fade + follow player + spine time
   duft.update(clock.delta); // scent field: fade, re-anchor, GPU sim (spine-scaled dt)
   creatures.update(clock.delta); // boids swarm + mushroom anchors (obey pause/timeScale)
@@ -612,17 +628,15 @@ renderer.start((dtSeconds) => {
     (id) => !AIR_ONLY_SENSES.has(id) && signals.sense[id].peek() > 0,
   );
   life.group.visible = worldRevealed;
-  // The bird MESHES are revealed by the COLOUR-spectrum senses. Senses are
-  // LAYERS: a sense that doesn't reveal the meshes never suppresses another
-  // that does — motion+infrarot shows warm bodies AND their trails. Non-revealers:
-  // motion contributes only the vertex trails, echo keeps its pure depth map
-  // bird-free, duft is air-only. The boids keep flying while hidden, so
-  // motion/netzwerk read live positions either way.
+  // Ground fauna follows the world's surface reveal, so deer and foxes also read
+  // correctly in Echo. Bird meshes keep their narrower colour-spectrum gate:
+  // motion contributes only vertex trails, Echo stays bird-free, and Duft is air-only.
+  // The boids keep flying while hidden, so motion/netzwerk still read live positions.
   const birdsRevealed = SENSE_ORDER.some(
     (id) =>
       id !== "motion" && id !== "echo" && !AIR_ONLY_SENSES.has(id) && signals.sense[id].peek() > 0,
   );
-  creatures.setBirdsVisible(birdsRevealed);
+  creatures.setVisibility(birdsRevealed, worldRevealed);
   netzwerk.update(clock.delta); // swarm web + mycelium (fade, rebuild, pulse)
   motion.update(clock.delta); // vertex-motion trails (spawn/fade ring buffer)
   synth.update(dtSeconds); // push the signal packet into the synth iframe
@@ -633,7 +647,7 @@ renderer.start((dtSeconds) => {
   // ── CONSUME ──
   world.update(pose.x, pose.z); // 6. stream chunks around the player
   life.update(dtSeconds); // 7. pump time / unrest / intensity / sense into the flora uniforms
-  grass?.update(dtSeconds); // GPU grass: snap, repaint field texture, dispatch compute (void-gated)
+  grass.update(dtSeconds); // GPU grass: snap, repaint field texture, dispatch compute (void-gated)
   atmosphere.update(dtSeconds); // 8. pump player pose + virtual clock into the dust uniforms
 });
 

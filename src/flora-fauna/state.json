@@ -40,7 +40,15 @@
       "roamScale": 1,
       "flightSpeed": 1,
       "mushroomCount": 24,
-      "mushroomRadius": 90
+      "mushroomRadius": 90,
+      "deerCount": 3,
+      "deerScale": 1,
+      "deerSpeed": 1.2,
+      "deerRoamRadius": 110,
+      "deerTreeClearance": 3,
+      "foxCount": 4,
+      "foxScale": 1,
+      "foxScatterRadius": 95
     }
   }
 }

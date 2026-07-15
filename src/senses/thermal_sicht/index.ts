@@ -9,8 +9,12 @@ import {
   max,
   min,
   mix,
+  mx_noise_float,
+  normalView,
+  normalWorld,
   oneMinus,
   positionView,
+  positionWorld,
   pow,
   smoothstep,
   vec2,
@@ -101,10 +105,17 @@ export function createThermalSicht(): ShaderSense {
   const natureVariation = scalarUniform(0.025);
   const distanceCooling = scalarUniform(0.05);
   const groundHeat = scalarUniform(0.2);
+  const rockHeat = scalarUniform(0.4);
   const grassHeat = scalarUniform(0.3);
   const waterHeat = scalarUniform(0.03);
+  const sunWarmth = scalarUniform(0.15);
+  const microVariation = scalarUniform(0.08);
+  const altitudeCooling = scalarUniform(0.0012);
   const centerWarmth = scalarUniform(1);
   const centerFalloff = scalarUniform(1.6);
+  const formShading = scalarUniform(0.22);
+  const formSharpness = scalarUniform(1.6);
+  const shadeCooling = scalarUniform(0.12);
   const bloom = scalarUniform(0.25);
   const c0 = colorUniform(REFERENCE.c0);
   const c1 = colorUniform(REFERENCE.c1);
@@ -140,10 +151,17 @@ export function createThermalSicht(): ShaderSense {
       natureVariation,
       distanceCooling,
       groundHeat,
+      rockHeat,
       grassHeat,
       waterHeat,
+      sunWarmth,
+      microVariation,
+      altitudeCooling,
       centerWarmth,
       centerFalloff,
+      formShading,
+      formSharpness,
+      shadeCooling,
       bloom,
       c0,
       c1,
@@ -213,8 +231,35 @@ export function createThermalSicht(): ShaderSense {
         digits: 3,
       },
       { key: "groundHeat", label: "Boden · Wärme", type: "range", min: 0, max: 1, step: 0.01 },
+      { key: "rockHeat", label: "Fels · Wärme", type: "range", min: 0, max: 1, step: 0.01 },
       { key: "grassHeat", label: "Gras · Wärme", type: "range", min: 0, max: 1, step: 0.01 },
       { key: "waterHeat", label: "Wasser · Wärme", type: "range", min: 0, max: 1, step: 0.01 },
+      {
+        key: "sunWarmth",
+        label: "Sonne · Bodenerwärmung",
+        type: "range",
+        min: 0,
+        max: 0.5,
+        step: 0.01,
+      },
+      {
+        key: "microVariation",
+        label: "Boden · Mikroklima-Flecken",
+        type: "range",
+        min: 0,
+        max: 0.3,
+        step: 0.005,
+        digits: 3,
+      },
+      {
+        key: "altitudeCooling",
+        label: "Höhen-Abkühlung (pro m)",
+        type: "range",
+        min: 0,
+        max: 0.005,
+        step: 0.0001,
+        digits: 4,
+      },
       {
         key: "centerWarmth",
         label: "Objektzentrum · Farbstufen",
@@ -230,6 +275,30 @@ export function createThermalSicht(): ShaderSense {
         min: 0.2,
         max: 5,
         step: 0.1,
+      },
+      {
+        key: "formShading",
+        label: "3D-Form · Randkühlung",
+        type: "range",
+        min: 0,
+        max: 0.6,
+        step: 0.01,
+      },
+      {
+        key: "formSharpness",
+        label: "3D-Form · Kantenschärfe",
+        type: "range",
+        min: 0.2,
+        max: 5,
+        step: 0.1,
+      },
+      {
+        key: "shadeCooling",
+        label: "3D-Form · Schattenkühlung",
+        type: "range",
+        min: 0,
+        max: 0.5,
+        step: 0.01,
       },
       { key: "bloom", label: "Shader-Bloom", type: "range", min: 0, max: 2, step: 0.05 },
       {
@@ -259,18 +328,49 @@ export function createThermalSicht(): ShaderSense {
       const classified = clamp(bird.add(tree).add(grass).add(water).add(explicitGround), 0, 1);
       const ground = max(explicitGround, oneMinus(classified));
       const weight = max(bird.add(tree).add(grass).add(water).add(ground), 1);
+
+      // ── Fels: steile Bodenflächen sind Gestein — Wärmespeicher, deutlich wärmer
+      // als offener Boden. Über die Flächenneigung klassifiziert, kein eigener Kanal.
+      const slope = oneMinus(clamp(normalWorld.y, 0, 1));
+      const rockiness = smoothstep(0.35, 0.65, slope).mul(ground);
+      const soil = ground.sub(rockiness);
+
       const baseHeat = bird
         .mul(birdHeat)
         .add(tree.mul(treeHeat))
         .add(grass.mul(grassHeat))
         .add(water.mul(waterHeat))
-        .add(ground.mul(groundHeat))
+        .add(soil.mul(groundHeat))
+        .add(rockiness.mul(rockHeat))
         .div(weight);
 
       const animalShift = surface.thermalObjectVariation.mul(animalVariation).mul(bird);
       const natureMembership = clamp(tree.add(grass), 0, 1);
       const natureShift = surface.thermalObjectVariation.mul(natureVariation).mul(natureMembership);
-      const rawHeat = baseHeat.add(animalShift).add(natureShift);
+
+      // ── Sonneneinstrahlung: der Lambert-Term der Szene (Sonne · Normale) erwärmt
+      // besonnte Hänge und kühlt Schattenlagen — Boden/Fels voll, Gras gedämpft
+      // (Transpiration), Baumkronen leicht, Wasser gar nicht (Wärmekapazität).
+      const sunExposure = clamp(surface.light, 0, 1).sub(0.675).mul(2);
+      const sunMask = ground.add(grass.mul(0.6)).add(tree.mul(0.25));
+      const sunShift = sunExposure.mul(sunWarmth).mul(sunMask);
+
+      // ── Mikroklima: großskalige Feuchte-/Schattenflecken machen den Boden
+      // thermisch inhomogen statt uniform.
+      const microNoise = mx_noise_float(positionWorld.xz.mul(0.06));
+      const microShift = microNoise.mul(microVariation).mul(ground.add(grass));
+
+      // ── Höhenlage kühlt Boden, Fels und Gras ab (Wasser bleibt träge).
+      const altitudeShift = max(positionWorld.y, 0)
+        .mul(altitudeCooling)
+        .mul(ground.add(grass));
+
+      const rawHeat = baseHeat
+        .add(animalShift)
+        .add(natureShift)
+        .add(sunShift)
+        .add(microShift)
+        .sub(altitudeShift);
       const warmThreshold = max(thresholdWarm, thresholdCold.add(0.001));
       const mapped = pow(
         clamp(smoothstep(thresholdCold, warmThreshold, rawHeat), 0, 1),
@@ -289,7 +389,19 @@ export function createThermalSicht(): ShaderSense {
       const cooling = smoothstep(range.mul(0.15), max(range, 0.001), objectDistance)
         .mul(distanceCooling)
         .mul(living);
-      const palettePosition = clamp(centeredPosition.sub(cooling), 0, 1);
+
+      // ── 3D-Form: direktionale Emissivität + Schattenseiten-Kühlung ──
+      // Streifend gesehene Flächen (Silhouettenränder) strahlen weniger Richtung
+      // Kamera ab und erscheinen kühler — der zentrale Tiefen-Hinweis echter
+      // Thermalkameras. Dazu kühlt die sonnenabgewandte Seite leicht ab.
+      const facing = clamp(dot(normalView, positionView.negate().normalize()), 0, 1);
+      const rimCooling = pow(oneMinus(facing), max(formSharpness, 0.001)).mul(formShading);
+      const shadowCooling = oneMinus(clamp(surface.light, 0, 1)).mul(shadeCooling);
+      const palettePosition = clamp(
+        centeredPosition.sub(cooling).sub(rimCooling).sub(shadowCooling),
+        0,
+        1,
+      );
 
       const palette = paletteColor(palettePosition, [c0, c1, c2, c3, c4, c5, c6, c7]);
       const luma = dot(palette, vec3(0.299, 0.587, 0.114));

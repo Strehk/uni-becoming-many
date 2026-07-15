@@ -11,9 +11,9 @@
  *     player"). It re-anchors next time it appears.
  *
  * Visibility + fade are authored on the Theatre timeline (`credits.opacity`, 0..1) and read into
- * {@link Credits.update} each frame — the one authored input. The panel's own alpha (the rounded
- * card shape drawn on a transparent canvas) is multiplied by that master fade, so keyframing the
- * envelope up/down is all it takes to bring the screen in and dismiss it.
+ * {@link Credits.update} each frame — the one authored input. The panel's own alpha (the text
+ * drawn on an otherwise transparent canvas — no card, no box) is multiplied by that master fade, so
+ * keyframing the envelope up/down is all it takes to bring the screen in and dismiss it.
  *
  * TSL/WebGPU per AGENT.md: node material from `three/webgpu`, the fade uniform + texture sample
  * from `three/tsl`. No GLSL.
@@ -28,14 +28,10 @@ import * as THREE from "three/webgpu";
 export const CREDITS_CONTENT: { title: string; lines: string[] } = {
   title: "BECOMING MANY",
   lines: [
-    "Thank you for playing!",
-    "",
     "A Project By",
-    "Erasmus Schmidt (KD)",
-    "Eddie Huesmann (KD)",
-    "Tade Strehk (IKG)",
-    "",
-    "Made with three.js · WebGPU",
+    "Erasmus Schmidt",
+    "Eddie Huesmann",
+    "Tade Strehk",
   ],
 };
 
@@ -151,66 +147,100 @@ export function createCredits(options: CreditsOptions): Credits {
   return { update, dispose };
 }
 
-/** Render the credits content onto a transparent canvas as a rounded card, return it as a texture. */
+/** The display face for the credits — bundled in `public/fonts`, loaded on demand. */
+const FONT_FAMILY = "Heavitas";
+const FONT_URL = "/fonts/Heavitas.ttf";
+
+/**
+ * Load Heavitas once and register it with the document, so canvas text draws in it. Resolves after
+ * the face is ready (or on failure, so a missing font never blocks the credits). Idempotent.
+ */
+let fontReady: Promise<void> | null = null;
+function ensureFont(): Promise<void> {
+  if (!fontReady) {
+    const face = new FontFace(FONT_FAMILY, `url(${FONT_URL})`);
+    fontReady = face
+      .load()
+      .then((loaded) => {
+        (document.fonts as FontFaceSet).add(loaded);
+      })
+      .catch((err) => {
+        console.warn("[credits] Heavitas font failed to load — using fallback", err);
+      });
+  }
+  return fontReady;
+}
+
+/**
+ * Render the credits onto a transparent canvas (no card, no box) and return it as a texture.
+ *
+ * The canvas is drawn once immediately, then re-drawn once Heavitas has loaded — the font arrives
+ * asynchronously, so without the second pass the first paint would fall back to a system face.
+ */
 function drawCreditsTexture(content: { title: string; lines: string[] }): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
   canvas.width = CANVAS_W;
   canvas.height = CANVAS_H;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
+  const maybeCtx = canvas.getContext("2d");
+  if (!maybeCtx) {
     throw new Error("[credits] 2D canvas context unavailable");
   }
+  const ctx: CanvasRenderingContext2D = maybeCtx; // non-null ref that survives into the closures below
 
-  // Rounded translucent card, inset from the canvas edge so the plane has a soft margin.
-  const margin = 40;
-  const radius = 56;
-  const x = margin;
-  const y = margin;
-  const w = CANVAS_W - margin * 2;
-  const h = CANVAS_H - margin * 2;
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.arcTo(x + w, y, x + w, y + h, radius);
-  ctx.arcTo(x + w, y + h, x, y + h, radius);
-  ctx.arcTo(x, y + h, x, y, radius);
-  ctx.arcTo(x, y, x + w, y, radius);
-  ctx.closePath();
-  ctx.fillStyle = "rgba(8, 11, 16, 0.78)";
-  ctx.fill();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.14)";
-  ctx.stroke();
+  const setLetterSpacing = (v: string) => {
+    (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = v;
+  };
 
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  const fontStack = "'Helvetica Neue', Helvetica, Arial, system-ui, sans-serif";
+  function withHalo(draw: () => void): void {
+    // A soft light halo behind every black glyph keeps it legible against darker backdrops.
+    ctx.save();
+    ctx.shadowColor = "rgba(255, 255, 255, 0.55)";
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    draw();
+    ctx.restore();
+  }
 
-  // Title.
-  ctx.fillStyle = "#f4f6f8";
-  ctx.font = `650 128px ${fontStack}`;
-  const titleY = CANVAS_H * 0.24;
-  ctx.fillText(content.title, CANVAS_W / 2, titleY);
+  function paint(): void {
+    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#000000";
 
-  // Accent rule under the title.
-  ctx.strokeStyle = "#d9f99d";
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.moveTo(CANVAS_W / 2 - 160, titleY + 96);
-  ctx.lineTo(CANVAS_W / 2 + 160, titleY + 96);
-  ctx.stroke();
+    // Title — Heavitas is a single heavy weight; lean on its own mass, just add gentle tracking.
+    const titleY = CANVAS_H * 0.26;
+    ctx.font = `104px ${FONT_FAMILY}`;
+    setLetterSpacing("6px");
+    withHalo(() => ctx.fillText(content.title, CANVAS_W / 2, titleY));
+    setLetterSpacing("0px");
 
-  // Credit lines, evenly spaced through the lower portion of the card.
-  const lineHeight = 66;
-  const blockTop = CANVAS_H * 0.42;
-  ctx.font = `400 52px ${fontStack}`;
-  content.lines.forEach((line, i) => {
-    ctx.fillStyle = "#cbd5df";
-    ctx.fillText(line, CANVAS_W / 2, blockTop + i * lineHeight);
-  });
+    // Credit lines, evenly spaced through the lower portion of the panel.
+    const lineHeight = 88;
+    const blockTop = CANVAS_H * 0.52;
+    content.lines.forEach((line, i) => {
+      // "A Project By" reads as a quiet, tracked label; the intro and names sit a touch larger.
+      const isLabel = line === "A Project By";
+      const size = isLabel ? 40 : 50;
+      ctx.font = `${size}px ${FONT_FAMILY}`;
+      setLetterSpacing(isLabel ? "4px" : "1px");
+      withHalo(() => ctx.fillText(line, CANVAS_W / 2, blockTop + i * lineHeight));
+      setLetterSpacing("0px");
+    });
+  }
+
+  paint(); // first pass — may use a fallback face until Heavitas resolves
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
   texture.needsUpdate = true;
+
+  // Re-paint in Heavitas once the font is ready, then push the pixels to the GPU.
+  void ensureFont().then(() => {
+    paint();
+    texture.needsUpdate = true;
+  });
+
   return texture;
 }

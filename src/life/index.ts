@@ -69,6 +69,13 @@ export interface ScentSpot {
   readonly type: ScentKey;
 }
 
+/** A conservative trunk footprint from one actually scattered tree instance. */
+export interface TreeObstacle {
+  readonly x: number;
+  readonly z: number;
+  readonly radius: number;
+}
+
 /** Cap on how many spots one query returns — matches the scent field's zone
  *  buffer capacity (maxZones 192); nearest spots win so the plume field stays
  *  centred on the player. */
@@ -91,6 +98,9 @@ export interface Life {
   /** The scent emissions of actually-placed flora within `radius` of (x, z) —
    *  nearest first, capped. World coordinates; the duft coupling localizes them. */
   scentSpotsAround(x: number, z: number, radius: number): ScentSpot[];
+  /** Tree trunks from the currently streamed flora, used by ground fauna for
+   *  route planning and local avoidance. */
+  treeObstaclesAround(x: number, z: number, radius: number): TreeObstacle[];
   /** Apply new density / forest-shape / sway config. Re-scatters every live chunk
    *  in place (deterministic — same PRNG salt), so the change shows immediately
    *  without terrain regeneration. */
@@ -196,6 +206,7 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
   // Scent emissions of placed flora, per chunk — fed to the duft sense via
   // `scentSpotsAround`, so plumes rise from actual trees/mushrooms, not guesses.
   const scentSpots = new Map<string, ScentSpot[]>();
+  const treeObstacles = new Map<string, TreeObstacle[]>();
 
   /** Scatter every species into one chunk's instance buffers and record its scent
    *  spots. Shared by the streaming hook and the live re-scatter (`applyConfig`). */
@@ -204,10 +215,26 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
     const entry = makeHeightEntry(info.gridX, info.gridZ, info.chunkSize, info.heightGrid);
 
     const spots: ScentSpot[] = [];
+    const obstacles: TreeObstacle[] = [];
     for (const [index, s] of species.entries()) {
       const cap = capOf.get(s.id) ?? s.def.perChunkCap;
       const block = scatterChunk(info, entry, s.def, s.affinity, index, cap, s.mods);
       s.instances.addChunk(k, block);
+
+      if (SPECIES_CATEGORY[s.id] === "tree") {
+        for (let i = 0; i < block.count; i++) {
+          const m = i * 16;
+          const c0 = block.matrices[m] ?? 1;
+          const c1 = block.matrices[m + 1] ?? 0;
+          const c2 = block.matrices[m + 2] ?? 0;
+          const scale = Math.sqrt(c0 * c0 + c1 * c1 + c2 * c2) || 1;
+          obstacles.push({
+            x: block.matrices[m + 12] ?? 0,
+            z: block.matrices[m + 14] ?? 0,
+            radius: Math.max(0.45, Math.min(2.2, s.def.targetHeight * scale * 0.13)),
+          });
+        }
+      }
 
       // Record the placed instances' scent emissions (matrix column 3 is the
       // instance translation — the plant's foot on the ground). Offsets and
@@ -248,6 +275,8 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
     }
     if (spots.length > 0) scentSpots.set(k, spots);
     else scentSpots.delete(k);
+    if (obstacles.length > 0) treeObstacles.set(k, obstacles);
+    else treeObstacles.delete(k);
   };
 
   // ── Bioluminescence follows the active sense (event-rate → subscribe is right) ──
@@ -280,6 +309,7 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
 
       for (const s of species) s.instances.removeChunk(k);
       scentSpots.delete(k);
+      treeObstacles.delete(k);
       chunkInfos.delete(k);
       liveChunks.delete(k);
     },
@@ -299,6 +329,19 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       return hits.slice(0, MAX_SCENT_SPOTS).map((h) => h.spot);
     },
 
+    treeObstaclesAround(x: number, z: number, radius: number): TreeObstacle[] {
+      const hits: TreeObstacle[] = [];
+      for (const obstacles of treeObstacles.values()) {
+        for (const obstacle of obstacles) {
+          const dx = obstacle.x - x;
+          const dz = obstacle.z - z;
+          const reach = radius + obstacle.radius;
+          if (dx * dx + dz * dz <= reach * reach) hits.push(obstacle);
+        }
+      }
+      return hits;
+    },
+
     applyConfig(next: FloraConfig): void {
       config = next;
       setWoodlandConfig(config);
@@ -311,6 +354,7 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       // replay in the retained chunk order — deterministic, no buffer realloc.
       for (const s of species) s.instances.clear();
       scentSpots.clear();
+      treeObstacles.clear();
       for (const [k, info] of chunkInfos) scatterInto(k, info);
     },
 
@@ -332,6 +376,7 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       liveChunks.clear();
       chunkInfos.clear();
       scentSpots.clear();
+      treeObstacles.clear();
       for (const s of species) s.instances.dispose();
       disposeFloraParts(parts);
       foliageAtlas.dispose();

@@ -147,6 +147,22 @@ export interface FaunaConfig {
   readonly mushroomCount: number;
   /** Mushroom scatter radius in metres (live). */
   readonly mushroomRadius: number;
+  /** Number of animated deer roaming on the streamed terrain. */
+  readonly deerCount: number;
+  /** Multiplier on the deer's normalized real-world size. */
+  readonly deerScale: number;
+  /** Deer walking speed in metres per second. */
+  readonly deerSpeed: number;
+  /** Radius around the player in which deer choose new routes. */
+  readonly deerRoamRadius: number;
+  /** Extra clearance kept between a deer route and tree trunks, in metres. */
+  readonly deerTreeClearance: number;
+  /** Number of seated foxes scattered near the player. */
+  readonly foxCount: number;
+  /** Multiplier on the fox's normalized real-world size. */
+  readonly foxScale: number;
+  /** Radius around the player in which seated foxes are scattered. */
+  readonly foxScatterRadius: number;
 }
 
 export interface FloraFaunaConfig {
@@ -198,6 +214,14 @@ export const DEFAULT_CONFIG: FloraFaunaConfig = {
     flightSpeed: 1,
     mushroomCount: 24,
     mushroomRadius: 90,
+    deerCount: 3,
+    deerScale: 1,
+    deerSpeed: 1.2,
+    deerRoamRadius: 110,
+    deerTreeClearance: 3,
+    foxCount: 4,
+    foxScale: 1,
+    foxScatterRadius: 95,
   },
 };
 

@@ -123,7 +123,9 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
     dustStrength: 1,
   },
   // 3 — thermal: wide field, heat tint. Rim kept LOW: a strong warm fresnel edge
-  // reads as sunset lighting, not as a temperature measurement.
+  // reads as sunset lighting, not as a temperature measurement. The sky/fog stays
+  // the white void — the sense layers additively over the white world, it does
+  // not replace the backdrop.
   infrarot: {
     id: "infrarot",
     label: SENSE_LABELS.infrarot,
@@ -136,7 +138,7 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
     rimStrength: 0.08,
     colorNear: 0x102060,
     colorFar: 0x08031c,
-    fogColor: 0x020617,
+    fogColor: 0xf0f4ff,
     rimColor: 0x2050c0,
     dustStrength: 0.35,
   },
