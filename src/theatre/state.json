@@ -430,8 +430,21 @@
                 "__debugName": "arc:[\"tracks\",\"intro\"]",
                 "keyframes": [
                   {
-                    "id": "qVRDENW-oZ",
+                    "id": "XRv7U8uc6B",
                     "position": 0,
+                    "connectedRight": true,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "hold",
+                    "value": 0
+                  },
+                  {
+                    "id": "qVRDENW-oZ",
+                    "position": 0.533,
                     "connectedRight": true,
                     "handles": [
                       0.5,
@@ -676,6 +689,7 @@
   },
   "definitionVersion": "0.4.0",
   "revisionHistory": [
+    "tyNVsWjm5cKP5oai",
     "5IP788Sq27P3vmgP",
     "_j4TXoobm1lFQYCt",
     "IOBWtrNfRdFVnQFr",
