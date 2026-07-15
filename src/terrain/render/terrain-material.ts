@@ -53,6 +53,14 @@ export interface TerrainSurfaceNodes {
   /** Lighting factor for colour shading — a real lambert term (the `farben` sense
    *  reveals shaded form; other senses ignore it). */
   light: Node<"float">;
+  thermalBird?: Node<"float">;
+  thermalTree?: Node<"float">;
+  thermalGround?: Node<"float">;
+  thermalGrass?: Node<"float">;
+  thermalWater?: Node<"float">;
+  thermalObjectVariation?: Node<"float">;
+  thermalCenter?: Node<"vec3">;
+  thermalRadius?: Node<"float">;
 }
 
 /**
@@ -114,6 +122,7 @@ export function createTerrainMaterial(
         uvSignal: lichen,
         distance: viewDepth,
         light: lambert,
+        thermalGround: float(1),
       });
     }
 

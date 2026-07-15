@@ -63,7 +63,7 @@ export const SENSE_KEY_ORDER: readonly SenseKeySlot[] = [
 export const SENSE_LABELS: Record<SenseId, string> = {
   farben: "Wahrnehmbare Farben",
   echo: "Echoortung",
-  infrarot: "Infrarot (Wärme)",
+  infrarot: "Infrarot · Thermalsicht",
   uv: "UV-Reflexion",
   duft: "Chemische Wahrnehmung",
   netzwerk: "Schwarm-Netzwerk",
