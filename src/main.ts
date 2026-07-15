@@ -182,6 +182,7 @@ const duft = createDuftSense(
         radius: s.radius,
         type: scentTypeIndex.get(s.type) ?? 0,
       })),
+  (x, z) => life.isWaterAt(x, z),
 );
 window.addEventListener("pagehide", () => duft.dispose());
 
@@ -268,9 +269,14 @@ const floraFauna = createFloraFaunaController({
 });
 window.addEventListener("pagehide", () => floraFauna.dispose());
 
-// Netzwerk sense: swarm communication web between the birds + pulsing mycelium
-// between the mushrooms, gated by `signals.sense.netzwerk`.
-const netzwerk = createNetzwerkSense(renderer.scene, bus, creatures);
+// Netzwerk sense: swarm communication web between the birds + the WFC-grown root
+// web starting under trees/bushes/mushrooms, gated by `signals.sense.netzwerk`.
+const netzwerk = createNetzwerkSense(renderer.scene, bus, {
+  birds: creatures.birds,
+  rootAnchors: (x, z, radius) => life.rootAnchorsAround(x, z, radius),
+  groundHeightAt: (x, z) => world.groundHeightAt(x, z),
+  waterAt: (x, z) => life.isWaterAt(x, z),
+});
 window.addEventListener("pagehide", () => netzwerk.dispose());
 
 // Motion sense: particle trails from the birds' animated vertices. The bird meshes

@@ -1,39 +1,40 @@
 // ── Netzwerk sense — public facade + signal coupling ───────────
 //
-// Wires the two ported networks onto the substrate:
+// Wires the two networks onto the substrate:
 //
 //   - the **SwarmNetwork** reads the boids birds (creatures substrate) as moving
 //     nodes — links + travelling signals update every frame while visible;
-//   - the **MyceliumNetwork** grows from the mushroom spawn points and rebuilds
-//     whenever the creatures module re-scatters them (`creatures:mushrooms-changed`).
+//   - the **RootsNetwork** grows a wave-function-collapsed root web from the
+//     rooted plants (trees / bushes / mushrooms via `sources.rootAnchors`) and
+//     rebuilds when the player travels or a structural option changes;
 //   - `signals.sense.netzwerk` eases both `fade` uniforms; at 0 the groups are
-//     hidden and nothing updates (zero cost).
-//   - `sense:param {id:"netzwerk", key, value}` routes `swarm.<key>` / `myzel.<key>`
-//     option writes; structural mycelium keys trigger a rebuild.
+//     hidden and nothing updates (zero cost);
+//   - `sense:param {id:"netzwerk", key, value}` routes `swarm.<key>` /
+//     `wurzel.<key>` option writes; structural root keys trigger a rebuild.
 
 import type * as THREE from "three/webgpu";
 import type { BirdActor } from "../../creatures/index.ts";
 import type { SensePanelDescriptor } from "../../dev-console/sense-controls.ts";
+import type { RootAnchor } from "../../life/index.ts";
 import type { Bus } from "../../signals/index.ts";
 import { signals } from "../../signals/index.ts";
-import { MyceliumNetwork, type MyceliumOptions } from "./mycelium-network.ts";
+import { ROOTS_STRUCTURAL, RootsNetwork, type RootsOptions } from "./roots-network.ts";
 import { SwarmNetwork, type SwarmNetworkOptions } from "./swarm-network.ts";
 
 const FADE_SECONDS = 2.5;
 
-/** Mycelium options whose change requires a geometry rebuild. */
-const MYCELIUM_STRUCTURAL: ReadonlySet<string> = new Set([
-  "radius",
-  "neighbourLinks",
-  "radialArms",
-  "branchDepth",
-  "segments",
-  "maxDepth",
-]);
+/** While the root web found no plants yet (flora still streaming in), retry the
+ *  build at most this often. */
+const ROOTS_RETRY_SECONDS = 0.5;
 
 export interface NetzwerkSources {
   readonly birds: readonly BirdActor[];
-  readonly mushrooms: readonly THREE.Vector3[];
+  /** Root points of placed flora around (x, z) — see `Life.rootAnchorsAround`. */
+  rootAnchors(x: number, z: number, radius: number): readonly RootAnchor[];
+  /** Terrain surface height (null outside loaded chunks) — the root strands hug it. */
+  groundHeightAt(x: number, z: number): number | null;
+  /** Water lookup (life.isWaterAt) — the root web never grows through lakes. */
+  waterAt(x: number, z: number): boolean;
 }
 
 export interface NetzwerkSense {
@@ -42,13 +43,13 @@ export interface NetzwerkSense {
   dispose(): void;
 }
 
-function buildControls(swarm: SwarmNetwork, mycelium: MyceliumNetwork): SensePanelDescriptor {
+function buildControls(swarm: SwarmNetwork, roots: RootsNetwork): SensePanelDescriptor {
   const so = (): Readonly<SwarmNetworkOptions> => swarm.currentOptions;
-  const mo = (): Readonly<MyceliumOptions> => mycelium.currentOptions;
+  const ro = (): Readonly<RootsOptions> => roots.currentOptions;
   return {
     key: "netzwerk",
     description:
-      "Kollektiv-Wahrnehmung: ein leuchtendes Kommunikationsnetz zwischen den Schwarmtieren und das pulsierende Myzel der Pilze im Boden.",
+      "Kollektiv-Wahrnehmung: ein leuchtendes Kommunikationsnetz zwischen den Schwarmtieren und ein per Wave Function Collapse gewachsenes Wurzelgeflecht, das unter Bäumen, Büschen und Pilzen beginnt und alles verbindet.",
     controls: [
       // Swarm
       {
@@ -141,85 +142,219 @@ function buildControls(swarm: SwarmNetwork, mycelium: MyceliumNetwork): SensePan
         label: "Schwarm · Signal-Halo",
         get: () => so().signalHaloColor,
       },
-      // Mycelium
+      // Roots — WFC layout
       {
         type: "range",
-        key: "myzel.neighbourLinks",
-        label: "Myzel · Nachbar-Links",
-        min: 1,
-        max: 8,
-        step: 1,
+        key: "wurzel.radius",
+        label: "Wurzeln · Reichweite",
+        min: 40,
+        max: 200,
+        step: 5,
         digits: 0,
-        get: () => mo().neighbourLinks,
+        get: () => ro().radius,
       },
       {
         type: "range",
-        key: "myzel.radialArms",
-        label: "Myzel · Radial-Arme",
-        min: 0,
+        key: "wurzel.viewDistance",
+        label: "Wurzeln · Sichtweite",
+        min: 20,
+        max: 250,
+        step: 5,
+        digits: 0,
+        get: () => ro().viewDistance,
+      },
+      {
+        type: "range",
+        key: "wurzel.cellSize",
+        label: "Wurzeln · Rasterweite",
+        min: 3,
         max: 16,
-        step: 1,
-        digits: 0,
-        get: () => mo().radialArms,
+        step: 0.5,
+        digits: 1,
+        get: () => ro().cellSize,
       },
       {
         type: "range",
-        key: "myzel.branchDepth",
-        label: "Myzel · Verzweigungstiefe",
+        key: "wurzel.density",
+        label: "Wurzeln · Dichte",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        get: () => ro().density,
+      },
+      {
+        type: "range",
+        key: "wurzel.branchiness",
+        label: "Wurzeln · Verästelung",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        get: () => ro().branchiness,
+      },
+      {
+        type: "range",
+        key: "wurzel.tips",
+        label: "Wurzeln · Wurzelspitzen",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        get: () => ro().tips,
+      },
+      {
+        type: "check",
+        key: "wurzel.connectAll",
+        label: "Wurzeln · Alles verbinden",
+        get: () => ro().connectAll,
+      },
+      {
+        type: "range",
+        key: "wurzel.seed",
+        label: "Wurzeln · Seed",
+        min: 1,
+        max: 99,
+        step: 1,
+        digits: 0,
+        get: () => ro().seed,
+      },
+      // Roots — hubs per plant kind
+      {
+        type: "range",
+        key: "wurzel.treeHub",
+        label: "Wurzeln · Baum-Knoten",
         min: 0,
         max: 4,
         step: 1,
         digits: 0,
-        get: () => mo().branchDepth,
+        get: () => ro().treeHub,
       },
       {
         type: "range",
-        key: "myzel.baseAlpha",
-        label: "Myzel · Grund-Alpha",
+        key: "wurzel.bushHub",
+        label: "Wurzeln · Busch-Knoten",
+        min: 0,
+        max: 4,
+        step: 1,
+        digits: 0,
+        get: () => ro().bushHub,
+      },
+      {
+        type: "range",
+        key: "wurzel.mushroomHub",
+        label: "Wurzeln · Pilz-Knoten",
+        min: 0,
+        max: 4,
+        step: 1,
+        digits: 0,
+        get: () => ro().mushroomHub,
+      },
+      // Roots — strand look
+      {
+        type: "range",
+        key: "wurzel.strands",
+        label: "Wurzeln · Stränge",
+        min: 1,
+        max: 5,
+        step: 1,
+        digits: 0,
+        get: () => ro().strands,
+      },
+      {
+        type: "range",
+        key: "wurzel.strandSpread",
+        label: "Wurzeln · Strangbreite",
+        min: 0,
+        max: 2,
+        step: 0.05,
+        get: () => ro().strandSpread,
+      },
+      {
+        type: "range",
+        key: "wurzel.wiggle",
+        label: "Wurzeln · Gewundenheit",
+        min: 0,
+        max: 5,
+        step: 0.1,
+        digits: 1,
+        get: () => ro().wiggle,
+      },
+      {
+        type: "range",
+        key: "wurzel.taper",
+        label: "Wurzeln · Ausdünnung",
         min: 0,
         max: 1,
         step: 0.01,
-        get: () => mo().baseAlpha,
+        get: () => ro().taper,
       },
       {
         type: "range",
-        key: "myzel.hotspotAlpha",
-        label: "Myzel · Hotspot-Alpha",
+        key: "wurzel.depth",
+        label: "Wurzeln · Relief",
+        min: 0,
+        max: 3,
+        step: 0.1,
+        digits: 1,
+        get: () => ro().depth,
+      },
+      {
+        type: "range",
+        key: "wurzel.segments",
+        label: "Wurzeln · Segmente",
+        min: 4,
+        max: 24,
+        step: 1,
+        digits: 0,
+        get: () => ro().segments,
+      },
+      // Roots — glow
+      {
+        type: "range",
+        key: "wurzel.baseAlpha",
+        label: "Wurzeln · Grund-Alpha",
         min: 0,
         max: 1,
         step: 0.01,
-        get: () => mo().hotspotAlpha,
+        get: () => ro().baseAlpha,
       },
       {
         type: "range",
-        key: "myzel.hotspotStrength",
-        label: "Myzel · Hotspot-Stärke",
+        key: "wurzel.hotspotAlpha",
+        label: "Wurzeln · Hotspot-Alpha",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        get: () => ro().hotspotAlpha,
+      },
+      {
+        type: "range",
+        key: "wurzel.hotspotStrength",
+        label: "Wurzeln · Hotspot-Stärke",
         min: 0,
         max: 6,
         step: 0.05,
-        get: () => mo().hotspotStrength,
+        get: () => ro().hotspotStrength,
       },
       {
         type: "range",
-        key: "myzel.hotspotSpeed",
-        label: "Myzel · Hotspot-Tempo",
+        key: "wurzel.hotspotSpeed",
+        label: "Wurzeln · Hotspot-Tempo",
         min: 0,
         max: 12,
         step: 0.1,
         digits: 1,
-        get: () => mo().hotspotSpeed,
+        get: () => ro().hotspotSpeed,
       },
       {
         type: "color",
-        key: "myzel.baseColor",
-        label: "Myzel · Grundfarbe",
-        get: () => mo().baseColor,
+        key: "wurzel.baseColor",
+        label: "Wurzeln · Grundfarbe",
+        get: () => ro().baseColor,
       },
       {
         type: "color",
-        key: "myzel.hotspotColor",
-        label: "Myzel · Hotspot-Farbe",
-        get: () => mo().hotspotColor,
+        key: "wurzel.hotspotColor",
+        label: "Wurzeln · Hotspot-Farbe",
+        get: () => ro().hotspotColor,
       },
     ],
   };
@@ -243,22 +378,38 @@ function applySwarmOption(swarm: SwarmNetwork, key: string, value: string | numb
   }
 }
 
-/** Typed routing of a `myzel.<key>` param command onto the options object. */
-function applyMyceliumOption(mycelium: MyceliumNetwork, key: string, value: string | number): void {
+/** Typed routing of a `wurzel.<key>` param command onto the options object. */
+function applyRootsOption(
+  roots: RootsNetwork,
+  key: string,
+  value: string | number | boolean,
+): void {
   if (typeof value === "number") {
-    if (key === "radius") mycelium.setOptions({ radius: value });
-    else if (key === "neighbourLinks") mycelium.setOptions({ neighbourLinks: Math.round(value) });
-    else if (key === "radialArms") mycelium.setOptions({ radialArms: Math.round(value) });
-    else if (key === "branchDepth") mycelium.setOptions({ branchDepth: Math.round(value) });
-    else if (key === "segments") mycelium.setOptions({ segments: Math.round(value) });
-    else if (key === "maxDepth") mycelium.setOptions({ maxDepth: value });
-    else if (key === "baseAlpha") mycelium.setOptions({ baseAlpha: value });
-    else if (key === "hotspotAlpha") mycelium.setOptions({ hotspotAlpha: value });
-    else if (key === "hotspotStrength") mycelium.setOptions({ hotspotStrength: value });
-    else if (key === "hotspotSpeed") mycelium.setOptions({ hotspotSpeed: value });
+    if (key === "radius") roots.setOptions({ radius: value });
+    else if (key === "cellSize") roots.setOptions({ cellSize: value });
+    else if (key === "density") roots.setOptions({ density: value });
+    else if (key === "branchiness") roots.setOptions({ branchiness: value });
+    else if (key === "tips") roots.setOptions({ tips: value });
+    else if (key === "seed") roots.setOptions({ seed: Math.round(value) });
+    else if (key === "treeHub") roots.setOptions({ treeHub: Math.round(value) });
+    else if (key === "bushHub") roots.setOptions({ bushHub: Math.round(value) });
+    else if (key === "mushroomHub") roots.setOptions({ mushroomHub: Math.round(value) });
+    else if (key === "strands") roots.setOptions({ strands: Math.round(value) });
+    else if (key === "strandSpread") roots.setOptions({ strandSpread: value });
+    else if (key === "wiggle") roots.setOptions({ wiggle: value });
+    else if (key === "taper") roots.setOptions({ taper: value });
+    else if (key === "depth") roots.setOptions({ depth: value });
+    else if (key === "viewDistance") roots.setOptions({ viewDistance: value });
+    else if (key === "segments") roots.setOptions({ segments: Math.round(value) });
+    else if (key === "baseAlpha") roots.setOptions({ baseAlpha: value });
+    else if (key === "hotspotAlpha") roots.setOptions({ hotspotAlpha: value });
+    else if (key === "hotspotStrength") roots.setOptions({ hotspotStrength: value });
+    else if (key === "hotspotSpeed") roots.setOptions({ hotspotSpeed: value });
+  } else if (typeof value === "boolean") {
+    if (key === "connectAll") roots.setOptions({ connectAll: value });
   } else {
-    if (key === "baseColor") mycelium.setOptions({ baseColor: value });
-    else if (key === "hotspotColor") mycelium.setOptions({ hotspotColor: value });
+    if (key === "baseColor") roots.setOptions({ baseColor: value });
+    else if (key === "hotspotColor") roots.setOptions({ hotspotColor: value });
   }
 }
 
@@ -268,20 +419,26 @@ export function createNetzwerkSense(
   sources: NetzwerkSources,
 ): NetzwerkSense {
   const swarm = new SwarmNetwork({ maxNodes: 64 });
-  const mycelium = new MyceliumNetwork({ radius: 120 });
-  scene.add(swarm.group, mycelium.group);
+  const roots = new RootsNetwork(
+    (x, z) => sources.groundHeightAt(x, z),
+    (x, z, radius) => sources.rootAnchors(x, z, radius),
+    (x, z) => sources.waterAt(x, z),
+  );
+  scene.add(swarm.group, roots.group);
   swarm.group.visible = false;
-  mycelium.group.visible = false;
+  roots.group.visible = false;
 
   let fade = 0;
   let target = signals.sense.netzwerk.peek();
-  let myceliumDirty = true;
+  let rootsDirty = true;
+  let retryTimer = 0;
 
   const offSignal = signals.sense.netzwerk.subscribe((v) => {
     target = v;
   });
-  const offMushrooms = bus.on("creatures:mushrooms-changed", () => {
-    myceliumDirty = true;
+  // Flora re-scatter (density edits etc.) moves the plants → re-grow the web.
+  const offFlora = bus.on("flora-fauna:param", () => {
+    rootsDirty = true;
   });
 
   const offParams = bus.on("sense:param", (payload) => {
@@ -294,53 +451,70 @@ export function createNetzwerkSense(
     }
     const key = p.get("key");
     const value = p.get("value");
-    if (typeof key !== "string" || (typeof value !== "number" && typeof value !== "string")) {
+    if (
+      typeof key !== "string" ||
+      (typeof value !== "number" && typeof value !== "string" && typeof value !== "boolean")
+    ) {
       return;
     }
     if (key.startsWith("swarm.")) {
-      applySwarmOption(swarm, key.slice("swarm.".length), value);
-    } else if (key.startsWith("myzel.")) {
-      const option = key.slice("myzel.".length);
-      applyMyceliumOption(mycelium, option, value);
-      if (MYCELIUM_STRUCTURAL.has(option)) {
-        myceliumDirty = true;
+      if (typeof value !== "boolean") {
+        applySwarmOption(swarm, key.slice("swarm.".length), value);
+      }
+    } else if (key.startsWith("wurzel.")) {
+      const option = key.slice("wurzel.".length);
+      applyRootsOption(roots, option, value);
+      if (ROOTS_STRUCTURAL.has(option as keyof RootsOptions)) {
+        rootsDirty = true;
       }
     }
   });
 
   return {
-    controls: buildControls(swarm, mycelium),
+    controls: buildControls(swarm, roots),
     update(dt: number): void {
       const delta = target - fade;
       if (delta !== 0) {
         fade += Math.min(Math.abs(delta), dt / FADE_SECONDS) * Math.sign(delta);
       }
       swarm.fade.value = fade;
-      mycelium.fade.value = fade;
+      roots.fade.value = fade;
       const active = fade > 0.001;
       swarm.group.visible = active;
-      mycelium.group.visible = active;
+      roots.group.visible = active;
       if (!active) {
         return;
       }
 
-      if (myceliumDirty && sources.mushrooms.length > 0) {
-        myceliumDirty = false;
-        mycelium.setMushrooms(sources.mushrooms);
-        mycelium.rebuild();
+      // Root web upkeep: blocks are world-anchored and deterministic, so this
+      // only adds/removes rim blocks while flying — the visible web never jumps.
+      // `rootsDirty` (structural param / flora change) forces a fresh solve.
+      const pose = signals.playerPose.peek();
+      retryTimer += dt;
+      let force = false;
+      if (rootsDirty && retryTimer >= ROOTS_RETRY_SECONDS) {
+        roots.invalidate();
+        force = true;
+      }
+      const anchoredBlocks = roots.rebuildIfNeeded(pose.x, pose.z, force);
+      if (anchoredBlocks >= 0) {
+        retryTimer = 0;
+        // Keep retrying while no plants were found (flora still streaming in).
+        if (anchoredBlocks > 0) rootsDirty = false;
+        else rootsDirty = true;
       }
 
       const elapsed = signals.time.peek();
       swarm.setNodes(sources.birds);
       swarm.update(dt, elapsed);
-      mycelium.update(dt, elapsed);
+      roots.update(dt, elapsed, pose.x, pose.y, pose.z);
     },
     dispose(): void {
       offSignal();
-      offMushrooms();
+      offFlora();
       offParams();
       swarm.dispose();
-      mycelium.dispose();
+      roots.dispose();
     },
   };
 }

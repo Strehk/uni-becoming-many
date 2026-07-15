@@ -32,6 +32,9 @@ const PLANT_SPOTS = 90;
 /** Ground-height source (world.groundHeightAt) — null over unloaded chunks. */
 export type GroundSource = (x: number, z: number) => number | null;
 
+/** Water lookup (life.isWaterAt) — keeps guessed scent plants off lakes/rivers. */
+export type WaterSource = (x: number, z: number) => boolean;
+
 /** Optional zone source fed from the ACTUAL placed flora (life.scentSpotsAround,
  *  adapted in main.ts): given the new anchor, return anchor-LOCAL scent zones.
  *  An empty answer falls back to the procedural generator (flora not streamed yet). */
@@ -44,7 +47,13 @@ export interface DuftSense {
 }
 
 /** Deterministic-ish plant scatter on the terrain around (ax, az). Local coords. */
-function generateZones(ax: number, ay: number, az: number, ground: GroundSource): ScentZone[] {
+function generateZones(
+  ax: number,
+  ay: number,
+  az: number,
+  ground: GroundSource,
+  waterAt?: WaterSource,
+): ScentZone[] {
   const zones: ScentZone[] = [];
   for (let i = 0; i < PLANT_SPOTS && zones.length < 180; i++) {
     const ang = Math.random() * Math.PI * 2;
@@ -54,6 +63,9 @@ function generateZones(ax: number, ay: number, az: number, ground: GroundSource)
     const h = ground(wx, wz);
     if (h === null) {
       continue;
+    }
+    if (waterAt?.(wx, wz)) {
+      continue; // no flowering plants on lakes / rivers / the sea
     }
     // Local slope estimate from two nearby samples.
     const hx = ground(wx + 4, wz);
@@ -344,6 +356,7 @@ export function createDuftSense(
   rendererInstance: THREE.WebGPURenderer,
   ground: GroundSource,
   zoneSource?: ZoneSource,
+  waterAt?: WaterSource,
 ): DuftSense {
   const field = new ScentField({ fieldRadius: FIELD_RADIUS, initialCount: 400_000 });
   scene.add(field.object);
@@ -407,7 +420,7 @@ export function createDuftSense(
     // Real flora first: zones from the actually-placed plants around the anchor.
     // Falls back to the procedural guesser while the flora is still streaming in.
     const grown = zoneSource?.(px, gy, pz, FIELD_RADIUS - 6) ?? [];
-    lastZones = grown.length > 0 ? grown : generateZones(px, gy, pz, ground);
+    lastZones = grown.length > 0 ? grown : generateZones(px, gy, pz, ground, waterAt);
     field.setZones(lastZones);
     field.requestReseed();
     rebuildZoneViz();

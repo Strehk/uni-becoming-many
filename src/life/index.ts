@@ -76,6 +76,24 @@ export interface TreeObstacle {
   readonly radius: number;
 }
 
+/** What kind of plant a root anchor grows from — sets its hub size in the netzwerk sense. */
+export type RootAnchorKind = "tree" | "bush" | "mushroom";
+
+/** One placed plant's root point (its foot on the ground, WORLD coordinates) —
+ *  where the netzwerk sense's underground root web begins. */
+export interface RootAnchor {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** Instance scale (column-0 norm) — bigger plants read as bigger root hubs. */
+  readonly scale: number;
+  readonly kind: RootAnchorKind;
+}
+
+/** Cap on how many anchors one `rootAnchorsAround` query returns — bounds the
+ *  netzwerk sense's WFC grid seeding; nearest anchors win. */
+const MAX_ROOT_ANCHORS = 96;
+
 /** Cap on how many spots one query returns — matches the scent field's zone
  *  buffer capacity (maxZones 192); nearest spots win so the plume field stays
  *  centred on the player. */
@@ -101,6 +119,13 @@ export interface Life {
   /** Tree trunks from the currently streamed flora, used by ground fauna for
    *  route planning and local avoidance. */
   treeObstaclesAround(x: number, z: number, radius: number): TreeObstacle[];
+  /** Root points of actually-placed trees/bushes/mushrooms within `radius` of
+   *  (x, z) — nearest first, capped. The netzwerk sense grows its root web here. */
+  rootAnchorsAround(x: number, z: number, radius: number): RootAnchor[];
+  /** Whether (x, z) lies on water (ocean/lake/river), from the streamed chunks'
+   *  placement fields. `false` where no chunk is loaded — callers treat unknown
+   *  ground as land. Keeps duft plumes and the root web off the lakes. */
+  isWaterAt(x: number, z: number): boolean;
   /** Apply new density / forest-shape / sway config. Re-scatters every live chunk
    *  in place (deterministic — same PRNG salt), so the change shows immediately
    *  without terrain regeneration. */
@@ -207,6 +232,9 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
   // `scentSpotsAround`, so plumes rise from actual trees/mushrooms, not guesses.
   const scentSpots = new Map<string, ScentSpot[]>();
   const treeObstacles = new Map<string, TreeObstacle[]>();
+  // Root anchors of placed trees/bushes/mushrooms, per chunk — the netzwerk
+  // sense's root web starts under these via `rootAnchorsAround`.
+  const rootAnchors = new Map<string, RootAnchor[]>();
 
   /** Scatter every species into one chunk's instance buffers and record its scent
    *  spots. Shared by the streaming hook and the live re-scatter (`applyConfig`). */
@@ -216,12 +244,14 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
 
     const spots: ScentSpot[] = [];
     const obstacles: TreeObstacle[] = [];
+    const anchors: RootAnchor[] = [];
     for (const [index, s] of species.entries()) {
       const cap = capOf.get(s.id) ?? s.def.perChunkCap;
       const block = scatterChunk(info, entry, s.def, s.affinity, index, cap, s.mods);
       s.instances.addChunk(k, block);
 
-      if (SPECIES_CATEGORY[s.id] === "tree") {
+      const category = SPECIES_CATEGORY[s.id];
+      if (category === "tree") {
         for (let i = 0; i < block.count; i++) {
           const m = i * 16;
           const c0 = block.matrices[m] ?? 1;
@@ -232,6 +262,32 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
             x: block.matrices[m + 12] ?? 0,
             z: block.matrices[m + 14] ?? 0,
             radius: Math.max(0.45, Math.min(2.2, s.def.targetHeight * scale * 0.13)),
+          });
+        }
+      }
+
+      // Root anchors: rooted plants only (trees, bushes, mushrooms) — the plant's
+      // foot (matrix column 3) plus its uniform scale for hub sizing.
+      const anchorKind: RootAnchorKind | null =
+        category === "tree"
+          ? "tree"
+          : category === "undergrowth"
+            ? "bush"
+            : category === "mushroom"
+              ? "mushroom"
+              : null;
+      if (anchorKind) {
+        for (let i = 0; i < block.count; i++) {
+          const m = i * 16;
+          const c0 = block.matrices[m] ?? 1;
+          const c1 = block.matrices[m + 1] ?? 0;
+          const c2 = block.matrices[m + 2] ?? 0;
+          anchors.push({
+            x: block.matrices[m + 12] ?? 0,
+            y: block.matrices[m + 13] ?? 0,
+            z: block.matrices[m + 14] ?? 0,
+            scale: Math.sqrt(c0 * c0 + c1 * c1 + c2 * c2) || 1,
+            kind: anchorKind,
           });
         }
       }
@@ -277,6 +333,8 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
     else scentSpots.delete(k);
     if (obstacles.length > 0) treeObstacles.set(k, obstacles);
     else treeObstacles.delete(k);
+    if (anchors.length > 0) rootAnchors.set(k, anchors);
+    else rootAnchors.delete(k);
   };
 
   // ── Bioluminescence follows the active sense (event-rate → subscribe is right) ──
@@ -310,6 +368,7 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       for (const s of species) s.instances.removeChunk(k);
       scentSpots.delete(k);
       treeObstacles.delete(k);
+      rootAnchors.delete(k);
       chunkInfos.delete(k);
       liveChunks.delete(k);
     },
@@ -342,6 +401,36 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       return hits;
     },
 
+    isWaterAt(x: number, z: number): boolean {
+      // All chunks share one size — read it off any live chunk info.
+      const first: ChunkBuiltInfo | undefined = chunkInfos.values().next().value;
+      if (!first) return false;
+      const size = first.chunkSize;
+      const gx = Math.floor(x / size);
+      const gz = Math.floor(z / size);
+      const info = chunkInfos.get(key(gx, gz));
+      if (!info) return false;
+      const res = info.fields.res;
+      const cx = Math.min(res - 1, Math.max(0, Math.floor(((x - gx * size) / size) * res)));
+      const cz = Math.min(res - 1, Math.max(0, Math.floor(((z - gz * size) / size) * res)));
+      return (info.fields.water[cz * res + cx] ?? 0) !== 0;
+    },
+
+    rootAnchorsAround(x: number, z: number, radius: number): RootAnchor[] {
+      const r2 = radius * radius;
+      const hits: { anchor: RootAnchor; d2: number }[] = [];
+      for (const anchors of rootAnchors.values()) {
+        for (const anchor of anchors) {
+          const dx = anchor.x - x;
+          const dz = anchor.z - z;
+          const d2 = dx * dx + dz * dz;
+          if (d2 <= r2) hits.push({ anchor, d2 });
+        }
+      }
+      hits.sort((a, b) => a.d2 - b.d2);
+      return hits.slice(0, MAX_ROOT_ANCHORS).map((h) => h.anchor);
+    },
+
     applyConfig(next: FloraConfig): void {
       config = next;
       setWoodlandConfig(config);
@@ -355,6 +444,7 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       for (const s of species) s.instances.clear();
       scentSpots.clear();
       treeObstacles.clear();
+      rootAnchors.clear();
       for (const [k, info] of chunkInfos) scatterInto(k, info);
     },
 
@@ -377,6 +467,7 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       chunkInfos.clear();
       scentSpots.clear();
       treeObstacles.clear();
+      rootAnchors.clear();
       for (const s of species) s.instances.dispose();
       disposeFloraParts(parts);
       foliageAtlas.dispose();
