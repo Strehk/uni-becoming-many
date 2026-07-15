@@ -114,7 +114,7 @@ export function createThermalSicht(): ShaderSense {
   const c5 = colorUniform(REFERENCE.c5);
   const c6 = colorUniform(REFERENCE.c6);
   const c7 = colorUniform(REFERENCE.c7);
-  const range = scalarUniform(600);
+  const range = scalarUniform(70);
 
   return {
     key: "infrarot",

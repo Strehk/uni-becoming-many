@@ -43,7 +43,7 @@
       "infrarot": {
         "enabled": false,
         "opacity": 1,
-        "range": 600,
+        "range": 70,
         "rangeSoft": 80,
         "blendMode": "normal",
         "params": {
