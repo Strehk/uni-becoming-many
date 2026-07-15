@@ -8,7 +8,7 @@
       },
       "sequence": {
         "subUnitsPerUnit": 30,
-        "length": 452.1,
+        "length": 476.05,
         "type": "PositionalSequence",
         "tracksByObject": {
           "arc": {
@@ -53,7 +53,7 @@
                   },
                   {
                     "id": "kf-unrest-2",
-                    "position": 300,
+                    "position": 344.267,
                     "connectedRight": false,
                     "handles": [
                       0.5,
@@ -85,7 +85,7 @@
                   },
                   {
                     "id": "kf-intensity-4",
-                    "position": 300,
+                    "position": 344.267,
                     "connectedRight": false,
                     "handles": [
                       0.5,
@@ -136,7 +136,7 @@
                   },
                   {
                     "id": "2zMNHqy1Hv",
-                    "position": 114.633,
+                    "position": 126.033,
                     "connectedRight": false,
                     "handles": [
                       0.5,
@@ -149,7 +149,7 @@
                   },
                   {
                     "id": "qXE2ZZjLf1",
-                    "position": 377.133,
+                    "position": 403.167,
                     "connectedRight": false,
                     "handles": [
                       0.5,
@@ -181,7 +181,7 @@
                   },
                   {
                     "id": "WAikGkGTe0",
-                    "position": 205.6,
+                    "position": 216.4,
                     "connectedRight": false,
                     "handles": [
                       0.5,
@@ -194,7 +194,7 @@
                   },
                   {
                     "id": "nqlKaj5Ooq",
-                    "position": 376.533,
+                    "position": 403.167,
                     "connectedRight": false,
                     "handles": [
                       0.5,
@@ -258,7 +258,7 @@
                   },
                   {
                     "id": "0eEFrugCkR",
-                    "position": 377.367,
+                    "position": 403.033,
                     "connectedRight": false,
                     "handles": [
                       0.5,
@@ -290,7 +290,7 @@
                   },
                   {
                     "id": "UduJ-R0Mrs",
-                    "position": 306.733,
+                    "position": 330.6,
                     "connectedRight": false,
                     "handles": [
                       0.5,
@@ -303,7 +303,7 @@
                   },
                   {
                     "id": "9yQQjCSdHL",
-                    "position": 376.8,
+                    "position": 403.2,
                     "connectedRight": false,
                     "handles": [
                       0.5,
@@ -335,7 +335,7 @@
                   },
                   {
                     "id": "Jq5v-SNZaW",
-                    "position": 160.533,
+                    "position": 168.033,
                     "connectedRight": false,
                     "handles": [
                       0.5,
@@ -348,7 +348,7 @@
                   },
                   {
                     "id": "H-NE4y0Pdc",
-                    "position": 376.767,
+                    "position": 403.167,
                     "connectedRight": false,
                     "handles": [
                       0.5,
@@ -380,7 +380,7 @@
                   },
                   {
                     "id": "Ei6-MTowWk",
-                    "position": 264.833,
+                    "position": 281.367,
                     "connectedRight": false,
                     "handles": [
                       0.5,
@@ -393,7 +393,7 @@
                   },
                   {
                     "id": "0EQRu5MXO_",
-                    "position": 376.2,
+                    "position": 403.133,
                     "connectedRight": false,
                     "handles": [
                       0.5,
@@ -495,7 +495,7 @@
                   },
                   {
                     "id": "tATqXAZRUV",
-                    "position": 114.067,
+                    "position": 120.033,
                     "connectedRight": true,
                     "handles": [
                       0.5,
@@ -527,7 +527,7 @@
                   },
                   {
                     "id": "93IeXoWREz",
-                    "position": 159.967,
+                    "position": 166.1,
                     "connectedRight": true,
                     "handles": [
                       0.5,
@@ -559,7 +559,7 @@
                   },
                   {
                     "id": "uXyUlw57w-",
-                    "position": 205.333,
+                    "position": 216.6,
                     "connectedRight": true,
                     "handles": [
                       0.5,
@@ -591,7 +591,7 @@
                   },
                   {
                     "id": "mSTNiz0_cU",
-                    "position": 264.333,
+                    "position": 280.267,
                     "connectedRight": true,
                     "handles": [
                       0.5,
@@ -623,7 +623,7 @@
                   },
                   {
                     "id": "lQVv0oN3GY",
-                    "position": 305.867,
+                    "position": 328.667,
                     "connectedRight": true,
                     "handles": [
                       0.5,
@@ -655,7 +655,7 @@
                   },
                   {
                     "id": "MBWH2arB1W",
-                    "position": 379.6,
+                    "position": 404.833,
                     "connectedRight": true,
                     "handles": [
                       0.5,
@@ -676,6 +676,7 @@
   },
   "definitionVersion": "0.4.0",
   "revisionHistory": [
+    "5IP788Sq27P3vmgP",
     "_j4TXoobm1lFQYCt",
     "IOBWtrNfRdFVnQFr",
     "ZKRgS8zqF7RuVAUf",
