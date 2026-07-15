@@ -13,15 +13,22 @@
  *
  * Called once per frame, after the sequence playhead has been positioned.
  */
+import { EVENT_IDS } from "../events/ids.ts";
 import { SENSE_ORDER } from "../senses/ids.ts";
 import { signals } from "../signals/index.ts";
 import type { ArcObject } from "./project.ts";
 
 /** Copy the authored envelope values into their signals. */
 export function pumpAuthored(arc: ArcObject): void {
-  const { unrest, intensity, senses } = arc.value;
+  const { unrest, intensity, senses, events } = arc.value;
   signals.unrest.value = unrest;
   signals.intensity.value = intensity;
+
+  // Event trigger pulses are unconditionally Theatre-owned (no manual writer
+  // shares these cells — the dev panel triggers over the bus instead).
+  for (const id of EVENT_IDS) {
+    signals.events[id].value = events[id];
+  }
 
   if (signals.senseAuthority.peek() === "theatre") {
     for (const id of SENSE_ORDER) {

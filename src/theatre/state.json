@@ -31,7 +31,8 @@
               "[\"tracks\",\"infrared\"]": "-nX8PTxcUR",
               "[\"tracks\",\"magnetic\"]": "umsmv0jocw",
               "[\"tracks\",\"overload\"]": "yIfzh2i35k",
-              "[\"tracks\",\"finale\"]": "9ib58DOeSq"
+              "[\"tracks\",\"finale\"]": "9ib58DOeSq",
+              "[\"events\",\"birdCircle\"]": "track:events.birdCircle"
             },
             "trackData": {
               "track:unrest": {
@@ -680,6 +681,51 @@
                     "value": 1
                   }
                 ]
+              },
+              "track:events.birdCircle": {
+                "type": "BasicKeyframedTrack",
+                "__debugName": "events.birdCircle",
+                "keyframes": [
+                  {
+                    "id": "kf-ev-bird-0",
+                    "position": 0,
+                    "connectedRight": true,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "hold",
+                    "value": 0
+                  },
+                  {
+                    "id": "kf-ev-bird-1",
+                    "position": 12,
+                    "connectedRight": true,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "hold",
+                    "value": 1
+                  },
+                  {
+                    "id": "kf-ev-bird-2",
+                    "position": 14,
+                    "connectedRight": true,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "hold",
+                    "value": 0
+                  }
+                ]
               }
             }
           },
@@ -793,13 +839,13 @@
   },
   "definitionVersion": "0.4.0",
   "revisionHistory": [
+    "XpclRYqDzoI7gS54",
     "Q84OpdcquZqCdxp1",
     "Ulkdo0pQumgvAXIT",
     "tyNVsWjm5cKP5oai",
     "5IP788Sq27P3vmgP",
     "_j4TXoobm1lFQYCt",
     "IOBWtrNfRdFVnQFr",
-    "ZKRgS8zqF7RuVAUf",
-    null
+    "ZKRgS8zqF7RuVAUf"
   ]
 }

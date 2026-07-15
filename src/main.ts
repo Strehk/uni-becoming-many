@@ -3,11 +3,13 @@ import { createAtmosphere } from "./atmosphere/index.ts";
 import { SoundBus, SoundDirector } from "./audio/index.ts";
 import { createMovementScore } from "./audio/movements.ts";
 import { createCreatures } from "./creatures/index.ts";
+import { createEventControls } from "./dev-console/event-controls.ts";
 import { createFloraFaunaControls } from "./dev-console/flora-fauna-controls.ts";
 import { createDevConsole } from "./dev-console/index.ts";
 import { createSaveTuningControls } from "./dev-console/save-tuning.ts";
 import { createSenseControls } from "./dev-console/sense-controls.ts";
 import { createWorldControls } from "./dev-console/world-controls.ts";
+import { createEvents } from "./events/index.ts";
 import {
   type ExperienceConfig,
   loadExperienceConfig,
@@ -300,6 +302,22 @@ const player = createPlayer(renderer.camera, {
 });
 renderer.scene.add(player.rig);
 
+// Scripted timeline events: one-shot staged moments (first: the bird sweeping
+// close past the camera on an authored route). Triggered by Theatre pulses
+// (arc.events.*, rising edge) or the dev panel — both over the same
+// `event:trigger` bus channel; the module wires its own `bus.when` crossings.
+// Routes anchor in WORLD space at the camera pose when triggered (they never
+// follow the camera) — the fly-by geometry is tuned against the player's
+// constant 6 m/s glide (see definitions/bird-circle.ts).
+const events = createEvents({
+  scene: renderer.scene,
+  renderer: renderer.instance,
+  camera: renderer.camera,
+  bus,
+  uniforms: senses.uniforms,
+});
+window.addEventListener("pagehide", () => events.dispose());
+
 // ── Theatre.js: authored envelopes, slaved to the clock ─────────────────────
 // Dev loads @theatre/studio (dynamic import ⇒ out of the prod bundle); prod loads state.json.
 const theatre = await initTheatre();
@@ -326,7 +344,12 @@ const credits = createCredits({
 window.addEventListener("pagehide", () => credits.dispose());
 
 if (import.meta.env.DEV) {
-  (window as Window & { __bmDebug?: unknown }).__bmDebug = { clock, signals, theatre };
+  (window as Window & { __bmDebug?: unknown }).__bmDebug = {
+    clock,
+    signals,
+    theatre,
+    scene: renderer.scene,
+  };
 }
 
 // ── Audio director on the bus ───────────────────────────────────────────────
@@ -459,6 +482,12 @@ const floraFaunaControls = createFloraFaunaControls(bus, floraFauna.config);
 devConsole.addSection(floraFaunaControls.element);
 window.addEventListener("pagehide", () => floraFaunaControls.dispose());
 
+// Events: manual test triggers for the scripted timeline events — the buttons
+// emit `event:trigger`, the exact channel the Theatre timeline pulses use.
+const eventControls = createEventControls(bus, events.ids);
+devConsole.addSection(eventControls.element);
+window.addEventListener("pagehide", () => eventControls.dispose());
+
 // Dev-only: export the live sense + world + flora/fauna tuning as committed state.json files.
 if (import.meta.env.DEV) {
   const saveTuning = createSaveTuningControls({
@@ -572,6 +601,7 @@ renderer.start((dtSeconds) => {
   magnetfeld.update(dtSeconds); // sky dome fade + follow player + spine time
   duft.update(clock.delta); // scent field: fade, re-anchor, GPU sim (spine-scaled dt)
   creatures.update(clock.delta); // boids swarm + mushroom anchors (obey pause/timeScale)
+  events.update(clock.delta); // scripted timeline events (bird fly-bys) — obey pause/timeScale
   publishScentAnchors(); // Duft source positions -> signal substrate for spatial synth bindings
   // Flora is perception-dependent: the white void must read as an empty uniform field,
   // so the flora stays hidden until a sense reveals the world. Dust, by contrast, hangs

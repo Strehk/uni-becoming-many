@@ -61,12 +61,20 @@ const MOVEMENT_ENVELOPES = Object.fromEntries(
   MOVEMENTS.map((m) => [m.id, types.number(0, { range: [0, 1], label: m.label })]),
 ) as Record<(typeof MOVEMENTS)[number]["id"], ReturnType<typeof types.number>>;
 
+/** One authored 0..1 trigger pulse per scripted event (keys = EventId, see
+ *  src/events/ids.ts). An event fires on the rising edge (>0.5) — author a held
+ *  plateau (~1–2 s at 1), not a one-frame spike, so scrubs into it still fire. */
+const EVENT_TRIGGERS = {
+  birdCircle: types.number(0, { range: [0, 1] }),
+};
+
 /** The authored macro-envelope object's props. Extend as the dramaturgy grows. */
 const ARC_PROPS = {
   unrest: types.number(0, { range: [0, 1] }),
   intensity: types.number(0, { range: [0, 1] }),
   senses: types.compound(SENSE_ENVELOPES),
   tracks: types.compound(MOVEMENT_ENVELOPES),
+  events: types.compound(EVENT_TRIGGERS),
 };
 
 export type ArcObject = ISheetObject<typeof ARC_PROPS>;

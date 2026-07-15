@@ -6,6 +6,7 @@
  *
  * If you add a cell, name its writer in the comment — that annotation *is* the ownership contract.
  */
+import type { EventId } from "../events/ids.ts";
 import type { SenseId } from "../senses/ids.ts";
 import { type Signal, signal } from "./signal.ts";
 
@@ -33,6 +34,13 @@ export interface SpatialAnchor {
 
 /** Who is allowed to write the per-sense intensities right now. */
 export type SenseAuthority = "manual" | "theatre";
+
+/** One trigger cell per timeline event, spelled out like the sense cells. */
+function createEventCells(): Record<EventId, Signal<number>> {
+  return {
+    birdCircle: signal(0),
+  };
+}
 
 /** One intensity cell per sense, spelled out so no cast is needed (the `as`-free zone). */
 function createSenseCells(): Record<SenseId, Signal<number>> {
@@ -79,6 +87,10 @@ export const signals = {
   unrest: signal(0),
   /** Macro intensity 0..1 across the piece. WRITER: Theatre 'Timeline' sheet. */
   intensity: signal(0),
+  /** Per-event trigger pulse 0..1 — a scripted event fires on the rising edge
+   *  (>0.5, evaluated by the events module's `bus.when`). WRITER: Theatre
+   *  'Timeline' sheet (via the bridge). */
+  events: createEventCells(),
 } as const;
 
 export type Signals = typeof signals;
