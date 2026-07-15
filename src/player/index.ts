@@ -87,6 +87,12 @@ export interface Player {
    * spring-centered keyboard) owns the return-to-level.
    */
   look(pitch: number): void;
+  /**
+   * Retune the altitude ceiling at runtime, in metres above the terrain floor (see
+   * {@link PlayerOptions.maxAltitude}). Lets an authored source (the Theatre timeline) shape the
+   * ceiling over the piece; applied on the next `update`'s bounds clamp. Values are used as-is.
+   */
+  setMaxAltitude(metres: number): void;
   /** Detach the camera and remove the rig from the scene graph. */
   dispose(): void;
 }
@@ -104,7 +110,7 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
   const lookAngle = options.lookAngle ?? 0.7; // ~40° at full deflection
   const floor = options.floor;
   const clearance = options.clearance ?? 3;
-  const maxAltitude = options.maxAltitude ?? 200;
+  let maxAltitude = options.maxAltitude ?? 200; // mutable: the Theatre timeline can retune it live
 
   const rig = new THREE.Group();
   rig.name = "player-rig";
@@ -163,11 +169,15 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
     gimbal.rotation.x = pitch * lookAngle;
   }
 
+  function setMaxAltitude(metres: number): void {
+    maxAltitude = metres; // takes effect on the next update()'s applyBounds() clamp
+  }
+
   function dispose(): void {
     gimbal.remove(camera);
     rig.remove(gimbal);
     rig.removeFromParent();
   }
 
-  return { rig, update, look, dispose };
+  return { rig, update, look, setMaxAltitude, dispose };
 }

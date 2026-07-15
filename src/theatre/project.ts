@@ -14,9 +14,13 @@
  * `signals.senseAuthority` is "theatre", so manual testing and the timeline use the SAME
  * signals without fighting.
  *
- * Flight recording/playback is deliberately NOT part of this integration — the flight is
+ * Flight *path* recording/playback is deliberately NOT part of this integration — the flight is
  * player-controlled only (the former 'Camera' sheet stub was dropped; `bindings.ts` stays
- * as a generic transform helper for scripted scene objects).
+ * as a generic transform helper for scripted scene objects). The one flight *parameter* Theatre
+ * does author is the altitude ceiling: a `flight` object whose `maxHeight` (metres above terrain)
+ * retunes the player's airspace over the piece — an authored envelope like `unrest`/`intensity`,
+ * not a recorded pose. It is written straight to the player rig, so it never touches the signal
+ * substrate or {@link pumpAuthored} (which is only for authored *signals*).
  *
  * ⚠️ The official 3D extension `@theatre/r3f` is React-Three-Fiber only and unusable here (vanilla
  * `three/webgpu`, no React). We reconstruct its useful part in `bindings.ts`.
@@ -67,9 +71,23 @@ const ARC_PROPS = {
 
 export type ArcObject = ISheetObject<typeof ARC_PROPS>;
 
+/**
+ * Authored flight parameters. `maxHeight` is the altitude ceiling in metres above the terrain
+ * floor (see the player's `maxAltitude`) — keyframe it to open or tighten the airspace over the
+ * piece. Default 100 matches the call-site option, so an un-keyframed timeline flies exactly as
+ * before; the range only bounds Studio's slider (you can still type any value).
+ */
+const FLIGHT_PROPS = {
+  maxHeight: types.number(100, { range: [10, 400], label: "Max Height (m)" }),
+};
+
+export type FlightObject = ISheetObject<typeof FLIGHT_PROPS>;
+
 export interface Theatre {
   /** Authored envelopes: unrest / intensity + the per-sense layer envelopes. */
   readonly arc: ArcObject;
+  /** Authored flight parameters (the altitude ceiling); read each frame into the player rig. */
+  readonly flight: FlightObject;
   /** The timeline sheet whose sequence is slaved to the clock (~300 s dramaturgy). */
   readonly timeline: ISheet;
   /** Drive the timeline playhead. Call each frame **only while the clock is running**. */
@@ -106,6 +124,7 @@ export async function initTheatre(): Promise<Theatre> {
 
   const timeline = project.sheet("Timeline");
   const arc = timeline.object("arc", ARC_PROPS);
+  const flight = timeline.object("flight", FLIGHT_PROPS);
 
   if (import.meta.env.DEV && new URLSearchParams(window.location.search).get("studio") === "1") {
     // Dynamic import ⇒ @theatre/studio is excluded from the production bundle.
@@ -117,7 +136,7 @@ export async function initTheatre(): Promise<Theatre> {
     // open on the stale browser snapshot and prompt "Use browser's state / Use disk state" — pick
     // "Use disk state" to reload the committed file.
     studio.initialize({ usePersistentStorage: true });
-    studio.setSelection([timeline, arc]);
+    studio.setSelection([timeline, arc, flight]);
     // Tip: `studio.createContentOfSaveFile("Becoming Many")` returns the state object to write
     // into src/theatre/state.json — the production save file — without the Studio export button.
   }
@@ -126,6 +145,7 @@ export async function initTheatre(): Promise<Theatre> {
 
   return {
     arc,
+    flight,
     timeline,
     setPosition(seconds: number): void {
       timeline.sequence.position = seconds;

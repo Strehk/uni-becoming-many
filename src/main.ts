@@ -532,6 +532,7 @@ renderer.start((dtSeconds) => {
 
   keyboard.update(dtSeconds); // 4. input → player → emergent signals
   const { locomotion } = keyboard;
+  player.setMaxAltitude(theatre.flight.value.maxHeight); // authored airspace ceiling → player rig
   player.look(locomotion.pitch);
   player.update(dtSeconds, {
     pitch: keyboard.steering ? 0 : orientation.pitch - PITCH_BIAS,
