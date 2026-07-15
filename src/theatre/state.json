@@ -682,6 +682,58 @@
                 ]
               }
             }
+          },
+          "flight": {
+            "trackData": {
+              "7XoseAELsP": {
+                "type": "BasicKeyframedTrack",
+                "__debugName": "flight:[\"maxHeight\"]",
+                "keyframes": [
+                  {
+                    "id": "j_NsYUWBpR",
+                    "position": 0,
+                    "connectedRight": true,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
+                    "value": 15
+                  },
+                  {
+                    "id": "wePIwd4hEh",
+                    "position": 96.933,
+                    "connectedRight": true,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
+                    "value": 15
+                  },
+                  {
+                    "id": "lj5Fy9g_dL",
+                    "position": 120,
+                    "connectedRight": true,
+                    "handles": [
+                      0.5,
+                      1,
+                      0.5,
+                      0
+                    ],
+                    "type": "bezier",
+                    "value": 50
+                  }
+                ]
+              }
+            },
+            "trackIdByPropPath": {
+              "[\"maxHeight\"]": "7XoseAELsP"
+            }
           }
         }
       }
@@ -689,6 +741,7 @@
   },
   "definitionVersion": "0.4.0",
   "revisionHistory": [
+    "Ulkdo0pQumgvAXIT",
     "tyNVsWjm5cKP5oai",
     "5IP788Sq27P3vmgP",
     "_j4TXoobm1lFQYCt",
