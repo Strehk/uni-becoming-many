@@ -37,19 +37,13 @@ import {
 } from "three/tsl";
 import * as THREE from "three/webgpu";
 import type { Node } from "three/webgpu";
-import { DEFAULT_CONFIG, type FaunaConfig } from "../flora-fauna/config.ts";
+import { DEFAULT_CONFIG, type FaunaConfig, normalizeFaunaConfig } from "../flora-fauna/config.ts";
 import type { FloraLayerCompositor } from "../life/material.ts";
-import { chunkSeed, mulberry32 } from "../life/matrix.ts";
 import { distanceFog, viewReveal } from "../render/tsl-kit.ts";
 import type { KitUniforms } from "../render/uniforms.ts";
 import type { Bus } from "../signals/index.ts";
 import { signals } from "../signals/index.ts";
-import {
-  type ChunkBuiltInfo,
-  type ChunkCell,
-  makeHeightEntry,
-  sampleEntry,
-} from "../terrain/index.ts";
+import type { ChunkBuiltInfo, ChunkCell } from "../terrain/index.ts";
 import { type MosquitoFlocks, createMosquitoFlocks } from "./mosquito-flocks.ts";
 
 // ── Flock layout ──
@@ -199,6 +193,10 @@ const DEER_WALK_REFERENCE_SPEED = 1.4;
 /** The fox's own walk clip reference speed (it trots quicker than the deer). */
 const FOX_WALK_REFERENCE_SPEED = 1.8;
 const MAX_GROUND_SLOPE = 0.65;
+const DEER_MIN_PLAYER_DISTANCE = 15;
+const DEER_MIN_SPACING = 6;
+const FOX_MIN_PLAYER_DISTANCE = 8;
+const FOX_MIN_SPACING = 3;
 /** Re-scatter the mushrooms when the player is farther than this from their anchor. */
 const MUSHROOM_REANCHOR = 110;
 
@@ -247,6 +245,9 @@ export interface Creatures {
   debugSnapshot(): {
     readonly visibility: { readonly birds: boolean; readonly groundFauna: boolean };
     readonly streamedChunks: number;
+    readonly flying: Readonly<
+      Record<FlyingKind, { readonly flocks: number; readonly animals: number }>
+    >;
     readonly deer: readonly {
       x: number;
       y: number;
@@ -288,6 +289,8 @@ interface Flock {
   readonly kind: FlyingKind;
   readonly ringIndex: number;
   readonly ringCount: number;
+  /** Stable member list keeps boids work flock-local as populations grow. */
+  readonly members: Bird[];
   /** Seconds since the waypoint was rolled (drives the timeout re-roll). */
   age: number;
 }
@@ -613,7 +616,7 @@ export async function createCreatures(
   // the flock/mushroom rebuilds in `reconfigure`.
   // Keep a private snapshot: the coordinator mutates its live config object in
   // place, while reconfigure needs the previous values to detect count changes.
-  let fauna: FaunaConfig = structuredClone(senseOpts.config ?? DEFAULT_CONFIG.fauna);
+  let fauna: FaunaConfig = normalizeFaunaConfig(senseOpts.config ?? DEFAULT_CONFIG.fauna);
 
   // ── birds ──
   // A flock waypoint: somewhere in the flock's roam ring around the player, at
@@ -680,7 +683,7 @@ export async function createCreatures(
       rawMaxPerFlock: number,
       roamScale: number,
     ): void => {
-      const count = Math.max(1, Math.round(rawCount));
+      const count = Math.max(0, Math.round(rawCount));
       for (let f = 0; f < count; f++) {
         const perFlock = randomFlockSize(rawMinPerFlock, rawMaxPerFlock);
         const ring = ringFor(f, count, roamScale);
@@ -691,6 +694,7 @@ export async function createCreatures(
           kind,
           ringIndex: f,
           ringCount: count,
+          members: [],
         };
         rollWaypoint(flock.waypoint, ring, kind);
         flocks.push(flock);
@@ -715,7 +719,7 @@ export async function createCreatures(
             sz,
           );
           birdGroup.add(root);
-          birds.push({
+          const bird: Bird = {
             object: root,
             position: root.position,
             velocity: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5)
@@ -725,7 +729,9 @@ export async function createCreatures(
             mixer,
             flock: flockIndex,
             kind,
-          });
+          };
+          birds.push(bird);
+          flock.members.push(bird);
         }
       }
     };
@@ -798,19 +804,7 @@ export async function createCreatures(
   const deers: Deer[] = [];
   const foxes: Fox[] = [];
 
-  interface GroundFaunaAnchor {
-    readonly key: string;
-    readonly position: THREE.Vector3;
-    readonly yaw: number;
-  }
-
-  interface GroundFaunaChunk {
-    readonly info: ChunkBuiltInfo;
-    readonly deer: readonly GroundFaunaAnchor[];
-    readonly fox: readonly GroundFaunaAnchor[];
-  }
-
-  const groundFaunaChunks = new Map<string, GroundFaunaChunk>();
+  const streamedGroundChunks = new Set<string>();
   const groundChunkKey = (gridX: number, gridZ: number): string => `${gridX},${gridZ}`;
 
   const setAnimalScale = (model: THREE.Object3D, metrics: ModelMetrics, scale: number): void => {
@@ -914,117 +908,102 @@ export async function createCreatures(
     return found;
   };
 
-  const scatterGroundAnchor = (
-    info: ChunkBuiltInfo,
-    salt: number,
-    clearance: number,
-    clearingBias: number,
-  ): GroundFaunaAnchor | null => {
-    const rand = mulberry32(chunkSeed(info.gridX, info.gridZ, salt));
-    const entry = makeHeightEntry(info.gridX, info.gridZ, info.chunkSize, info.heightGrid);
-    const { fields } = info;
-    const originX = info.gridX * info.chunkSize;
-    const originZ = info.gridZ * info.chunkSize;
-    for (let attempt = 0; attempt < 96; attempt++) {
-      const u = 0.06 + rand() * 0.88;
-      const v = 0.06 + rand() * 0.88;
-      const cx = Math.min(fields.res - 1, Math.floor(u * fields.res));
-      const cz = Math.min(fields.res - 1, Math.floor(v * fields.res));
-      const cell = cz * fields.res + cx;
-      if ((fields.water[cell] ?? 1) !== 0) continue;
-      if ((fields.slope[cell] ?? 1) > MAX_GROUND_SLOPE * 0.75) continue;
-      if ((fields.vegetation[cell] ?? 1) > clearingBias && rand() < 0.82) continue;
-      const x = originX + u * info.chunkSize;
-      const z = originZ + v * info.chunkSize;
-      if (!pointIsClear(x, z, clearance)) continue;
-      return {
-        key: `${groundChunkKey(info.gridX, info.gridZ)}:${salt}`,
-        position: new THREE.Vector3(x, sampleEntry(entry, x, z), z),
-        yaw: rand() * Math.PI * 2,
-      };
-    }
-    return null;
-  };
-
-  const allGroundAnchors = (kind: "deer" | "fox"): GroundFaunaAnchor[] =>
-    [...groundFaunaChunks.values()]
-      .flatMap((chunk) => chunk[kind])
-      .sort((a, b) => {
-        const adx = a.position.x - pose.x;
-        const adz = a.position.z - pose.z;
-        const bdx = b.position.x - pose.x;
-        const bdz = b.position.z - pose.z;
-        return adx * adx + adz * adz - (bdx * bdx + bdz * bdz);
-      });
-
-  const deerAnchorsFor = (info: ChunkBuiltInfo): GroundFaunaAnchor[] =>
-    [0xd33, 0xd34]
-      .map((salt) => scatterGroundAnchor(info, salt, fauna.deerTreeClearance, 0.62))
-      .filter((anchor): anchor is GroundFaunaAnchor => anchor !== null);
-
-  const foxAnchorsFor = (info: ChunkBuiltInfo): GroundFaunaAnchor[] =>
-    [0xf09, 0xf0a]
-      .map((salt) => scatterGroundAnchor(info, salt, fauna.foxTreeClearance, 0.78))
-      .filter((anchor): anchor is GroundFaunaAnchor => anchor !== null);
-
+  let deerSerial = 0;
   const reconcileDeer = (emit: boolean): void => {
     const target = Math.max(0, Math.round(fauna.deerCount));
-    const liveKeys = new Set(allGroundAnchors("deer").map((anchor) => anchor.key));
+    const radius = Math.max(DEER_MIN_PLAYER_DISTANCE + 1, fauna.deerRoamRadius);
+    const retainRadiusSq = (radius + 40) ** 2;
     let changed = false;
     for (let i = deers.length - 1; i >= 0; i--) {
       const deer = deers[i];
-      if (!deer || (i < target && liveKeys.has(deer.homeKey))) continue;
+      const dx = deer ? deer.object.position.x - pose.x : 0;
+      const dz = deer ? deer.object.position.z - pose.z : 0;
+      if (
+        deer &&
+        i < target &&
+        dx * dx + dz * dz <= retainRadiusSq &&
+        ground(deer.object.position.x, deer.object.position.z) !== null
+      ) {
+        continue;
+      }
+      if (!deer) continue;
       deer.object.removeFromParent();
       deers.splice(i, 1);
       changed = true;
     }
-    const used = new Set(deers.map((deer) => deer.homeKey));
-    for (const anchor of allGroundAnchors("deer")) {
-      if (deers.length >= target) break;
-      if (used.has(anchor.key)) continue;
-      const deer = buildDeer(anchor.key, anchor.position);
+
+    const candidate = new THREE.Vector3();
+    const maxAttempts = Math.max(32, (target - deers.length) * 12);
+    for (let attempt = 0; deers.length < target && attempt < maxAttempts; attempt++) {
+      if (!findOpenPoint(candidate, DEER_MIN_PLAYER_DISTANCE, radius, fauna.deerTreeClearance)) {
+        continue;
+      }
+      const spaced = deers.every(
+        (deer) => deer.object.position.distanceTo(candidate) >= DEER_MIN_SPACING,
+      );
+      if (!spaced) continue;
+
+      const deer = buildDeer(`deer:${deerSerial++}`, candidate);
       setAnimalScale(deer.model, deerMetrics, fauna.deerScale);
-      deer.object.position.copy(anchor.position);
-      deer.heading.set(Math.sin(anchor.yaw), 0, Math.cos(anchor.yaw));
-      deer.object.rotation.y = anchor.yaw;
+      deer.object.position.copy(candidate);
+      const yaw = Math.random() * Math.PI * 2;
+      deer.heading.set(Math.sin(yaw), 0, Math.cos(yaw));
+      deer.object.rotation.y = yaw;
       deer.object.visible = true;
       deer.placed = true;
       deer.waypointAge = DEER_WAYPOINT_TIMEOUT;
       groundFaunaGroup.add(deer.object);
       deers.push(deer);
-      used.add(anchor.key);
       changed = true;
     }
     if (emit && changed) bus.emit("creatures:ground-fauna-changed");
   };
 
+  let foxSerial = 0;
   const reconcileFoxes = (emit: boolean): void => {
     const target = Math.max(0, Math.round(fauna.foxCount));
-    const anchors = allGroundAnchors("fox");
-    const liveKeys = new Set(anchors.map((anchor) => anchor.key));
+    const radius = Math.max(FOX_MIN_PLAYER_DISTANCE + 1, fauna.foxRoamRadius);
+    const retainRadiusSq = (radius + 30) ** 2;
     let changed = false;
     for (let i = foxes.length - 1; i >= 0; i--) {
       const fox = foxes[i];
-      if (!fox || (i < target && liveKeys.has(fox.homeKey))) continue;
+      const dx = fox ? fox.object.position.x - pose.x : 0;
+      const dz = fox ? fox.object.position.z - pose.z : 0;
+      if (
+        fox &&
+        i < target &&
+        dx * dx + dz * dz <= retainRadiusSq &&
+        ground(fox.object.position.x, fox.object.position.z) !== null
+      ) {
+        continue;
+      }
+      if (!fox) continue;
       fox.object.removeFromParent();
       foxes.splice(i, 1);
       changed = true;
     }
-    const used = new Set(foxes.map((fox) => fox.homeKey));
-    for (const anchor of anchors) {
-      if (foxes.length >= target) break;
-      if (used.has(anchor.key)) continue;
-      const fox = buildFox(anchor.key, anchor.position);
+    const candidate = new THREE.Vector3();
+    const maxAttempts = Math.max(32, (target - foxes.length) * 12);
+    for (let attempt = 0; foxes.length < target && attempt < maxAttempts; attempt++) {
+      if (!findOpenPoint(candidate, FOX_MIN_PLAYER_DISTANCE, radius, fauna.foxTreeClearance)) {
+        continue;
+      }
+      const spaced = foxes.every(
+        (fox) => fox.object.position.distanceTo(candidate) >= FOX_MIN_SPACING,
+      );
+      if (!spaced) continue;
+
+      const fox = buildFox(`fox:${foxSerial++}`, candidate);
       setAnimalScale(fox.model, foxMetrics, fauna.foxScale);
-      fox.object.position.copy(anchor.position);
-      fox.heading.set(Math.sin(anchor.yaw), 0, Math.cos(anchor.yaw));
-      fox.object.rotation.y = anchor.yaw;
+      fox.object.position.copy(candidate);
+      const yaw = Math.random() * Math.PI * 2;
+      fox.heading.set(Math.sin(yaw), 0, Math.cos(yaw));
+      fox.object.rotation.y = yaw;
       fox.object.visible = true;
       fox.placed = true;
       fox.waypointAge = DEER_WAYPOINT_TIMEOUT;
       groundFaunaGroup.add(fox.object);
       foxes.push(fox);
-      used.add(anchor.key);
       changed = true;
     }
     if (emit && changed) bus.emit("creatures:ground-fauna-changed");
@@ -1039,6 +1018,7 @@ export async function createCreatures(
   const avoid = new THREE.Vector3();
 
   let elapsed = 0;
+  let localFaunaReconcileAge = 0;
 
   return {
     group,
@@ -1052,45 +1032,45 @@ export async function createCreatures(
       groundFaunaGroup.visible = groundFaunaVisible;
     },
     onChunkBuilt(info: ChunkBuiltInfo): void {
-      const key = groundChunkKey(info.gridX, info.gridZ);
-      groundFaunaChunks.set(key, {
-        info,
-        deer: deerAnchorsFor(info),
-        fox: foxAnchorsFor(info),
-      });
+      streamedGroundChunks.add(groundChunkKey(info.gridX, info.gridZ));
       reconcileDeer(true);
       reconcileFoxes(true);
     },
     onChunkDisposed(cell: ChunkCell): void {
-      groundFaunaChunks.delete(groundChunkKey(cell.gridX, cell.gridZ));
+      streamedGroundChunks.delete(groundChunkKey(cell.gridX, cell.gridZ));
       reconcileDeer(true);
       reconcileFoxes(true);
     },
     reconfigure(next: FaunaConfig): void {
+      const normalized = normalizeFaunaConfig(next);
       const birdCountsChanged =
-        next.flockCount !== fauna.flockCount ||
-        next.birdMinPerFlock !== fauna.birdMinPerFlock ||
-        next.birdMaxPerFlock !== fauna.birdMaxPerFlock ||
-        next.batFlockCount !== fauna.batFlockCount ||
-        next.batMinPerFlock !== fauna.batMinPerFlock ||
-        next.batMaxPerFlock !== fauna.batMaxPerFlock;
+        normalized.flockCount !== fauna.flockCount ||
+        normalized.birdMinPerFlock !== fauna.birdMinPerFlock ||
+        normalized.birdMaxPerFlock !== fauna.birdMaxPerFlock ||
+        normalized.batFlockCount !== fauna.batFlockCount ||
+        normalized.batMinPerFlock !== fauna.batMinPerFlock ||
+        normalized.batMaxPerFlock !== fauna.batMaxPerFlock ||
+        normalized.meiseFlockCount !== fauna.meiseFlockCount ||
+        normalized.meiseMinPerFlock !== fauna.meiseMinPerFlock ||
+        normalized.meiseMaxPerFlock !== fauna.meiseMaxPerFlock ||
+        normalized.butterflyFlockCount !== fauna.butterflyFlockCount ||
+        normalized.butterflyMinPerFlock !== fauna.butterflyMinPerFlock ||
+        normalized.butterflyMaxPerFlock !== fauna.butterflyMaxPerFlock;
       const mushroomsChanged =
-        next.mushroomCount !== fauna.mushroomCount || next.mushroomRadius !== fauna.mushroomRadius;
-      const deerCountChanged = next.deerCount !== fauna.deerCount;
-      const deerRouteChanged = next.deerRoamRadius !== fauna.deerRoamRadius;
-      const deerAnchorsChanged = next.deerTreeClearance !== fauna.deerTreeClearance;
-      const foxCountChanged = next.foxCount !== fauna.foxCount;
-      const foxRouteChanged = next.foxRoamRadius !== fauna.foxRoamRadius;
-      const foxAnchorsChanged = next.foxTreeClearance !== fauna.foxTreeClearance;
-      mosquitoes.reconfigure(next);
-      fauna = structuredClone(next);
+        normalized.mushroomCount !== fauna.mushroomCount ||
+        normalized.mushroomRadius !== fauna.mushroomRadius;
+      const deerCountChanged = normalized.deerCount !== fauna.deerCount;
+      const deerRouteChanged = normalized.deerRoamRadius !== fauna.deerRoamRadius;
+      const deerAnchorsChanged = normalized.deerTreeClearance !== fauna.deerTreeClearance;
+      const foxCountChanged = normalized.foxCount !== fauna.foxCount;
+      const foxRouteChanged = normalized.foxRoamRadius !== fauna.foxRoamRadius;
+      const foxAnchorsChanged = normalized.foxTreeClearance !== fauna.foxTreeClearance;
+      mosquitoes.reconfigure(normalized);
+      fauna = structuredClone(normalized);
       // roam/speed are read live in `update` — nothing to do for those.
       if (birdCountsChanged) rebuildFlocks(true); // emits creatures:birds-changed
       if (mushroomsChanged) scatterMushrooms(); // emits creatures:mushrooms-changed
       if (deerAnchorsChanged) {
-        for (const [key, chunk] of groundFaunaChunks) {
-          groundFaunaChunks.set(key, { ...chunk, deer: deerAnchorsFor(chunk.info) });
-        }
         for (const deer of deers) deer.object.removeFromParent();
         deers.length = 0;
         reconcileDeer(true);
@@ -1101,11 +1081,9 @@ export async function createCreatures(
           setAnimalScale(deer.model, deerMetrics, fauna.deerScale);
           if (deerRouteChanged) deer.waypointAge = DEER_WAYPOINT_TIMEOUT;
         }
+        if (deerRouteChanged) reconcileDeer(true);
       }
       if (foxAnchorsChanged) {
-        for (const [key, chunk] of groundFaunaChunks) {
-          groundFaunaChunks.set(key, { ...chunk, fox: foxAnchorsFor(chunk.info) });
-        }
         for (const fox of foxes) fox.object.removeFromParent();
         foxes.length = 0;
         reconcileFoxes(true);
@@ -1116,6 +1094,7 @@ export async function createCreatures(
           setAnimalScale(fox.model, foxMetrics, fauna.foxScale);
           if (foxRouteChanged) fox.waypointAge = DEER_WAYPOINT_TIMEOUT;
         }
+        if (foxRouteChanged) reconcileFoxes(true);
       }
     },
     groundAnimalPositions(): { x: number; y: number; z: number }[] {
@@ -1141,9 +1120,20 @@ export async function createCreatures(
       return out;
     },
     debugSnapshot() {
+      const flying = {
+        bird: { flocks: 0, animals: 0 },
+        bat: { flocks: 0, animals: 0 },
+        meise: { flocks: 0, animals: 0 },
+        butterfly: { flocks: 0, animals: 0 },
+      } satisfies Record<FlyingKind, { flocks: number; animals: number }>;
+      for (const flock of flocks) {
+        flying[flock.kind].flocks++;
+        flying[flock.kind].animals += flock.members.length;
+      }
       return {
         visibility: { birds: birdGroup.visible, groundFauna: groundFaunaGroup.visible },
-        streamedChunks: groundFaunaChunks.size,
+        streamedChunks: streamedGroundChunks.size,
+        flying,
         deer: deers.map((deer) => {
           const nearby =
             senseOpts.groundObstacles?.(
@@ -1191,6 +1181,12 @@ export async function createCreatures(
       }
       elapsed += dt;
       mosquitoes.update(dt);
+      localFaunaReconcileAge += dt;
+      if (localFaunaReconcileAge >= 2) {
+        localFaunaReconcileAge = 0;
+        reconcileDeer(true);
+        reconcileFoxes(true);
+      }
 
       // Mushrooms: initial scatter + re-anchor when the player flew on.
       if (!mushroomAnchor) {
@@ -1308,20 +1304,41 @@ export async function createCreatures(
       for (const fox of foxes) stepWalker(fox, foxWalk);
 
       // ── Flock goals: reached / stale / left-behind waypoints get re-rolled ──
-      for (const [f, flock] of flocks.entries()) {
+      for (const flock of flocks) {
         const roamScale = fauna[KIND_PROFILES[flock.kind].roamScaleKey];
         const ring = ringFor(flock.ringIndex, flock.ringCount, roamScale);
         flock.age += dt;
 
         centre.set(0, 0, 0);
         let flockSize = 0;
-        for (const b of birds) {
-          if (b.flock === f) {
-            centre.add(b.position);
-            flockSize++;
-          }
+        for (const b of flock.members) {
+          centre.add(b.position);
+          flockSize++;
         }
         centre.divideScalar(Math.max(1, flockSize));
+
+        const centroidDx = centre.x - pose.x;
+        const centroidDz = centre.z - pose.z;
+        const reanchorRadius = ring.max + BOUNDARY_MARGIN * 2;
+        if (centroidDx * centroidDx + centroidDz * centroidDz > reanchorRadius * reanchorRadius) {
+          const angle = Math.random() * Math.PI * 2;
+          const radius = ring.min + Math.random() * Math.max(0, ring.max - ring.min);
+          const targetX = pose.x + Math.cos(angle) * radius;
+          const targetZ = pose.z + Math.sin(angle) * radius;
+          const targetY =
+            (ground(targetX, targetZ) ?? pose.y) + MIN_ALTITUDE + 10 + Math.random() * 25;
+          const offsetX = targetX - centre.x;
+          const offsetY = targetY - centre.y;
+          const offsetZ = targetZ - centre.z;
+          for (const bird of flock.members) {
+            bird.position.x += offsetX;
+            bird.position.y += offsetY;
+            bird.position.z += offsetZ;
+          }
+          centre.set(targetX, targetY, targetZ);
+          rollWaypoint(flock.waypoint, ring, flock.kind);
+          flock.age = 0;
+        }
 
         const reached = centre.distanceTo(flock.waypoint) < WAYPOINT_REACHED;
         const behind =
@@ -1348,8 +1365,8 @@ export async function createCreatures(
         align.set(0, 0, 0);
         let cohesionCount = 0;
         let alignCount = 0;
-        for (const o of birds) {
-          if (o === b || o.flock !== b.flock) {
+        for (const o of flock.members) {
+          if (o === b) {
             continue;
           }
           diff.copy(b.position).sub(o.position);

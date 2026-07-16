@@ -22,6 +22,7 @@
 // `trigger()` warns and no-ops until its event is ready.
 
 import type * as THREE from "three/webgpu";
+import type { FloraLayerCompositor } from "../life/material.ts";
 import type { KitUniforms } from "../render/uniforms.ts";
 import type { Bus } from "../signals/index.ts";
 import { signals } from "../signals/index.ts";
@@ -62,10 +63,13 @@ export interface EventsOptions {
   bus: Bus;
   /** The live sense-look uniforms (fog / view reveal), optional. */
   uniforms?: KitUniforms;
+  /** Shader-sense compositor for perceptible event actors. */
+  layers?: FloraLayerCompositor;
 }
 
 export function createEvents(options: EventsOptions): Events {
-  const { scene, parent, positionSource, ground, renderer, camera, bus, uniforms } = options;
+  const { scene, parent, positionSource, ground, renderer, camera, bus, uniforms, layers } =
+    options;
 
   // The presenting camera's pose — the same XR rule as `syncCameraPos`
   // (src/render/camera-pos.ts): while a VR session presents, read the XR
@@ -92,7 +96,16 @@ export function createEvents(options: EventsOptions): Events {
   for (const definition of DEFINITIONS) {
     const entry: Entry = {
       definition,
-      instance: definition.create({ scene, bus, parent, positionSource, ground, anchor, uniforms }),
+      instance: definition.create({
+        scene,
+        bus,
+        parent,
+        positionSource,
+        ground,
+        anchor,
+        uniforms,
+        layers,
+      }),
       ready: false,
     };
     entries.set(definition.id, entry);

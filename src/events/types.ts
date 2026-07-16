@@ -6,6 +6,7 @@
 // out and hide themselves. Definitions are registered in `src/events/index.ts`.
 
 import type * as THREE from "three/webgpu";
+import type { FloraLayerCompositor } from "../life/material.ts";
 import type { KitUniforms } from "../render/uniforms.ts";
 import type { Bus } from "../signals/index.ts";
 import type { EventId } from "./ids.ts";
@@ -40,6 +41,8 @@ export interface EventContext {
   anchor: AnchorPose;
   /** The live sense-look uniforms (distance fog / view reveal), optional. */
   uniforms?: KitUniforms | undefined;
+  /** Shader-sense compositor for event actors that participate in perception. */
+  layers?: FloraLayerCompositor | undefined;
 }
 
 /** One live event: loaded once at startup, triggered any number of times. */

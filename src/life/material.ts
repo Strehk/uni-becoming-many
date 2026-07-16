@@ -83,7 +83,10 @@ export interface FloraSurfaceNodes {
 /** The sense-layer compositor flora consumes (implemented by
  *  `createShaderSenses().compositor`, same object the terrain gets). */
 export interface FloraLayerCompositor {
-  buildColorNode(surface: FloraSurfaceNodes): Node<"vec3"> | Node<"color">;
+  buildColorNode(
+    surface: FloraSurfaceNodes,
+    baseColor?: Node<"vec3">,
+  ): Node<"vec3"> | Node<"color">;
   /** Subscribe to structural changes (blend mode / order). Returns an unsubscribe. */
   onStructureChange(cb: () => void): () => void;
 }

@@ -15,7 +15,7 @@
 
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js";
-import { mix, vec3 } from "three/tsl";
+import { float, mix, modelPosition, modelRadius, normalWorld, positionView, vec3 } from "three/tsl";
 import * as THREE from "three/webgpu";
 import type { Node } from "three/webgpu";
 import { distanceFog, viewReveal } from "../../render/tsl-kit.ts";
@@ -28,18 +28,29 @@ const BIRD_MODEL_URL = "/creatures/bird_erasmus.glb";
 /** The authored route (Blender Empty with a position track, see bird_intro). */
 const ROUTE_URL = "/events/bird-circle.fbx";
 /** Target wingspan in metres — a close fly-by reads well slightly bird-sized. */
-const BIRD_WINGSPAN = 0.55;
+const BIRD_WINGSPAN = 1.65;
 
 /** Load a dedicated, event-owned bird instance with the always-visible look. */
-async function loadEventBird(uniforms?: KitUniforms): Promise<LoadedBirdModel> {
+async function loadEventBird(
+  uniforms?: KitUniforms,
+  layers?: EventContext["layers"],
+): Promise<LoadedBirdModel> {
   const gltf = await new GLTFLoader().loadAsync(BIRD_MODEL_URL);
   const model = cloneSkeleton(gltf.scene);
-  const span = new THREE.Box3().setFromObject(gltf.scene).getSize(new THREE.Vector3()).x;
+  const bounds = new THREE.Box3().setFromObject(gltf.scene);
+  const span = bounds.getSize(new THREE.Vector3()).x;
+  const radius = Math.hypot(
+    Math.max(Math.abs(bounds.min.x), Math.abs(bounds.max.x)),
+    Math.max(Math.abs(bounds.min.y), Math.abs(bounds.max.y)),
+    Math.max(Math.abs(bounds.min.z), Math.abs(bounds.max.z)),
+  );
   model.scale.setScalar(BIRD_WINGSPAN / Math.max(span, 1e-4));
+  const thermalVariation = Math.random() * 2 - 1;
 
   // UNLIT (the scene has no lights — a standard material renders black): the
-  // model's own part colours as albedo, faded by fog/view-reveal only.
-  const materials = new Map<string, THREE.MeshBasicNodeMaterial>();
+  // model's own part colours remain the no-sense base. The same compositor as
+  // world birds overlays thermal vision and every other active shader sense.
+  const materials = new Map<string, { material: THREE.MeshBasicNodeMaterial; rewire(): void }>();
   const materialFor = (source: THREE.Material): THREE.MeshBasicNodeMaterial => {
     const color =
       "color" in source && source.color instanceof THREE.Color
@@ -47,31 +58,59 @@ async function loadEventBird(uniforms?: KitUniforms): Promise<LoadedBirdModel> {
         : new THREE.Color(0x8e98a8);
     const key = color.getHexString();
     const cached = materials.get(key);
-    if (cached) return cached;
+    if (cached) return cached.material;
 
     const material = new THREE.MeshBasicNodeMaterial();
     material.side = THREE.DoubleSide;
-    let base: Node<"vec3"> | Node<"color"> = vec3(color.r, color.g, color.b);
-    if (uniforms) {
-      const fogged = distanceFog(base, uniforms.fogColor, uniforms.fogNear, uniforms.fogFar);
-      base = mix(
-        uniforms.fogColor,
-        fogged,
-        viewReveal(uniforms.viewRadius, uniforms.revealSoftness),
-      );
-    }
-    material.colorNode = base;
-    materials.set(key, material);
+    const albedo = vec3(color.r, color.g, color.b);
+    const rewire = (): void => {
+      let base: Node<"vec3"> | Node<"color"> = albedo;
+      if (layers) {
+        const facing = normalWorld.dot(vec3(0.4, 0.75, 0.3).normalize()).clamp(0, 1);
+        base = layers.buildColorNode(
+          {
+            albedo,
+            tempK: float(310),
+            uvSignal: float(0.4),
+            distance: positionView.z.negate(),
+            light: facing.mul(0.65).add(0.35),
+            thermalBird: float(1),
+            thermalObjectVariation: float(thermalVariation),
+            thermalCenter: modelPosition,
+            thermalRadius: modelRadius,
+          },
+          albedo,
+        );
+      }
+      if (uniforms) {
+        const fogged = distanceFog(base, uniforms.fogColor, uniforms.fogNear, uniforms.fogFar);
+        base = mix(
+          uniforms.fogColor,
+          fogged,
+          viewReveal(uniforms.viewRadius, uniforms.revealSoftness),
+        );
+      }
+      material.colorNode = base;
+      material.needsUpdate = true;
+    };
+    rewire();
+    materials.set(key, { material, rewire });
     return material;
   };
 
   model.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
+    child.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), radius);
     const source = Array.isArray(child.material) ? child.material[0] : child.material;
     if (source) child.material = materialFor(source);
   });
 
-  return { scene: model, animations: gltf.animations };
+  const cleanup = layers?.onStructureChange(() => {
+    for (const entry of materials.values()) entry.rewire();
+  });
+  return cleanup
+    ? { scene: model, animations: gltf.animations, cleanup }
+    : { scene: model, animations: gltf.animations };
 }
 
 export const birdCircleEvent: EventDefinition = {
@@ -79,7 +118,7 @@ export const birdCircleEvent: EventDefinition = {
   label: "Vogel-Rundflug",
   create(ctx: EventContext): EventInstance {
     const flight = new BirdFlight(ctx.scene, {
-      getBirdModel: () => loadEventBird(ctx.uniforms),
+      getBirdModel: () => loadEventBird(ctx.uniforms, ctx.layers),
       anchor: ctx.anchor,
       parent: ctx.parent,
       positionSource: ctx.positionSource,

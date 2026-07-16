@@ -16,7 +16,10 @@ const browser = await chromium.launch({
   headless: true,
   args: ["--enable-unsafe-webgpu", "--use-angle=metal", "--hide-scrollbars"],
 });
-const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true });
+const page = await browser.newPage({
+  viewport: { width: 1280, height: 800 },
+  ignoreHTTPSErrors: true,
+});
 const logs: string[] = [];
 page.on("console", (m) => logs.push(`[${m.type()}] ${m.text()}`));
 page.on("pageerror", (e) => logs.push(`[pageerror] ${e.message}`));
@@ -31,13 +34,14 @@ await page.waitForTimeout(6000);
 
 // Solo the farben sense so the world shows in colour (flowers + fauna visible).
 const soloed = await page.evaluate(() => {
-  document.querySelectorAll("button").forEach((b) => {
+  for (const b of document.querySelectorAll("button")) {
     if (b.textContent?.trim() === "Manuell") b.click();
-  });
+  }
   const card = [...document.querySelectorAll("details.sc-card")].find((c) =>
     c.textContent?.includes("Farben"),
   );
-  const solo = card && [...card.querySelectorAll("button")].find((b) => b.textContent?.includes("Solo"));
+  const solo =
+    card && [...card.querySelectorAll("button")].find((b) => b.textContent?.includes("Solo"));
   solo?.click();
   return solo ? "ok" : "no farben solo";
 });

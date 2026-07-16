@@ -5,7 +5,7 @@ import * as THREE from "three/webgpu";
 import type { FaunaConfig } from "../flora-fauna/config.ts";
 import { signals } from "../signals/index.ts";
 
-const MAX_SWARMS = 12;
+const MAX_SWARMS = 48;
 const MAX_PER_SWARM = 400;
 export const MAX_FAUNA_MOSQUITOES = MAX_SWARMS * MAX_PER_SWARM;
 
