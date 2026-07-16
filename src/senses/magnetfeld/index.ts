@@ -42,6 +42,9 @@ export interface MagnetfeldSense {
   readonly controls: SensePanelDescriptor;
   /** Ease visibility, follow the player, feed the spine time. Once per frame. */
   update(dt: number): void;
+  /** Set the weight of one blend mode (0..1) — e.g. the authored field-line-dome
+   *  mix from the Theatre timeline. Same target as the panel's `weight.<mode>`. */
+  setModeWeight(mode: ModeKey, weight: number): void;
   dispose(): void;
 }
 
@@ -282,6 +285,9 @@ export function createMagnetfeldSense(scene: THREE.Scene, bus: Bus): MagnetfeldS
 
   return {
     controls: buildControls(params),
+    setModeWeight(mode: ModeKey, weight: number): void {
+      weights[mode].value = weight;
+    },
     update(dt: number): void {
       uSkyTime.value = signals.time.peek();
       const current = uVisibility.value;

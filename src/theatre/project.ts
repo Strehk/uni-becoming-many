@@ -106,6 +106,19 @@ const CREDITS_PROPS = {
 
 export type CreditsObject = ISheetObject<typeof CREDITS_PROPS>;
 
+/**
+ * Authored magnetfeld mix. `linesMix` (0..1) is the field-line-dome mode's weight in the
+ * magnetfeld sense's 9-mode blend — keyframe it to fade the curved dipole field lines in and out
+ * over the piece. Read each frame into the magnetfeld sense (while the timeline owns the senses),
+ * so it layers on top of whatever base modes the committed look sets. Like `flight`/`credits`, this
+ * drives its subsystem directly, never the signal substrate.
+ */
+const MAGNETFELD_PROPS = {
+  linesMix: types.number(0, { range: [0, 1], label: "Feldlinien-Dom Mix" }),
+};
+
+export type MagnetfeldObject = ISheetObject<typeof MAGNETFELD_PROPS>;
+
 export interface Theatre {
   /** Authored envelopes: unrest / intensity + the per-sense layer envelopes. */
   readonly arc: ArcObject;
@@ -113,6 +126,8 @@ export interface Theatre {
   readonly flight: FlightObject;
   /** Authored credits screen fade (0..1); read each frame into the credits subsystem. */
   readonly credits: CreditsObject;
+  /** Authored magnetfeld mix (field-line-dome weight); read each frame into the magnetfeld sense. */
+  readonly magnetfeld: MagnetfeldObject;
   /** The timeline sheet whose sequence is slaved to the clock (~300 s dramaturgy). */
   readonly timeline: ISheet;
   /** Drive the timeline playhead. Call each frame **only while the clock is running**. */
@@ -151,6 +166,7 @@ export async function initTheatre(): Promise<Theatre> {
   const arc = timeline.object("arc", ARC_PROPS);
   const flight = timeline.object("flight", FLIGHT_PROPS);
   const credits = timeline.object("credits", CREDITS_PROPS);
+  const magnetfeld = timeline.object("magnetfeld", MAGNETFELD_PROPS);
 
   if (import.meta.env.DEV && new URLSearchParams(window.location.search).get("studio") === "1") {
     // Dynamic import ⇒ @theatre/studio is excluded from the production bundle.
@@ -162,7 +178,7 @@ export async function initTheatre(): Promise<Theatre> {
     // open on the stale browser snapshot and prompt "Use browser's state / Use disk state" — pick
     // "Use disk state" to reload the committed file.
     studio.initialize({ usePersistentStorage: true });
-    studio.setSelection([timeline, arc, flight, credits]);
+    studio.setSelection([timeline, arc, flight, credits, magnetfeld]);
     // Tip: `studio.createContentOfSaveFile("Becoming Many")` returns the state object to write
     // into src/theatre/state.json — the production save file — without the Studio export button.
   }
@@ -173,6 +189,7 @@ export async function initTheatre(): Promise<Theatre> {
     arc,
     flight,
     credits,
+    magnetfeld,
     timeline,
     setPosition(seconds: number): void {
       timeline.sequence.position = seconds;

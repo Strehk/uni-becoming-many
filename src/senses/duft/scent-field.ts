@@ -255,12 +255,15 @@ export class ScentField {
             const zi = cellListBuf.element(cellIdx.mul(CAP).add(i)).toInt();
             const zp = zonePosBuf.element(zi);
             const zc = zoneColBuf.element(zi);
+            const typeIdx = zc.w.toInt();
             const r = zp.w.mul(u.spawnRadius);
             const infl = smoothstep(r, r.mul(0.15), pos.distance(zp.xyz)).mul(
-              float(u.typeIntensity.element(zc.w.toInt())),
+              float(u.typeIntensity.element(typeIdx)),
             );
             sumInfl.addAssign(infl);
-            sumCol.addAssign(zc.xyz.mul(infl));
+            // Colour is looked up LIVE per type (not the baked zone rgb), so the
+            // panel's per-type colour pickers retint the air without a rebuild.
+            sumCol.addAssign(u.typeColor.element(typeIdx).mul(infl));
           });
 
           // Scent mixes in.

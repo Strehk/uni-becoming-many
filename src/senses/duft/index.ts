@@ -17,7 +17,14 @@ import * as THREE from "three/webgpu";
 import type { SensePanelDescriptor } from "../../dev-console/sense-controls.ts";
 import type { Bus } from "../../signals/index.ts";
 import { signals } from "../../signals/index.ts";
-import { SCENT_TYPES, getTypeIntensity, setTypeIntensity, u } from "./params.ts";
+import {
+  SCENT_TYPES,
+  getTypeColor,
+  getTypeIntensity,
+  setTypeColor,
+  setTypeIntensity,
+  u,
+} from "./params.ts";
 import { ScentField, type ScentZone } from "./scent-field.ts";
 
 /** Field radius around the anchor (m). */
@@ -39,6 +46,19 @@ export type WaterSource = (x: number, z: number) => boolean;
  *  adapted in main.ts): given the new anchor, return anchor-LOCAL scent zones.
  *  An empty answer falls back to the procedural generator (flora not streamed yet). */
 export type ZoneSource = (ax: number, ay: number, az: number, radius: number) => ScentZone[];
+
+/** Ground-animal foot positions (world space) — deer, foxes … — that leave a
+ *  fading scent trail on the ground. Queried each frame. */
+export type AnimalSource = () => readonly { x: number; y: number; z: number }[];
+
+/** SCENT_TYPES index of the animal-trail scent. */
+const TIER_TYPE = SCENT_TYPES.findIndex((t) => t.key === "tier");
+/** Cap on live trail marks (they share the field's 192-zone budget with flora). */
+const MAX_TRAIL = 64;
+
+/** Read a uniform's numeric value with a fallback (uniforms type `.value` loosely). */
+const numVal = (uni: { value: unknown }, fallback: number): number =>
+  typeof uni.value === "number" ? uni.value : fallback;
 
 export interface DuftSense {
   readonly controls: SensePanelDescriptor;
@@ -295,7 +315,7 @@ function buildControls(field: ScentField): SensePanelDescriptor {
     },
     { type: "check", key: "additive", label: "Additives Leuchten", get: () => false },
   ];
-  // Per scent type intensity
+  // Per scent type: intensity + colour (each plant/animal scent its own tint).
   SCENT_TYPES.forEach((t, i) => {
     controls.push({
       type: "range",
@@ -306,7 +326,63 @@ function buildControls(field: ScentField): SensePanelDescriptor {
       step: 0.05,
       get: () => getTypeIntensity(i),
     });
+    controls.push({
+      type: "color",
+      key: `typeColor.${i}`,
+      label: `Farbe · ${t.name}`,
+      get: () => getTypeColor(i),
+    });
   });
+  // Animal scent trail (fading marks that collect on the ground).
+  controls.push(
+    {
+      type: "range",
+      key: "animalTrail",
+      label: "Tierfährte · Stärke",
+      min: 0,
+      max: 2,
+      step: 0.05,
+      get: num(u.animalTrail),
+    },
+    {
+      type: "range",
+      key: "animalTrailLife",
+      label: "Tierfährte · Dauer (s)",
+      min: 1,
+      max: 30,
+      step: 0.5,
+      digits: 1,
+      get: num(u.animalTrailLife),
+    },
+    {
+      type: "range",
+      key: "animalTrailRadius",
+      label: "Tierfährte · Radius (m)",
+      min: 0.5,
+      max: 6,
+      step: 0.1,
+      digits: 1,
+      get: num(u.animalTrailRadius),
+    },
+    {
+      type: "range",
+      key: "animalTrailHeight",
+      label: "Tierfährte · Bodenhöhe (m)",
+      min: 0,
+      max: 2,
+      step: 0.05,
+      get: num(u.animalTrailHeight),
+    },
+    {
+      type: "range",
+      key: "animalTrailInterval",
+      label: "Tierfährte · Abstand (s)",
+      min: 0.1,
+      max: 2,
+      step: 0.05,
+      get: num(u.animalTrailInterval),
+    },
+  );
   // Performance
   controls.push(
     {
@@ -357,6 +433,7 @@ export function createDuftSense(
   ground: GroundSource,
   zoneSource?: ZoneSource,
   waterAt?: WaterSource,
+  animalSource?: AnimalSource,
 ): DuftSense {
   const field = new ScentField({ fieldRadius: FIELD_RADIUS, initialCount: 400_000 });
   scene.add(field.object);
@@ -366,10 +443,24 @@ export function createDuftSense(
   let target = signals.sense.duft.peek();
   let frame = 0;
 
+  // ── Animal scent trail: fading marks dropped along ground-fauna paths. Stored
+  // in WORLD coordinates (the anchor moves), converted to anchor-local per frame.
+  interface TrailMark {
+    x: number;
+    y: number;
+    z: number;
+    age: number;
+  }
+  const trail: TrailMark[] = [];
+  let sinceDrop = 0;
+
   // ── Duftzonen-Debugansicht: one wireframe sphere per zone, type-coloured. ──
   let showZones = false;
   let zoneViz: THREE.InstancedMesh | null = null;
   let lastZones: readonly ScentZone[] = [];
+  // Flora zones for the current anchor (local coords), cached so the moving trail
+  // can be recombined with them each frame without re-querying the flora.
+  let floraZones: readonly ScentZone[] = [];
 
   const disposeZoneViz = (): void => {
     if (!zoneViz) return;
@@ -420,10 +511,63 @@ export function createDuftSense(
     // Real flora first: zones from the actually-placed plants around the anchor.
     // Falls back to the procedural guesser while the flora is still streaming in.
     const grown = zoneSource?.(px, gy, pz, FIELD_RADIUS - 6) ?? [];
-    lastZones = grown.length > 0 ? grown : generateZones(px, gy, pz, ground, waterAt);
+    floraZones = grown.length > 0 ? grown : generateZones(px, gy, pz, ground, waterAt);
+    lastZones = floraZones;
     field.setZones(lastZones);
     field.requestReseed();
     rebuildZoneViz();
+    return true;
+  };
+
+  /** Advance and drop the animal scent trail, then push flora + trail into the
+   *  field. Returns true if it rewrote the zones (so callers skip a redundant set). */
+  const updateTrail = (dt: number): boolean => {
+    if (!anchor) return false;
+    const strength = numVal(u.animalTrail, 1);
+    const life = Math.max(0.1, numVal(u.animalTrailLife, 9));
+
+    // Age out old marks.
+    for (let i = trail.length - 1; i >= 0; i--) {
+      const mark = trail[i];
+      if (!mark) continue;
+      mark.age += dt;
+      if (mark.age >= life) trail.splice(i, 1);
+    }
+
+    // Drop a fresh mark at each animal's foot on the interval (trail off at 0).
+    if (strength > 0 && animalSource && TIER_TYPE >= 0) {
+      sinceDrop += dt;
+      const interval = Math.max(0.05, numVal(u.animalTrailInterval, 0.4));
+      if (sinceDrop >= interval) {
+        sinceDrop = 0;
+        const height = numVal(u.animalTrailHeight, 0.35);
+        for (const a of animalSource()) {
+          const gy = ground(a.x, a.z);
+          if (gy === null) continue;
+          trail.push({ x: a.x, y: gy + height, z: a.z, age: 0 });
+          if (trail.length > MAX_TRAIL) trail.shift();
+        }
+      }
+    }
+
+    if (trail.length === 0) return false;
+
+    // Combine cached flora (local) with the trail (world → local, radius fades
+    // with age so the mark shrinks away). Flora is capped so the trail always fits.
+    const radius = Math.max(0.2, numVal(u.animalTrailRadius, 2.2)) * strength;
+    const zones: ScentZone[] = floraZones.slice(0, 192 - MAX_TRAIL) as ScentZone[];
+    for (const mark of trail) {
+      const fade = 1 - mark.age / life;
+      zones.push({
+        x: mark.x - anchor.x,
+        y: mark.y - anchor.y,
+        z: mark.z - anchor.z,
+        radius: radius * (0.35 + 0.65 * fade),
+        type: TIER_TYPE,
+      });
+    }
+    lastZones = zones;
+    field.setZones(zones);
     return true;
   };
 
@@ -463,6 +607,10 @@ export function createDuftSense(
     }
     if (key.startsWith("typeIntensity.") && typeof value === "number") {
       setTypeIntensity(Number.parseInt(key.slice("typeIntensity.".length), 10), value);
+      return;
+    }
+    if (key.startsWith("typeColor.") && typeof value === "string") {
+      setTypeColor(Number.parseInt(key.slice("typeColor.".length), 10), value);
       return;
     }
     const uniforms = new Map<string, { value: unknown }>(Object.entries(u));
@@ -517,6 +665,10 @@ export function createDuftSense(
           reanchor(pose.x, pose.z);
         }
       }
+
+      // Animal scent trail: drop/age marks and recombine with the flora zones
+      // (moving marks need a per-frame zone rewrite; flora alone only on re-anchor).
+      updateTrail(dt);
 
       // Feed the spine into the GPU field, then run the simulation passes.
       u.delta.value = dt;

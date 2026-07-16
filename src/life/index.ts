@@ -182,9 +182,19 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
         cluster: { strength: config.bushCluster, size: config.bushClusterSize, seed: 0x7a11 },
       };
     }
-    if (category === "flower" && config.flowerCluster > 0) {
+    if (category === "flower") {
       return {
-        cluster: { strength: config.flowerCluster, size: config.flowerClusterSize, seed: 0x3b29 },
+        scaleMul: config.flowerScale,
+        scaleSpread: config.flowerScaleVariance,
+        ...(config.flowerCluster > 0
+          ? {
+              cluster: {
+                strength: config.flowerCluster,
+                size: config.flowerClusterSize,
+                seed: 0x3b29,
+              },
+            }
+          : {}),
       };
     }
     if (category === "mushroom" && config.mushroomCluster > 0) {

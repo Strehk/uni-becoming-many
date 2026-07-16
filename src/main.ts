@@ -183,6 +183,9 @@ const duft = createDuftSense(
         type: scentTypeIndex.get(s.type) ?? 0,
       })),
   (x, z) => life.isWaterAt(x, z),
+  // Ground fauna (deer + foxes) leave a scent trail — `creatures` is created just
+  // below; this closure only runs per frame, long after it exists.
+  () => terrainDependents.creatures?.groundAnimalPositions() ?? [],
 );
 window.addEventListener("pagehide", () => duft.dispose());
 
@@ -380,6 +383,7 @@ if (import.meta.env.DEV) {
     signals,
     theatre,
     scene: renderer.scene,
+    renderer: renderer.instance, // WebGPURenderer — .info + resolveTimestampsAsync for profiling
   };
 }
 
@@ -626,6 +630,12 @@ renderer.start((dtSeconds) => {
   // Authored credits/thank-you screen: desktop billboard vs VR world-locked panel, faded by the
   // Theatre `credits.opacity` envelope. Positioned from the just-synced camera pose.
   credits.update(theatre.credits.value.opacity);
+
+  // Authored field-line-dome mix: keyframe the curved dipole field lines in/out on the timeline.
+  // Only while the timeline owns the senses, so manual panel edits win during dev tuning.
+  if (signals.senseAuthority.peek() === "theatre") {
+    magnetfeld.setModeWeight("lines", theatre.magnetfeld.value.linesMix);
+  }
 
   senses.update(dtSeconds); // writes senseProgress; eases the view uniforms
   magnetfeld.update(dtSeconds); // sky dome fade + follow player + spine time

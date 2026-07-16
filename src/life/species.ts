@@ -86,7 +86,19 @@ export type SpeciesId =
 /** Scent vocabulary key — matches `SCENT_TYPES[].key` in src/senses/duft/params.ts.
  *  A string key (not an index) so life never imports the senses module; the duft
  *  coupling resolves keys to indices at wiring time. */
-export type ScentKey = "blume" | "lavendel" | "baum" | "kiefer" | "kraut" | "pilz";
+export type ScentKey =
+  | "blume"
+  | "lavendel"
+  | "baum"
+  | "kiefer"
+  | "kraut"
+  | "pilz"
+  | "rose"
+  | "sonnenblume"
+  | "mohn"
+  | "glocke"
+  | "klee"
+  | "tier";
 
 /** What this species is to the senses. Every field optional — absent means the
  *  flora-wide default (the values material.ts always used). */
@@ -538,7 +550,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
     tintJitter: 0.25,
     sway: 0.06,
     placement: clearingLover(4),
-    senses: { uvSignal: 0.7, scent: { type: "blume", radius: 1.8, heightOffset: 0.3 } },
+    senses: { uvSignal: 0.7, scent: { type: "rose", radius: 1.8, heightOffset: 0.3 } },
   },
   "flower-4": {
     id: "flower-4",
@@ -550,7 +562,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
     tintJitter: 0.25,
     sway: 0.06,
     placement: clearingLover(4),
-    senses: { uvSignal: 0.7, scent: { type: "blume", radius: 1.8, heightOffset: 0.28 } },
+    senses: { uvSignal: 0.7, scent: { type: "sonnenblume", radius: 1.8, heightOffset: 0.28 } },
   },
   "flower-5": {
     id: "flower-5",
@@ -562,7 +574,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
     tintJitter: 0.25,
     sway: 0.06,
     placement: clearingLover(4),
-    senses: { uvSignal: 0.7, scent: { type: "blume", radius: 1.7, heightOffset: 0.26 } },
+    senses: { uvSignal: 0.7, scent: { type: "mohn", radius: 1.7, heightOffset: 0.26 } },
   },
   "flower-6": {
     id: "flower-6",
@@ -574,7 +586,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
     tintJitter: 0.25,
     sway: 0.06,
     placement: clearingLover(4),
-    senses: { uvSignal: 0.7, scent: { type: "blume", radius: 1.8, heightOffset: 0.32 } },
+    senses: { uvSignal: 0.7, scent: { type: "glocke", radius: 1.8, heightOffset: 0.32 } },
   },
   "flower-7": {
     id: "flower-7",
@@ -586,7 +598,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
     tintJitter: 0.25,
     sway: 0.06,
     placement: clearingLover(4),
-    senses: { uvSignal: 0.7, scent: { type: "blume", radius: 1.8, heightOffset: 0.3 } },
+    senses: { uvSignal: 0.7, scent: { type: "klee", radius: 1.8, heightOffset: 0.3 } },
   },
   reeds: {
     id: "reeds",

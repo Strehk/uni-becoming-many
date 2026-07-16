@@ -20,17 +20,16 @@
 //   - contradictions resolve to the tile forced by collapsed neighbours;
 //   - a per-block post-pass bridges disconnected patches.
 //
-// The collapsed grid renders as root strands hugging the ground skin: bundles fan
-// out between nodes and rejoin at them, meander sideways, ripple with a small
-// relief and thin out (taper) with graph distance from the nearest plant. The
-// strands use the HARDWARE depth test, so trees, rocks and hills standing in
-// front correctly occlude the web (three's WebGPU line material supports neither
-// a custom frag-depth nor a mid-pass scene-depth read, so a selective "x-ray
-// through soil but not through objects" isn't available — the strands therefore
-// sit just above the solid ground rather than buried under it). A `viewDistance`
-// uniform fades the web out softly around the player. Hotspot pulses travel the
-// strands in the shader (phase attribute + time uniform); a per-vertex
-// `strength` attribute carries the taper into the material.
+// The collapsed grid renders as root strands running BELOW the terrain surface,
+// drawn without depth test (x-ray view into the earth): bundles fan out between
+// nodes and rejoin at them, meander sideways, undulate through the soil at the
+// tunable `depth` and thin out (taper) with graph distance from the nearest
+// plant. (three's WebGPU line material supports neither a custom frag-depth nor a
+// mid-pass scene-depth read, so a selective "through soil but not through trees"
+// isn't available — the web reads through everything.) A `viewDistance` uniform
+// fades the web out softly around the player. Hotspot pulses travel the strands
+// in the shader (phase attribute + time uniform); a per-vertex `strength`
+// attribute carries the taper into the material.
 //
 // IMPORTANT — see AGENT.md "WebGPU rendering": node fns from `three/tsl`, classes
 // from `three/webgpu`. No GLSL.
@@ -64,9 +63,8 @@ export interface RootsOptions {
   strandSpread: number;
   /** Sideways meander amplitude of a root run (m). */
   wiggle: number;
-  /** Vertical relief of the strands above the ground skin (m) — a small organic
-   *  rise/fall. Kept positive so the depth test shows the web over its own
-   *  terrain while trees/rocks/hills in front still occlude it. */
+  /** How deep below the terrain surface the web runs (m) — the strands render
+   *  THROUGH the ground (no depth test), an x-ray view into the earth. */
   depth: number;
   /** 0..1 — how quickly roots thin out per graph step away from a plant. */
   taper: number;
@@ -201,15 +199,12 @@ function createRootsMaterial(
   // too — additive would vanish on white); only the hotspot glow adds light.
   material.blending = constantBase ? THREE.NormalBlending : THREE.AdditiveBlending;
   material.depthWrite = false;
-  // Hardware depth test ON: the strands run in the topsoil skin just under the
-  // surface, so trees, rocks and hills standing in front of them correctly
-  // occlude the web (its own thin covering of earth/grass does not — the strands
-  // sit on top of the solid ground mesh, only dipping into it at the nodes). This
-  // is the engine-honest way to get "hidden behind objects, visible on the
-  // ground": three's WebGPU line material honours neither a custom frag-depth
-  // (depthNode) nor a mid-pass scene-depth read, so a true selective x-ray isn't
-  // available here.
-  material.depthTest = true;
+  // X-ray into the earth: the strands run BELOW the surface (see `depth`), so the
+  // hardware depth test is OFF — the player looks THROUGH the ground and grass
+  // onto the root system. (three's WebGPU line material honours neither a custom
+  // frag-depth nor a mid-pass scene-depth read, so a selective "through soil but
+  // not through trees" isn't available — the web reads through everything.)
+  material.depthTest = false;
   material.toneMapped = false;
 
   const color = uniform(new THREE.Color(colorHex));
@@ -846,6 +841,8 @@ export class RootsNetwork {
     const px = -dz / len;
     const pz = dx / len;
     const segs = Math.max(3, Math.round(o.segments));
+    // Per-run depth jitter so the web layers vertically through the earth.
+    const runDepth = o.depth * (0.7 + 0.6 * (0.5 + 0.5 * Math.sin(phaseOffset * 12.9)));
 
     for (let s = 0; s < strandCount; s++) {
       const lane =
@@ -866,13 +863,13 @@ export class RootsNetwork {
         const x = x0 + dx * t + px * (meander + fan);
         const z = z0 + dz * t + pz * (meander + fan);
         lastGround = this.heightAt(x, z) ?? lastGround;
-        // Hover a hand's breadth over the ground so the depth test shows the
-        // strand over its own terrain, while trees/rocks/hills in front still
-        // occlude it. `depth` scales a small organic rise/fall on top; tendrils
-        // crest a little higher at the plant foot for a rooted-mound read.
-        const relief = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 + phaseOffset * 5.0 + s);
-        const mound = diveFromSurface ? (1 - t) * (1 - t) * 0.4 : 0;
-        const y = lastGround + 0.3 + relief * Math.min(o.depth, 2) * 0.3 + mound;
+        // Below the surface by `depth` metres (x-ray): edge runs undulate around
+        // web depth; tendrils start at the surface (the plant's foot) and dive
+        // down along the run.
+        const under = diveFromSurface
+          ? runDepth * t ** 0.7
+          : runDepth * (0.85 + 0.15 * Math.sin(t * Math.PI * 2 + phaseOffset * 5.0));
+        const y = lastGround - under + Math.sin((t + phaseOffset) * 17.0 + s) * 0.08;
         if (seg > 0) {
           positions.push(prevX, prevY, prevZ, x, y, z);
           phases.push((seg - 1) / segs + phaseOffset, t + phaseOffset);

@@ -232,6 +232,9 @@ export interface Creatures {
   /** Mushroom positions (world space). Mutated on re-anchor; listen for the
    *  `creatures:mushrooms-changed` bus event to rebuild dependents. */
   readonly mushrooms: readonly THREE.Vector3[];
+  /** Foot positions (world space) of the roaming ground fauna (deer + foxes) —
+   *  the duft sense drops a scent trail along these. */
+  groundAnimalPositions(): { x: number; y: number; z: number }[];
   /** Apply the sense visibility gates while simulations continue in the background. */
   setVisibility(birdsVisible: boolean, groundFaunaVisible: boolean): void;
   /** Terrain streaming hooks: ground fauna is scattered and released with chunks. */
@@ -1114,6 +1117,28 @@ export async function createCreatures(
           if (foxRouteChanged) fox.waypointAge = DEER_WAYPOINT_TIMEOUT;
         }
       }
+    },
+    groundAnimalPositions(): { x: number; y: number; z: number }[] {
+      const out: { x: number; y: number; z: number }[] = [];
+      for (const deer of deers) {
+        if (deer.placed) {
+          out.push({
+            x: deer.object.position.x,
+            y: deer.object.position.y,
+            z: deer.object.position.z,
+          });
+        }
+      }
+      for (const fox of foxes) {
+        if (fox.placed) {
+          out.push({
+            x: fox.object.position.x,
+            y: fox.object.position.y,
+            z: fox.object.position.z,
+          });
+        }
+      }
+      return out;
     },
     debugSnapshot() {
       return {

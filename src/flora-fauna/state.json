@@ -32,7 +32,9 @@
       "flowerCluster": 0,
       "flowerClusterSize": 18,
       "mushroomCluster": 0,
-      "mushroomClusterSize": 14
+      "mushroomClusterSize": 14,
+      "flowerScale": 1,
+      "flowerScaleVariance": 1
     },
     "fauna": {
       "flockCount": 4,

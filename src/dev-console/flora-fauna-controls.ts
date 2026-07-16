@@ -130,6 +130,28 @@ const GROUPS: Group[] = [
     ],
   },
   {
+    title: "Blumen · Größe",
+    open: false,
+    specs: [
+      {
+        kind: "slider",
+        key: "flora.flowerScale",
+        label: "Blumengröße ×",
+        min: 0.2,
+        max: 3,
+        step: 0.05,
+      },
+      {
+        kind: "slider",
+        key: "flora.flowerScaleVariance",
+        label: "Größen-Streuung ×",
+        min: 0,
+        max: 3,
+        step: 0.05,
+      },
+    ],
+  },
+  {
     title: "Wiesen & Lichtungen",
     open: false,
     specs: [

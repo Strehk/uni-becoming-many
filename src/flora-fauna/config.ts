@@ -104,6 +104,13 @@ export interface FloraConfig {
    *  read younger (many small trees between the tall ones). 0 = uniform. */
   readonly youngTrees: number;
 
+  // ── Blumen ──
+  /** Multiplier on every flower's MEAN size, 1 = authored. */
+  readonly flowerScale: number;
+  /** Spread of the flower size roll around that mean, 1 = authored jitter. 0 =
+   *  every flower the same size; 2-3 = a real mix from tiny to tall. */
+  readonly flowerScaleVariance: number;
+
   // ── Wiesen & Lichtungen ──
   /** Extra flower density on MEADOWS (multiplies the flower category's
    *  Grassland affinity), 1 = neutral. */
@@ -238,6 +245,8 @@ export const DEFAULT_CONFIG: FloraFaunaConfig = {
     treeScale: 1,
     treeScaleVariance: 1,
     youngTrees: 0,
+    flowerScale: 1,
+    flowerScaleVariance: 1,
     flowerMeadow: 1,
     bushMeadow: 1,
     flowerClearing: 1,

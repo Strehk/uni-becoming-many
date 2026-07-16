@@ -289,9 +289,9 @@ function buildControls(swarm: SwarmNetwork, roots: RootsNetwork): SensePanelDesc
       {
         type: "range",
         key: "wurzel.depth",
-        label: "Wurzeln · Relief",
+        label: "Wurzeln · Tiefe",
         min: 0,
-        max: 3,
+        max: 6,
         step: 0.1,
         digits: 1,
         get: () => ro().depth,
