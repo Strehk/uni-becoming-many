@@ -97,15 +97,98 @@ const MAX_ALTITUDE = 60;
  *  single clip (flap cycle) plays per bird with jittered phase/tempo. */
 const BIRD_MODEL_URL = "/creatures/bird_erasmus.glb";
 const DEER_MODEL_URL = "/creatures/deer_walk.glb";
-const FOX_MODEL_URL = "/creatures/fox.glb";
+/** Rigged, walking fox — roams the terrain on the same waypoint logic as the deer. */
+const FOX_MODEL_URL = "/creatures/fox-walk.glb";
+const FOX_WALK_CLIP = "Armature|Unreal Take|baselayer";
 /** Target wingspan in metres (the file spans ~17.4 units). */
 const BIRD_WINGSPAN = 1.05;
 /** Rigged bat added to the same flock/sense substrate as the birds. */
 const BAT_MODEL_URL = "/creatures/bat_BS_rig.glb";
 const BAT_WINGSPAN = 0.7;
 const BAT_FLAP_CLIP = "Armature.001Action";
+/** Meise (tit): flies at treetop height and below, everywhere. */
+const MEISE_MODEL_URL = "/creatures/meise.glb";
+const MEISE_WINGSPAN = 0.24;
+const MEISE_FLAP_CLIP = "ArmatureAction";
+/** Butterfly: flits very low, near flowers and bushes. */
+const BUTTERFLY_MODEL_URL = "/creatures/butterfly.glb";
+const BUTTERFLY_WINGSPAN = 0.09;
+const BUTTERFLY_FLAP_CLIP = "Armature.001Action";
+
+/** What kind of flying animal a flock is made of. */
+type FlyingKind = "bird" | "bat" | "meise" | "butterfly";
+
+/** Per-kind flight envelope (metres above ground) + speed band (m/s) + look.
+ *  `lift` is the altitude band waypoints are rolled into over the local ground;
+ *  `flit` adds erratic vertical wander (butterflies flutter, birds glide);
+ *  `attractFlora` biases waypoints toward nearby flowers/bushes. */
+interface KindProfile {
+  readonly minAlt: number;
+  readonly maxAlt: number;
+  readonly minSpeed: number;
+  readonly maxSpeed: number;
+  readonly lift: readonly [number, number];
+  readonly flit: number;
+  readonly attractFlora: boolean;
+  readonly roamScaleKey: "roamScale" | "batRoamScale" | "meiseRoamScale" | "butterflyRoamScale";
+  readonly flightSpeedKey:
+    | "flightSpeed"
+    | "batFlightSpeed"
+    | "meiseFlightSpeed"
+    | "butterflyFlightSpeed";
+}
+
+const KIND_PROFILES: Record<FlyingKind, KindProfile> = {
+  bird: {
+    minAlt: MIN_ALTITUDE,
+    maxAlt: MAX_ALTITUDE,
+    minSpeed: MIN_SPEED,
+    maxSpeed: MAX_SPEED,
+    lift: [18, 43],
+    flit: 0,
+    attractFlora: false,
+    roamScaleKey: "roamScale",
+    flightSpeedKey: "flightSpeed",
+  },
+  bat: {
+    minAlt: MIN_ALTITUDE,
+    maxAlt: MAX_ALTITUDE,
+    minSpeed: MIN_SPEED,
+    maxSpeed: MAX_SPEED,
+    lift: [18, 43],
+    flit: 0,
+    attractFlora: false,
+    roamScaleKey: "batRoamScale",
+    flightSpeedKey: "batFlightSpeed",
+  },
+  // Meise: treetop height and lower — a low, agile songbird.
+  meise: {
+    minAlt: 1.5,
+    maxAlt: 14,
+    minSpeed: 3,
+    maxSpeed: 8,
+    lift: [2, 11],
+    flit: 0.6,
+    attractFlora: false,
+    roamScaleKey: "meiseRoamScale",
+    flightSpeedKey: "meiseFlightSpeed",
+  },
+  // Butterfly: very low, near flowers/bushes, fluttering.
+  butterfly: {
+    minAlt: 0.4,
+    maxAlt: 2.6,
+    minSpeed: 0.8,
+    maxSpeed: 2.6,
+    lift: [0.5, 2.0],
+    flit: 1.8,
+    attractFlora: true,
+    roamScaleKey: "butterflyRoamScale",
+    flightSpeedKey: "butterflyFlightSpeed",
+  },
+};
 const DEER_TARGET_HEIGHT = 1.75;
-const FOX_TARGET_HEIGHT = 0.65;
+/** The walking fox stands ~0.55 m at the shoulder — smaller and nimbler than the deer. */
+const FOX_TARGET_HEIGHT = 0.55;
 const DEER_WAYPOINT_REACHED = 3;
 const DEER_WAYPOINT_TIMEOUT = 34;
 const DEER_LOOK_AHEAD = 7;
@@ -113,6 +196,8 @@ const DEER_LOOK_AHEAD = 7;
 const DEER_MAX_TURN_RATE = 0.22;
 /** Movement speed at which the authored walk clip plays at its native tempo. */
 const DEER_WALK_REFERENCE_SPEED = 1.4;
+/** The fox's own walk clip reference speed (it trots quicker than the deer). */
+const FOX_WALK_REFERENCE_SPEED = 1.8;
 const MAX_GROUND_SLOPE = 0.65;
 /** Re-scatter the mushrooms when the player is farther than this from their anchor. */
 const MUSHROOM_REANCHOR = 110;
@@ -191,13 +276,13 @@ interface Bird extends BirdActor {
   readonly mixer: THREE.AnimationMixer;
   /** Which flock this bird belongs to — neighbours are flock-internal. */
   readonly flock: number;
-  readonly kind: "bird" | "bat";
+  readonly kind: FlyingKind;
 }
 
 /** One flock's shared state: the wandering goal its members seek. */
 interface Flock {
   readonly waypoint: THREE.Vector3;
-  readonly kind: "bird" | "bat";
+  readonly kind: FlyingKind;
   readonly ringIndex: number;
   readonly ringCount: number;
   /** Seconds since the waypoint was rolled (drives the timeout re-roll). */
@@ -214,6 +299,9 @@ export interface CreatureSenseOptions {
   config?: FaunaConfig;
   /** Live tree-trunk query from the flora scatter. */
   groundObstacles?: GroundObstacleSource;
+  /** Nearby flower/bush world positions — butterflies flit toward these. Returns
+   *  the (x, z) of blooming flora within `radius`; empty far from any meadow. */
+  floraAttractors?: (x: number, z: number, radius: number) => readonly { x: number; z: number }[];
 }
 
 export async function createCreatures(
@@ -235,15 +323,22 @@ export async function createCreatures(
 
   // ── fauna assets ──
   const loader = new GLTFLoader();
-  const [birdGltf, batGltf, deerGltf, foxGltf] = await Promise.all([
+  const [birdGltf, batGltf, meiseGltf, butterflyGltf, deerGltf, foxGltf] = await Promise.all([
     loader.loadAsync(BIRD_MODEL_URL),
     loader.loadAsync(BAT_MODEL_URL),
+    loader.loadAsync(MEISE_MODEL_URL),
+    loader.loadAsync(BUTTERFLY_MODEL_URL),
     loader.loadAsync(DEER_MODEL_URL),
     loader.loadAsync(FOX_MODEL_URL),
   ]);
   const birdFlapClip = birdGltf.animations[0];
   const batFlapClip =
     THREE.AnimationClip.findByName(batGltf.animations, BAT_FLAP_CLIP) ?? undefined;
+  const meiseFlapClip =
+    THREE.AnimationClip.findByName(meiseGltf.animations, MEISE_FLAP_CLIP) ??
+    meiseGltf.animations[0];
+  const butterflyFlapClip =
+    THREE.AnimationClip.findByName(butterflyGltf.animations, BUTTERFLY_FLAP_CLIP) ?? undefined;
 
   interface FlyingAsset {
     readonly scene: THREE.Group;
@@ -278,6 +373,14 @@ export async function createCreatures(
 
   const birdAsset = prepareAsset(birdGltf.scene, birdFlapClip, BIRD_WINGSPAN);
   const batAsset = prepareAsset(batGltf.scene, batFlapClip, BAT_WINGSPAN);
+  const meiseAsset = prepareAsset(meiseGltf.scene, meiseFlapClip, MEISE_WINGSPAN);
+  const butterflyAsset = prepareAsset(butterflyGltf.scene, butterflyFlapClip, BUTTERFLY_WINGSPAN);
+  const assetForKind: Record<FlyingKind, FlyingAsset> = {
+    bird: birdAsset,
+    bat: batAsset,
+    meise: meiseAsset,
+    butterfly: butterflyAsset,
+  };
 
   // All four bird parts sit at the same model origin, but their individual geometry
   // spheres have different radii. modelPosition is therefore already shared; give
@@ -347,12 +450,12 @@ export async function createCreatures(
   /** One skinned flying animal with shared sense materials and jittered flap.
    * Birds face file −Z; bats face file +X with +Y as their back/up axis. Both
    * are converted to the boid root's +Z lookAt-forward convention. */
-  const buildAnimal = (
-    kind: "bird" | "bat",
-  ): { root: THREE.Group; mixer: THREE.AnimationMixer } => {
-    const asset = kind === "bat" ? batAsset : birdAsset;
+  const buildAnimal = (kind: FlyingKind): { root: THREE.Group; mixer: THREE.AnimationMixer } => {
+    const asset = assetForKind[kind];
     const model = cloneSkeleton(asset.scene);
     const thermalVariation = Math.random() * 2 - 1;
+    // Bats face file +X (yaw −90°); birds/meise face −Z (yaw 180°); the butterfly
+    // plane reads either way, keep it facing −Z like the birds.
     model.rotation.y = kind === "bat" ? -Math.PI / 2 : Math.PI;
     model.scale.setScalar(asset.scale);
     model.traverse((child) => {
@@ -376,9 +479,9 @@ export async function createCreatures(
   };
 
   const deerSource = deerGltf.scene.getObjectByName("Deer_001_rig");
-  const foxSource = foxGltf.scene.getObjectByName("Plane");
+  const foxSource = foxGltf.scene.getObjectByName("Armature");
   if (!deerSource) throw new Error("[creatures] Deer_001_rig missing from deer_walk.glb");
-  if (!foxSource) throw new Error("[creatures] Plane missing from fox.glb");
+  if (!foxSource) throw new Error("[creatures] Armature missing from fox-walk.glb");
 
   interface ModelMetrics {
     readonly baseScale: number;
@@ -397,6 +500,9 @@ export async function createCreatures(
   const foxMetrics = measureModel(foxSource, FOX_TARGET_HEIGHT);
   const deerWalkClip = deerGltf.animations.find((clip) => clip.name === "Deer_001_walk");
   if (!deerWalkClip) throw new Error("[creatures] Deer_001_walk animation missing");
+  const foxWalkClip =
+    THREE.AnimationClip.findByName(foxGltf.animations, FOX_WALK_CLIP) ?? foxGltf.animations[0];
+  if (!foxWalkClip) throw new Error("[creatures] walk animation missing from fox-walk.glb");
 
   const applyAnimalMaterials = (model: THREE.Object3D, fallbackColor?: THREE.Color): void => {
     model.traverse((child) => {
@@ -423,12 +529,29 @@ export async function createCreatures(
     routeCheckAge: number;
   }
 
-  interface Fox {
-    readonly homeKey: string;
-    readonly object: THREE.Group;
-    readonly model: THREE.Object3D;
-    placed: boolean;
+  // The fox is a walker with the same roaming state as the deer (it walks the
+  // very same waypoint logic, just faster and with a smaller footprint).
+  type Fox = Deer;
+
+  /** Per-species walk tuning resolved from the live config each step. */
+  interface WalkerTuning {
+    readonly speed: number;
+    readonly roamRadius: number;
+    readonly clearance: number;
+    readonly refSpeed: number;
   }
+  const deerTuning = (): WalkerTuning => ({
+    speed: Math.max(0, fauna.deerSpeed),
+    roamRadius: Math.max(18, fauna.deerRoamRadius),
+    clearance: fauna.deerTreeClearance,
+    refSpeed: DEER_WALK_REFERENCE_SPEED,
+  });
+  const foxTuning = (): WalkerTuning => ({
+    speed: Math.max(0, fauna.foxSpeed),
+    roamRadius: Math.max(14, fauna.foxRoamRadius),
+    clearance: fauna.foxTreeClearance,
+    refSpeed: FOX_WALK_REFERENCE_SPEED,
+  });
 
   const buildDeer = (homeKey: string, home: THREE.Vector3): Deer => {
     const model = cloneSkeleton(deerSource);
@@ -456,12 +579,29 @@ export async function createCreatures(
     };
   };
 
-  const buildFox = (homeKey: string): Fox => {
-    const model = foxSource.clone(true);
+  const buildFox = (homeKey: string, home: THREE.Vector3): Fox => {
+    const model = cloneSkeleton(foxSource);
     applyAnimalMaterials(model, new THREE.Color(0xb85f35));
     const object = new THREE.Group();
     object.add(model);
-    return { homeKey, object, model, placed: false };
+    const mixer = new THREE.AnimationMixer(model);
+    const action = mixer.clipAction(foxWalkClip);
+    action.play();
+    action.time = Math.random() * foxWalkClip.duration;
+    return {
+      homeKey,
+      home: home.clone(),
+      object,
+      model,
+      mixer,
+      action,
+      waypoint: new THREE.Vector3(),
+      heading: new THREE.Vector3(0, 0, 1),
+      placed: false,
+      routeReady: false,
+      waypointAge: 0,
+      routeCheckAge: 0,
+    };
   };
 
   const pose = signals.playerPose.peek();
@@ -476,14 +616,38 @@ export async function createCreatures(
   // A flock waypoint: somewhere in the flock's roam ring around the player, at
   // soaring altitude over the local terrain (player height as the fallback
   // while the chunk under it is still streaming).
-  const rollWaypoint = (target: THREE.Vector3, ring: { min: number; max: number }): void => {
-    const a = Math.random() * Math.PI * 2;
-    const r = ring.min + Math.random() * (ring.max - ring.min);
-    const x = pose.x + Math.cos(a) * r;
-    const z = pose.z + Math.sin(a) * r;
+  const rollWaypoint = (
+    target: THREE.Vector3,
+    ring: { min: number; max: number },
+    kind: FlyingKind,
+  ): void => {
+    const profile = KIND_PROFILES[kind];
+    let x: number;
+    let z: number;
+    // Butterflies pick a real flower/bush in the ring when one is nearby, so they
+    // congregate over meadows instead of wandering empty ground.
+    const attractor = profile.attractFlora ? pickFloraAttractor(ring.max) : null;
+    if (attractor) {
+      x = attractor.x;
+      z = attractor.z;
+    } else {
+      const a = Math.random() * Math.PI * 2;
+      const r = ring.min + Math.random() * (ring.max - ring.min);
+      x = pose.x + Math.cos(a) * r;
+      z = pose.z + Math.sin(a) * r;
+    }
     const g = ground(x, z);
-    const y = (g ?? pose.y) + MIN_ALTITUDE + 10 + Math.random() * 25;
+    const [lo, hi] = profile.lift;
+    const y = (g ?? pose.y) + lo + Math.random() * (hi - lo);
     target.set(x, y, z);
+  };
+
+  /** A random flowering-flora point within `radius` of the player, or null when
+   *  none are streamed in nearby (butterflies then wander a low patch). */
+  const pickFloraAttractor = (radius: number): { x: number; z: number } | null => {
+    const spots = senseOpts.floraAttractors?.(pose.x, pose.z, radius) ?? [];
+    if (spots.length === 0) return null;
+    return spots[Math.floor(Math.random() * spots.length)] ?? null;
   };
 
   const flocks: Flock[] = [];
@@ -507,7 +671,7 @@ export async function createCreatures(
     flocks.length = 0;
 
     const addFlocks = (
-      kind: "bird" | "bat",
+      kind: FlyingKind,
       rawCount: number,
       rawMinPerFlock: number,
       rawMaxPerFlock: number,
@@ -525,20 +689,27 @@ export async function createCreatures(
           ringIndex: f,
           ringCount: count,
         };
-        rollWaypoint(flock.waypoint, ring);
+        rollWaypoint(flock.waypoint, ring, kind);
         flocks.push(flock);
 
-        // Each flock spawns as a loose, species-pure cloud in its own ring.
+        // Each flock spawns as a loose, species-pure cloud in its own ring, at
+        // the kind's own altitude band over the local ground (low for meise /
+        // butterflies, soaring for birds / bats).
+        const profile = KIND_PROFILES[kind];
         const a = Math.random() * Math.PI * 2;
         const r = ring.min + Math.random() * (ring.max - ring.min) * 0.7;
         const cx = pose.x + Math.cos(a) * r;
         const cz = pose.z + Math.sin(a) * r;
+        const spread = kind === "butterfly" ? 8 : kind === "meise" ? 16 : 24;
         for (let i = 0; i < perFlock; i++) {
           const { root, mixer } = buildAnimal(kind);
+          const sx = cx + (Math.random() - 0.5) * spread;
+          const sz = cz + (Math.random() - 0.5) * spread;
+          const sg = ground(sx, sz) ?? pose.y;
           root.position.set(
-            cx + (Math.random() - 0.5) * 24,
-            pose.y + 14 + Math.random() * 22,
-            cz + (Math.random() - 0.5) * 24,
+            sx,
+            sg + profile.lift[0] + Math.random() * (profile.lift[1] - profile.lift[0]),
+            sz,
           );
           birdGroup.add(root);
           birds.push({
@@ -569,6 +740,20 @@ export async function createCreatures(
       fauna.batMinPerFlock,
       fauna.batMaxPerFlock,
       fauna.batRoamScale,
+    );
+    addFlocks(
+      "meise",
+      fauna.meiseFlockCount,
+      fauna.meiseMinPerFlock,
+      fauna.meiseMaxPerFlock,
+      fauna.meiseRoamScale,
+    );
+    addFlocks(
+      "butterfly",
+      fauna.butterflyFlockCount,
+      fauna.butterflyMinPerFlock,
+      fauna.butterflyMaxPerFlock,
+      fauna.butterflyRoamScale,
     );
     if (emit) bus.emit("creatures:birds-changed");
   };
@@ -704,25 +889,25 @@ export async function createCreatures(
     return false;
   };
 
-  const rollDeerWaypoint = (deer: Deer): boolean => {
+  const rollWalkerWaypoint = (walker: Deer, tuning: WalkerTuning): boolean => {
     const found = findOpenPoint(
-      deer.waypoint,
+      walker.waypoint,
       12,
-      Math.max(18, fauna.deerRoamRadius),
-      fauna.deerTreeClearance,
-      deer.object.position,
-      deer.home,
+      tuning.roamRadius,
+      tuning.clearance,
+      walker.object.position,
+      walker.home,
     );
-    if (found && !deer.routeReady) {
-      const dx = deer.waypoint.x - deer.object.position.x;
-      const dz = deer.waypoint.z - deer.object.position.z;
+    if (found && !walker.routeReady) {
+      const dx = walker.waypoint.x - walker.object.position.x;
+      const dz = walker.waypoint.z - walker.object.position.z;
       const length = Math.hypot(dx, dz) || 1;
-      deer.heading.set(dx / length, 0, dz / length);
-      deer.object.rotation.y = Math.atan2(deer.heading.x, deer.heading.z);
-      deer.routeReady = true;
+      walker.heading.set(dx / length, 0, dz / length);
+      walker.object.rotation.y = Math.atan2(walker.heading.x, walker.heading.z);
+      walker.routeReady = true;
     }
-    deer.waypointAge = found ? 0 : DEER_WAYPOINT_TIMEOUT;
-    deer.routeCheckAge = 0;
+    walker.waypointAge = found ? 0 : DEER_WAYPOINT_TIMEOUT;
+    walker.routeCheckAge = 0;
     return found;
   };
 
@@ -776,7 +961,7 @@ export async function createCreatures(
 
   const foxAnchorsFor = (info: ChunkBuiltInfo): GroundFaunaAnchor[] =>
     [0xf09, 0xf0a]
-      .map((salt) => scatterGroundAnchor(info, salt, 1.2, 0.78))
+      .map((salt) => scatterGroundAnchor(info, salt, fauna.foxTreeClearance, 0.78))
       .filter((anchor): anchor is GroundFaunaAnchor => anchor !== null);
 
   const reconcileDeer = (emit: boolean): void => {
@@ -823,29 +1008,21 @@ export async function createCreatures(
       changed = true;
     }
     const used = new Set(foxes.map((fox) => fox.homeKey));
-    const addAnchor = (anchor: GroundFaunaAnchor): void => {
-      const fox = buildFox(anchor.key);
+    for (const anchor of anchors) {
+      if (foxes.length >= target) break;
+      if (used.has(anchor.key)) continue;
+      const fox = buildFox(anchor.key, anchor.position);
       setAnimalScale(fox.model, foxMetrics, fauna.foxScale);
       fox.object.position.copy(anchor.position);
+      fox.heading.set(Math.sin(anchor.yaw), 0, Math.cos(anchor.yaw));
       fox.object.rotation.y = anchor.yaw;
       fox.object.visible = true;
       fox.placed = true;
+      fox.waypointAge = DEER_WAYPOINT_TIMEOUT;
       groundFaunaGroup.add(fox.object);
       foxes.push(fox);
       used.add(anchor.key);
       changed = true;
-    };
-    for (const anchor of anchors) {
-      if (foxes.length >= target) break;
-      if (used.has(anchor.key)) continue;
-      const spaced = foxes.every(
-        (fox) => fox.object.position.distanceTo(anchor.position) >= fauna.foxScatterRadius,
-      );
-      if (spaced) addAnchor(anchor);
-    }
-    for (const anchor of anchors) {
-      if (foxes.length >= target) break;
-      if (!used.has(anchor.key)) addAnchor(anchor);
     }
     if (emit && changed) bus.emit("creatures:ground-fauna-changed");
   };
@@ -900,7 +1077,8 @@ export async function createCreatures(
       const deerRouteChanged = next.deerRoamRadius !== fauna.deerRoamRadius;
       const deerAnchorsChanged = next.deerTreeClearance !== fauna.deerTreeClearance;
       const foxCountChanged = next.foxCount !== fauna.foxCount;
-      const foxScatterChanged = next.foxScatterRadius !== fauna.foxScatterRadius;
+      const foxRouteChanged = next.foxRoamRadius !== fauna.foxRoamRadius;
+      const foxAnchorsChanged = next.foxTreeClearance !== fauna.foxTreeClearance;
       mosquitoes.reconfigure(next);
       fauna = structuredClone(next);
       // roam/speed are read live in `update` — nothing to do for those.
@@ -921,16 +1099,19 @@ export async function createCreatures(
           if (deerRouteChanged) deer.waypointAge = DEER_WAYPOINT_TIMEOUT;
         }
       }
-      if (foxCountChanged) {
+      if (foxAnchorsChanged) {
+        for (const [key, chunk] of groundFaunaChunks) {
+          groundFaunaChunks.set(key, { ...chunk, fox: foxAnchorsFor(chunk.info) });
+        }
+        for (const fox of foxes) fox.object.removeFromParent();
+        foxes.length = 0;
+        reconcileFoxes(true);
+      } else if (foxCountChanged) {
         reconcileFoxes(true);
       } else {
-        for (const fox of foxes) setAnimalScale(fox.model, foxMetrics, fauna.foxScale);
-        if (foxScatterChanged) {
-          for (const fox of foxes) {
-            fox.object.removeFromParent();
-          }
-          foxes.length = 0;
-          reconcileFoxes(true);
+        for (const fox of foxes) {
+          setAnimalScale(fox.model, foxMetrics, fauna.foxScale);
+          if (foxRouteChanged) fox.waypointAge = DEER_WAYPOINT_TIMEOUT;
         }
       }
     },
@@ -997,57 +1178,59 @@ export async function createCreatures(
         }
       }
 
-      // Deer select tree-free line segments through the actual streamed flora.
+      // Deer and foxes both walk tree-free line segments through the actual
+      // streamed flora, on identical waypoint logic (see stepWalker); only their
+      // speed / roam radius / clearance / clip tempo differ (their WalkerTuning).
       // A short look-ahead repulsion handles trunks near bends or newly re-scattered
       // trees without snapping the animal to a new position.
-      for (const deer of deers) {
-        deer.waypointAge += dt;
-        deer.routeCheckAge += dt;
-        diff.copy(deer.waypoint).sub(deer.object.position);
+      const stepWalker = (w: Deer, tuning: WalkerTuning): void => {
+        w.waypointAge += dt;
+        w.routeCheckAge += dt;
+        diff.copy(w.waypoint).sub(w.object.position);
         diff.y = 0;
         let targetDistance = diff.length();
         const needsWaypoint =
-          targetDistance < DEER_WAYPOINT_REACHED || deer.waypointAge >= DEER_WAYPOINT_TIMEOUT;
+          targetDistance < DEER_WAYPOINT_REACHED || w.waypointAge >= DEER_WAYPOINT_TIMEOUT;
         const routeBlocked =
-          deer.routeCheckAge >= 1.25 &&
+          w.routeCheckAge >= 1.25 &&
           !routeIsClear(
-            deer.object.position.x,
-            deer.object.position.z,
-            deer.waypoint.x,
-            deer.waypoint.z,
-            fauna.deerTreeClearance,
+            w.object.position.x,
+            w.object.position.z,
+            w.waypoint.x,
+            w.waypoint.z,
+            tuning.clearance,
           );
         if (needsWaypoint || routeBlocked) {
-          if (!rollDeerWaypoint(deer)) {
-            deer.action.timeScale = 0;
-            continue;
+          if (!rollWalkerWaypoint(w, tuning)) {
+            w.action.timeScale = 0;
+            return;
           }
-          diff.copy(deer.waypoint).sub(deer.object.position);
+          diff.copy(w.waypoint).sub(w.object.position);
           diff.y = 0;
           targetDistance = diff.length();
-        } else if (deer.routeCheckAge >= 1.25) {
-          deer.routeCheckAge = 0;
+        } else if (w.routeCheckAge >= 1.25) {
+          w.routeCheckAge = 0;
         }
 
         if (targetDistance < 1e-3) {
-          deer.action.timeScale = 0;
-          continue;
+          w.action.timeScale = 0;
+          return;
         }
         desired.copy(diff).divideScalar(targetDistance);
         avoid.set(0, 0, 0);
-        const lookX = deer.object.position.x + desired.x * DEER_LOOK_AHEAD;
-        const lookZ = deer.object.position.z + desired.z * DEER_LOOK_AHEAD;
+        const lookX = w.object.position.x + desired.x * DEER_LOOK_AHEAD;
+        const lookZ = w.object.position.z + desired.z * DEER_LOOK_AHEAD;
         const nearby =
           senseOpts.groundObstacles?.(
-            (deer.object.position.x + lookX) * 0.5,
-            (deer.object.position.z + lookZ) * 0.5,
-            DEER_LOOK_AHEAD + fauna.deerTreeClearance,
+            (w.object.position.x + lookX) * 0.5,
+            (w.object.position.z + lookZ) * 0.5,
+            DEER_LOOK_AHEAD + tuning.clearance,
           ) ?? [];
         for (const obstacle of nearby) {
-          const awayX = deer.object.position.x - obstacle.x;
-          const awayZ = deer.object.position.z - obstacle.z;
+          const awayX = w.object.position.x - obstacle.x;
+          const awayZ = w.object.position.z - obstacle.z;
           const distance = Math.hypot(awayX, awayZ);
-          const influence = obstacle.radius + fauna.deerTreeClearance + DEER_LOOK_AHEAD;
+          const influence = obstacle.radius + tuning.clearance + DEER_LOOK_AHEAD;
           if (distance >= influence) continue;
           const strength = (influence - distance) / influence;
           if (distance > 1e-3) {
@@ -1062,7 +1245,7 @@ export async function createCreatures(
         steer.copy(desired).addScaledVector(avoid, 1.8);
         if (steer.lengthSq() < 1e-4) steer.copy(desired);
         steer.normalize();
-        const currentYaw = Math.atan2(deer.heading.x, deer.heading.z);
+        const currentYaw = Math.atan2(w.heading.x, w.heading.z);
         const targetYaw = Math.atan2(steer.x, steer.z);
         const yawDelta = Math.atan2(
           Math.sin(targetYaw - currentYaw),
@@ -1070,33 +1253,38 @@ export async function createCreatures(
         );
         const maxYawStep = DEER_MAX_TURN_RATE * dt;
         const yaw = currentYaw + Math.min(maxYawStep, Math.max(-maxYawStep, yawDelta));
-        deer.heading.set(Math.sin(yaw), 0, Math.cos(yaw));
+        w.heading.set(Math.sin(yaw), 0, Math.cos(yaw));
 
-        const speed = Math.max(0, fauna.deerSpeed);
+        const speed = tuning.speed;
         const step = speed * dt;
-        const nextX = deer.object.position.x + deer.heading.x * step;
-        const nextZ = deer.object.position.z + deer.heading.z * step;
+        const nextX = w.object.position.x + w.heading.x * step;
+        const nextZ = w.object.position.z + w.heading.z * step;
         const nextY = ground(nextX, nextZ);
-        const stepIsClear = pointIsClear(nextX, nextZ, fauna.deerTreeClearance);
+        const stepIsClear = pointIsClear(nextX, nextZ, tuning.clearance);
         if (
           nextY === null ||
           !stepIsClear ||
-          Math.abs(nextY - deer.object.position.y) > Math.max(0.5, step * MAX_GROUND_SLOPE)
+          Math.abs(nextY - w.object.position.y) > Math.max(0.5, step * MAX_GROUND_SLOPE)
         ) {
-          deer.waypointAge = DEER_WAYPOINT_TIMEOUT;
-          deer.action.timeScale = 0;
-          continue;
+          w.waypointAge = DEER_WAYPOINT_TIMEOUT;
+          w.action.timeScale = 0;
+          return;
         }
 
-        deer.object.position.set(nextX, nextY, nextZ);
-        deer.object.rotation.y = yaw;
-        deer.action.timeScale = speed / DEER_WALK_REFERENCE_SPEED;
-        deer.mixer.update(dt);
-      }
+        w.object.position.set(nextX, nextY, nextZ);
+        w.object.rotation.y = yaw;
+        w.action.timeScale = speed / tuning.refSpeed;
+        w.mixer.update(dt);
+      };
+
+      const deerWalk = deerTuning();
+      for (const deer of deers) stepWalker(deer, deerWalk);
+      const foxWalk = foxTuning();
+      for (const fox of foxes) stepWalker(fox, foxWalk);
 
       // ── Flock goals: reached / stale / left-behind waypoints get re-rolled ──
       for (const [f, flock] of flocks.entries()) {
-        const roamScale = flock.kind === "bat" ? fauna.batRoamScale : fauna.roamScale;
+        const roamScale = fauna[KIND_PROFILES[flock.kind].roamScaleKey];
         const ring = ringFor(flock.ringIndex, flock.ringCount, roamScale);
         flock.age += dt;
 
@@ -1115,7 +1303,7 @@ export async function createCreatures(
           (flock.waypoint.x - pose.x) ** 2 + (flock.waypoint.z - pose.z) ** 2 >
           (ring.max + 120) ** 2; // the player flew on — bring the route with them
         if (reached || behind || flock.age > WAYPOINT_TIMEOUT) {
-          rollWaypoint(flock.waypoint, ring);
+          rollWaypoint(flock.waypoint, ring, flock.kind);
           flock.age = 0;
         }
       }
@@ -1123,9 +1311,10 @@ export async function createCreatures(
       for (const b of birds) {
         const flock = flocks[b.flock];
         if (!flock) continue;
-        const speedScale = b.kind === "bat" ? fauna.batFlightSpeed : fauna.flightSpeed;
-        const minSpeed = MIN_SPEED * speedScale;
-        const maxSpeed = MAX_SPEED * speedScale;
+        const profile = KIND_PROFILES[b.kind];
+        const speedScale = fauna[profile.flightSpeedKey];
+        const minSpeed = profile.minSpeed * speedScale;
+        const maxSpeed = profile.maxSpeed * speedScale;
         steer.set(0, 0, 0);
 
         // The three Reynolds rules against FLOCKmates (juanuys/boids ranges,
@@ -1169,7 +1358,7 @@ export async function createCreatures(
         }
 
         // Boundary (juanuys: outside the sphere the return urge dominates).
-        const roamScale = flock.kind === "bat" ? fauna.batRoamScale : fauna.roamScale;
+        const roamScale = fauna[profile.roamScaleKey];
         const boundary = ringFor(flock.ringIndex, flock.ringCount, roamScale).max + BOUNDARY_MARGIN;
         diff.set(pose.x - b.position.x, 0, pose.z - b.position.z);
         const fromPlayer = diff.length();
@@ -1177,20 +1366,25 @@ export async function createCreatures(
           steer.addScaledVector(diff.normalize(), (fromPlayer - boundary) * 0.5);
         }
 
-        // Terrain floor + altitude ceiling.
+        // Terrain floor + altitude ceiling — each kind keeps its own band, so
+        // meise hug the treetops and butterflies stay a flower's height up.
         const g = ground(b.position.x, b.position.z);
         if (g !== null) {
           const alt = b.position.y - g;
-          if (alt < MIN_ALTITUDE) {
-            steer.y += (MIN_ALTITUDE - alt) * 2.5;
-          } else if (alt > MAX_ALTITUDE) {
-            steer.y -= (alt - MAX_ALTITUDE) * 0.6;
+          if (alt < profile.minAlt) {
+            steer.y += (profile.minAlt - alt) * 2.5;
+          } else if (alt > profile.maxAlt) {
+            steer.y -= (alt - profile.maxAlt) * 0.6;
           }
         }
 
         // Gentle wander so the flock never fully settles (juanuys wanderWeight 0.2).
         steer.x += Math.sin(elapsed * 0.7 + b.flapPhase * 3.1) * 0.8;
         steer.z += Math.cos(elapsed * 0.6 + b.flapPhase * 2.3) * 0.8;
+        // Erratic vertical flit — pronounced for butterflies, off for gliders.
+        if (profile.flit > 0) {
+          steer.y += Math.sin(elapsed * 4.3 + b.flapPhase * 5.7) * profile.flit;
+        }
 
         // Acceleration clamp, then integrate with min/max speed.
         const force = steer.length();

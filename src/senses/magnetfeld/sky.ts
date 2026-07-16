@@ -347,15 +347,23 @@ const fieldlineSky = Fn(([dir]: [Vec3Node]) => {
     ),
   );
 
-  // North-south line bundle, slightly wobbled.
-  const u = dot(dir, eastH());
-  const wob = fbm(dir.mul(2.5)).sub(0.5).mul(U.wobble);
-  const lineField = abs(sin(u.mul(U.freq).add(wob)));
-  const lines = pow(oneMinus(lineField), 24.0);
+  // Realistic dipole field lines: a magnetic dipole has NO azimuthal component,
+  // so its field lines lie entirely in meridian planes around the field axis and
+  // all converge on the two magnetic poles. We draw them as lines of constant
+  // azimuth φ around the axis — curved arcs on the dome that crowd together at the
+  // poles — faded to a glow right at each pole (× sinθ) where φ collapses to a point.
+  const frame = axisFrame();
+  const cosT = clamp(dot(dir, frame.A), -1.0, 1.0);
+  const theta = acos(cosT); // colatitude: 0 at the north pole, π at the south pole
+  const phi = atan(dot(dir, frame.e2), dot(dir, frame.e1)); // azimuth around the axis
+  // Wobble follows the line along its meridian (fades at the poles) so the arcs
+  // ripple like iron filings without tearing at the seam.
+  const wob = fbm(dir.mul(2.5)).sub(0.5).mul(U.wobble).mul(0.4).mul(sin(theta));
+  const merid = abs(sin(phi.mul(U.freq.mul(0.5)).add(wob)));
+  const lines = pow(oneMinus(merid), 24.0).mul(sin(theta));
 
-  // Energy pulses travel along the arcs toward the north pole.
-  const ang = atan(dir.y, dot(dir, northH()));
-  const dash = pow(fract(ang.mul(U.dashFreq).add(t.mul(0.45))), 6.0);
+  // Energy pulses travel along the arcs (by colatitude θ) toward the north pole.
+  const dash = pow(fract(theta.mul(U.dashFreq).add(t.mul(0.45))), 6.0);
   const vis = smoothstep(-0.05, 0.1, elev);
   base.addAssign(U.colLine.mul(lines).mul(dash.mul(2.2).mul(U.pulse).add(0.25)).mul(vis));
 

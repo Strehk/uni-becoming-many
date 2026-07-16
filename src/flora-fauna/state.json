@@ -58,8 +58,10 @@
       "deerRoamRadius": 110,
       "deerTreeClearance": 3,
       "foxCount": 4,
-      "foxScale": 1,
-      "foxScatterRadius": 95
+      "foxScale": 0.02,
+      "foxSpeed": 1.9,
+      "foxRoamRadius": 95,
+      "foxTreeClearance": 2
     }
   }
 }

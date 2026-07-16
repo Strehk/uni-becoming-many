@@ -64,7 +64,13 @@ export type SpeciesId =
   | "birch-3"
   | "dead-pine"
   | "bush-2"
+  | "bush-3"
   | "flower-2"
+  | "flower-3"
+  | "flower-4"
+  | "flower-5"
+  | "flower-6"
+  | "flower-7"
   | "shrub"
   | "reeds"
   | "mushroom-brown"
@@ -451,6 +457,18 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
     placement: clearingLover(1.5),
     senses: { scent: { type: "kraut", radius: 1.6, heightOffset: 0.6 } },
   },
+  "bush-3": {
+    id: "bush-3",
+    targetHeight: 1.5,
+    perChunkCap: 40,
+    biomes: { [Biome.Forest]: 0.7, [Biome.Grassland]: 0.4, [Biome.Hills]: 0.4, [Biome.Taiga]: 0.4 },
+    maxSlope: 0.6,
+    scale: [0.7, 1.4],
+    tintJitter: 0.16,
+    sway: 0.1,
+    placement: clearingLover(1.5),
+    senses: { scent: { type: "kraut", radius: 1.7, heightOffset: 0.7 } },
+  },
   "berry-bush": {
     id: "berry-bush",
     targetHeight: 1.3,
@@ -496,6 +514,72 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
     id: "flower-2",
     targetHeight: 0.4,
     perChunkCap: 50,
+    biomes: { [Biome.Grassland]: 0.7, [Biome.Hills]: 0.3, [Biome.Forest]: 0.12 },
+    maxSlope: 0.5,
+    scale: [0.8, 1.3],
+    tintJitter: 0.25,
+    sway: 0.06,
+    placement: clearingLover(4),
+    senses: { uvSignal: 0.7, scent: { type: "blume", radius: 1.8, heightOffset: 0.3 } },
+  },
+  // ── New authored flowers (flower-3…7) — meadow bloomers, butterfly anchors ──
+  "flower-3": {
+    id: "flower-3",
+    targetHeight: 0.42,
+    perChunkCap: 50,
+    biomes: {
+      [Biome.Grassland]: 0.75,
+      [Biome.Hills]: 0.3,
+      [Biome.Wetland]: 0.2,
+      [Biome.Forest]: 0.12,
+    },
+    maxSlope: 0.5,
+    scale: [0.8, 1.3],
+    tintJitter: 0.25,
+    sway: 0.06,
+    placement: clearingLover(4),
+    senses: { uvSignal: 0.7, scent: { type: "blume", radius: 1.8, heightOffset: 0.3 } },
+  },
+  "flower-4": {
+    id: "flower-4",
+    targetHeight: 0.38,
+    perChunkCap: 48,
+    biomes: { [Biome.Grassland]: 0.7, [Biome.Hills]: 0.3, [Biome.Forest]: 0.12 },
+    maxSlope: 0.5,
+    scale: [0.8, 1.3],
+    tintJitter: 0.25,
+    sway: 0.06,
+    placement: clearingLover(4),
+    senses: { uvSignal: 0.7, scent: { type: "blume", radius: 1.8, heightOffset: 0.28 } },
+  },
+  "flower-5": {
+    id: "flower-5",
+    targetHeight: 0.36,
+    perChunkCap: 48,
+    biomes: { [Biome.Grassland]: 0.7, [Biome.Hills]: 0.28, [Biome.Forest]: 0.14 },
+    maxSlope: 0.5,
+    scale: [0.8, 1.3],
+    tintJitter: 0.25,
+    sway: 0.06,
+    placement: clearingLover(4),
+    senses: { uvSignal: 0.7, scent: { type: "blume", radius: 1.7, heightOffset: 0.26 } },
+  },
+  "flower-6": {
+    id: "flower-6",
+    targetHeight: 0.44,
+    perChunkCap: 46,
+    biomes: { [Biome.Grassland]: 0.72, [Biome.Hills]: 0.3, [Biome.Wetland]: 0.18 },
+    maxSlope: 0.5,
+    scale: [0.8, 1.3],
+    tintJitter: 0.25,
+    sway: 0.06,
+    placement: clearingLover(4),
+    senses: { uvSignal: 0.7, scent: { type: "blume", radius: 1.8, heightOffset: 0.32 } },
+  },
+  "flower-7": {
+    id: "flower-7",
+    targetHeight: 0.4,
+    perChunkCap: 46,
     biomes: { [Biome.Grassland]: 0.7, [Biome.Hills]: 0.3, [Biome.Forest]: 0.12 },
     maxSlope: 0.5,
     scale: [0.8, 1.3],
@@ -667,4 +751,11 @@ export const SPECIES_IDS: readonly SpeciesId[] = [
   "branch-birch",
   "rock-small",
   "rock-huge",
+  // Appended last so every prior species keeps its PRNG salt / placement.
+  "bush-3",
+  "flower-3",
+  "flower-4",
+  "flower-5",
+  "flower-6",
+  "flower-7",
 ];

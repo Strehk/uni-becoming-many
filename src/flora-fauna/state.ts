@@ -29,10 +29,15 @@ export function configFromState(state: unknown): FloraFaunaConfig {
     | (Partial<FloraFaunaConfig["fauna"]> & {
         birdsPerFlock?: number;
         batsPerFlock?: number;
+        foxScatterRadius?: number;
       })
     | undefined;
-  const { birdsPerFlock, batsPerFlock, ...currentFauna } = rawFauna ?? {};
+  const { birdsPerFlock, batsPerFlock, foxScatterRadius, ...currentFauna } = rawFauna ?? {};
   const fauna = { ...DEFAULT_CONFIG.fauna, ...currentFauna };
+  // The seated fox became a roaming one: its old scatter radius seeds foxRoamRadius.
+  if (rawFauna?.foxRoamRadius === undefined && typeof foxScatterRadius === "number") {
+    fauna.foxRoamRadius = foxScatterRadius;
+  }
   if (rawFauna?.birdMinPerFlock === undefined && typeof birdsPerFlock === "number") {
     fauna.birdMinPerFlock = birdsPerFlock;
   }

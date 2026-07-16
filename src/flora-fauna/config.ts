@@ -39,8 +39,18 @@ export const CATEGORY_SPECIES: Readonly<Record<FloraCategory, readonly SpeciesId
     "dead-pine",
     "palm",
   ],
-  undergrowth: ["bush", "bush-2", "berry-bush", "shrub", "cactus"],
-  flower: ["flower", "flower-2", "wheat", "reeds"],
+  undergrowth: ["bush", "bush-2", "bush-3", "berry-bush", "shrub", "cactus"],
+  flower: [
+    "flower",
+    "flower-2",
+    "flower-3",
+    "flower-4",
+    "flower-5",
+    "flower-6",
+    "flower-7",
+    "wheat",
+    "reeds",
+  ],
   mushroom: ["mushroom-brown", "mushroom-red", "mushroom-white", "mushroom-cluster"],
   rock: ["rock", "rock-small", "rock-huge", "moss-rock"],
   // The forest floor: fallen branches and cut stumps ("Zeug auf dem Boden").
@@ -153,6 +163,22 @@ export interface FaunaConfig {
   readonly batRoamScale: number;
   /** Bat min/max flight-speed multiplier (live). */
   readonly batFlightSpeed: number;
+  /** Number of independent meise (tit) flocks — fly at treetop height and below. */
+  readonly meiseFlockCount: number;
+  readonly meiseMinPerFlock: number;
+  readonly meiseMaxPerFlock: number;
+  /** Meise roam-ring multiplier (live). */
+  readonly meiseRoamScale: number;
+  /** Meise min/max flight-speed multiplier (live). */
+  readonly meiseFlightSpeed: number;
+  /** Number of butterfly clusters — flit very low, near flowers and bushes. */
+  readonly butterflyFlockCount: number;
+  readonly butterflyMinPerFlock: number;
+  readonly butterflyMaxPerFlock: number;
+  /** Butterfly roam-ring multiplier (live). */
+  readonly butterflyRoamScale: number;
+  /** Butterfly min/max flight-speed multiplier (live). */
+  readonly butterflyFlightSpeed: number;
   /** Number of persistent, ground-near mosquito swarms. */
   readonly mosquitoSwarmCount: number;
   /** Inclusive random mosquito-count range rolled independently per swarm. */
@@ -176,12 +202,16 @@ export interface FaunaConfig {
   readonly deerRoamRadius: number;
   /** Extra clearance kept between a deer route and tree trunks, in metres. */
   readonly deerTreeClearance: number;
-  /** Number of seated foxes scattered near the player. */
+  /** Number of animated foxes roaming the streamed terrain (they walk like the deer). */
   readonly foxCount: number;
   /** Multiplier on the fox's normalized real-world size. */
   readonly foxScale: number;
-  /** Radius around the player in which seated foxes are scattered. */
-  readonly foxScatterRadius: number;
+  /** Fox walking speed in metres per second. */
+  readonly foxSpeed: number;
+  /** Radius around each fox's home in which it chooses new routes. */
+  readonly foxRoamRadius: number;
+  /** Extra clearance kept between a fox route and tree trunks, in metres. */
+  readonly foxTreeClearance: number;
 }
 
 export interface FloraFaunaConfig {
@@ -237,6 +267,16 @@ export const DEFAULT_CONFIG: FloraFaunaConfig = {
     batMaxPerFlock: 16,
     batRoamScale: 1,
     batFlightSpeed: 1,
+    meiseFlockCount: 3,
+    meiseMinPerFlock: 4,
+    meiseMaxPerFlock: 9,
+    meiseRoamScale: 1,
+    meiseFlightSpeed: 1,
+    butterflyFlockCount: 5,
+    butterflyMinPerFlock: 3,
+    butterflyMaxPerFlock: 7,
+    butterflyRoamScale: 1,
+    butterflyFlightSpeed: 1,
     mosquitoSwarmCount: 4,
     mosquitoMinPerSwarm: 80,
     mosquitoMaxPerSwarm: 160,
@@ -250,8 +290,10 @@ export const DEFAULT_CONFIG: FloraFaunaConfig = {
     deerRoamRadius: 110,
     deerTreeClearance: 3,
     foxCount: 4,
-    foxScale: 1,
-    foxScatterRadius: 95,
+    foxScale: 0.02,
+    foxSpeed: 1.9,
+    foxRoamRadius: 95,
+    foxTreeClearance: 2,
   },
 };
 

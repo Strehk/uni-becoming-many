@@ -237,6 +237,13 @@ const creatures = await createCreatures(renderer.scene, bus, (x, z) => world.gro
   layers: senses.shader.compositor,
   config: floraFaunaConfig.fauna,
   groundObstacles: (x, z, radius) => life.treeObstaclesAround(x, z, radius),
+  // Butterflies flit toward real blooming flora — flowers ("blume") and the
+  // scented bushes ("kraut") the scatter placed around the player.
+  floraAttractors: (x, z, radius) =>
+    life
+      .scentSpotsAround(x, z, radius)
+      .filter((s) => s.type === "blume" || s.type === "kraut" || s.type === "lavendel")
+      .map((s) => ({ x: s.x, z: s.z })),
 });
 terrainDependents.creatures = creatures;
 window.addEventListener("pagehide", () => creatures.dispose());
