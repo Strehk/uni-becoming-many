@@ -48,6 +48,9 @@ interface SynthApp {
   addLayer(id: string): void;
   ensureBecomingManyDefaults?: () => void;
   syncSenseLayers?: (id: string, value: number) => void;
+  /** Host-driven per-frame pump used WHILE the drawer is closed — the iframe is
+   *  display:none then, so its own rAF (and the sense-gate loop) is paused. */
+  pumpFromHost?: () => void;
 }
 interface SynthEngine {
   isAudible?: () => boolean;
@@ -282,6 +285,14 @@ export function createSynthOverlay(options: SynthOverlayOptions): SynthOverlay {
         } else if (value > 0 && !app.layers.some((info) => info.layer.sense.id === synthId)) {
           app.addLayer(synthId);
         }
+      }
+      // While the drawer is CLOSED the iframe is display:none, so its own
+      // requestAnimationFrame (and with it the sense-gate loop in frame()) is
+      // paused — gated layers would only start when the tab is first opened.
+      // Drive the gate + sense-modulation from the host loop instead. When the
+      // drawer is open, the iframe's frame() owns this, so we skip it here.
+      if (!open) {
+        app.pumpFromHost?.();
       }
     }
   };

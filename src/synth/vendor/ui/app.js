@@ -219,6 +219,50 @@ export class App {
      und NICHT ersatzweise Layer nachlädt. */
   syncSenseLayers(_synthId, _value) {}
 
+  /* Sinn-Gate: jede Karte an-/ausschalten nach ihrer gewählten Quelle
+     (window.__bmFrame.senses). Läuft im eigenen frame() UND — wichtig — vom
+     Host (pumpFromHost), damit Layer auch bei geschlossenem Reiter anspringen. */
+  applySenseGates() {
+    const gsrc = (window.__bmFrame && window.__bmFrame.senses) || null;
+    for (const info of this.layers) {
+      const g = info.layer.gate;
+      let on;
+      if (g === "immer" || !g) on = true;
+      else if (g === "aus")   on = false;             // hartes Aus, ignoriert Signale
+      else on = gsrc ? (gsrc[g] || 0) > 0.5 : false;  // ohne Host-Frame: gegatete Karten aus
+      this.setLayerMuted(info, !on);
+    }
+  }
+
+  /* Vom Host jede Frame aufgerufen, SOLANGE der Synth-Reiter zu ist: dann ist
+     der iframe display:none und BEIDE eigenen rAF-Schleifen (App.frame() und
+     FlightModule.runLoop) pausieren. Damit der Synth wie eingestellt weiterspielt
+     — Module springen an, Modulationen greifen, gebundene Sinne sitzen an ihren
+     Orten — werden hier alle KLANG-relevanten Teile von frame() nachgezogen;
+     nur das Zeichnen (Wellen, Pads, Kabel) entfällt. Spiegelt frame(). */
+  pumpFromHost() {
+    // Flug-Welt aus dem Host-Frame auffrischen (sonst friert sie mit runLoop ein).
+    if (FlightModule.active && FlightModule.world) FlightModule.world.update();
+
+    // Live-Quellen (Flug, Drift, Sinne) einsammeln und Zuordnungen anwenden.
+    const live = {};
+    if (FlightModule.active && FlightModule.world) Object.assign(live, FlightModule.world.params);
+    if (LfoModule.active) { LfoModule.frame(); Object.assign(live, LfoModule.params); }
+    if (window.__bmFrame && window.__bmFrame.senses) Object.assign(live, window.__bmFrame.senses);
+    this.flightMap.apply(live);
+
+    // Sinn-Gate (Module an-/ausschalten).
+    this.applySenseGates();
+
+    // Räumliches Hören: Panner an die Anker, sonst heim zum Hörer.
+    const W = (FlightModule.active && FlightModule.world && FlightModule.world.pos)
+      ? FlightModule.world : null;
+    SpatialAudio.frame(
+      W ? { x: W.pos.x, y: W.pos.y, z: W.pos.z, yaw: W.yaw, pitch: W.pitch } : null,
+      W ? W.anchors : null,
+      this.flightMap.spatialBindings());
+  }
+
   /* Erster Aufbau (einmalig, beide Boot-Pfade laufen hier durch). Liegt eine
      komponierte state.json vor, wird sie geladen; sonst greifen die fest
      verdrahteten (kabellosen) Standard-Layer. */
@@ -229,25 +273,42 @@ export class App {
     const saved = this.savedState;
     if (saved && Array.isArray(saved.layers) && saved.layers.length) {
       this.loadState(saved);
-      return;
-    }
-
-    for (const synth of BM_DEFAULT_SYNTHS) {
-      if (!this.layers.some(info => info.layer.sense.id === synth)) {
-        this.addLayer(synth);
+    } else {
+      for (const synth of BM_DEFAULT_SYNTHS) {
+        if (!this.layers.some(info => info.layer.sense.id === synth)) {
+          this.addLayer(synth);
+        }
       }
+
+      for (const info of this.layers) {
+        const layer = info.layer;
+        layer.setVolume(0.68);
+        layer.setRoom(0.34);
+        layer.setCut(0.9);
+        this.setLayerMuted(info, true);
+      }
+
+      if (!FlightModule.active) FlightModule.open(this);
     }
 
-    for (const info of this.layers) {
-      const layer = info.layer;
-      layer.setVolume(0.68);
-      layer.setRoom(0.34);
-      layer.setCut(0.9);
-      this.setLayerMuted(info, true);
-    }
-
-    if (!FlightModule.active) FlightModule.open(this);
+    // Standard: der Duft-Sinn (chemie) hört an ALLEN Duftquellen.
+    this.connectDuftToAllOrte();
     this.flightMap.emit();
+  }
+
+  /* Standard-Verbindung: den Duft-Sinn (chemie) an JEDE Duftquelle binden —
+     aber nur, wenn er noch gar keinen Ort hat (eine bewusst geladene/gesetzte
+     Auswahl bleibt unangetastet). */
+  connectDuftToAllOrte() {
+    const info = this.layers.find(x => x.layer.sense.id === "chemie");
+    if (!info) return;
+    const layerId = info.layer.id;
+    if (this.flightMap.list.some(m => m.layerId === layerId && m.control === "ort")) return;
+    let added = false;
+    SPATIAL_QUELLEN.forEach(([q]) => {
+      if (q.startsWith("duft_") && this.flightMap.add(layerId + "|ort", q)) added = true;
+    });
+    if (added) this.fillCard(info);   // Ort-Sektion der Karte neu zeigen
   }
 
   /* ---------- Komposition speichern / laden (Theatre-Manier) ---------- */
@@ -502,15 +563,27 @@ export class App {
       const bindings = this.flightMap.list.filter(
         x => x.layerId === layer.id && x.control === "ort");
       bindings.forEach(m => wrap.append(this.ortRow(layer, m, build)));
-      // "+ ort" nur, solange noch freie Quellen übrig sind.
+      // "+ ort" (ein weiterer) und "alle düfte" (jede freie Duftquelle auf
+      // einmal) — nur solange noch freie Quellen übrig sind.
       if (bindings.length < SPATIAL_QUELLEN.length) {
+        const used = new Set(bindings.map(m => m.quelle));
+        const btns = h("div", "ort-add-row");
         const add = h("button", "fl-add ort-add", bindings.length ? "+ ort" : "+ ort wählen");
         add.addEventListener("click", () => {
-          const used = new Set(bindings.map(m => m.quelle));
           const free = SPATIAL_QUELLEN.find(([v]) => !used.has(v));
           if (free && this.flightMap.add(layer.id + "|ort", free[0])) build();
         });
-        wrap.append(add);
+        btns.append(add);
+        const freeDuft = SPATIAL_QUELLEN.filter(([v]) => v.startsWith("duft_") && !used.has(v));
+        if (freeDuft.length) {
+          const all = h("button", "fl-add ort-add", "alle düfte");
+          all.addEventListener("click", () => {
+            freeDuft.forEach(([v]) => this.flightMap.add(layer.id + "|ort", v));
+            build();
+          });
+          btns.append(all);
+        }
+        wrap.append(btns);
       }
     };
     build();
@@ -865,16 +938,8 @@ export class App {
     if (window.__bmFrame && window.__bmFrame.senses) Object.assign(live, window.__bmFrame.senses);
     this.flightMap.apply(live);
 
-    // Sinn-Gate: jede Karte an-/ausschalten nach ihrer gewählten Quelle.
-    const gsrc = (window.__bmFrame && window.__bmFrame.senses) || null;
-    for (const info of this.layers) {
-      const g = info.layer.gate;
-      let on;
-      if (g === "immer" || !g) on = true;
-      else if (g === "aus")   on = false;             // hartes Aus, ignoriert Signale
-      else on = gsrc ? (gsrc[g] || 0) > 0.5 : false;  // ohne Host-Frame: gegatete Karten aus
-      this.setLayerMuted(info, !on);
-    }
+    // Sinn-Gate anwenden (jede Karte an-/ausschalten nach ihrer Quelle).
+    this.applySenseGates();
 
     // Räumliches Hören: Hörer folgt der Kamera, gebundene Sinne sitzen an
     // ihren Ankern. Ohne Flug (pose null) gleiten die Panner heim.
