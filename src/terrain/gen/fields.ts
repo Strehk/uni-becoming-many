@@ -66,16 +66,22 @@ export function baseHeight01(
   const psx = wx + seedOffset[0];
   const psy = wy + seedOffset[1];
 
+  // Ocean size controls the horizontal extent of sea basins independently of
+  // their frequency/water coverage. Keeping the relief scale separate prevents
+  // this slider from also resizing every hill and mountain.
+  const oceanScale = P.continentScale * clamp(P.biomeOceanSize, 0.1, 2);
+
   // Domain warp at a medium scale for more organic coastlines / ranges.
-  const wf = 1 / (P.continentScale * 0.5);
-  const warpAmp = P.domainWarpStrength * P.continentScale * 0.3;
+  const wf = 1 / (oceanScale * 0.5);
+  const warpAmp = P.domainWarpStrength * oceanScale * 0.3;
   const warpX = fbm(psx * wf + 13.1, psy * wf + 7.7, S_WARP_X, 3) * warpAmp;
   const warpY = fbm(psx * wf + 31.7, psy * wf + 19.3, S_WARP_Y, 3) * warpAmp;
   const pwx = psx + warpX;
   const pwy = psy + warpY;
 
   const cf = 1 / P.continentScale;
-  const continent = fbm(pwx * cf, pwy * cf, S_CONTINENT, 5); // ~[-0.5,0.5]
+  const oceanFrequency = 1 / oceanScale;
+  const continent = fbm(pwx * oceanFrequency, pwy * oceanFrequency, S_CONTINENT, 5); // ~[-0.5,0.5]
   const broad = fbm(pwx * cf * 2.5, pwy * cf * 2.5, S_BROAD, 4);
   const land = smoothstep(-0.1, 0.2, continent); // 0..1 landmass mask
 
