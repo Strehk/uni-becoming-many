@@ -24,7 +24,9 @@
       "grassTaiga": 1,
       "grassHills": 1,
       "swayStrength": 0.5,
-      "speciesCap": {},
+      "speciesCap": {
+        "bush-3": 0
+      },
       "treeScaleVariance": 1,
       "bushMeadow": 1,
       "bushCluster": 0,

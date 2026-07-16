@@ -263,7 +263,8 @@ export const DEFAULT_CONFIG: FloraFaunaConfig = {
     grassTaiga: 1,
     grassHills: 1,
     swayStrength: 0.5,
-    speciesCap: {},
+    // High-poly bush off by default (dominated the triangle budget); raisable live.
+    speciesCap: { "bush-3": 0 },
   },
   fauna: {
     flockCount: 4,

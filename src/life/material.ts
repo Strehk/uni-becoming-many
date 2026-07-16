@@ -71,6 +71,7 @@ export interface FloraSurfaceNodes {
   distance: Node<"float">;
   light: Node<"float">;
   thermalBird?: Node<"float">;
+  thermalMammal?: Node<"float">;
   thermalTree?: Node<"float">;
   thermalGround?: Node<"float">;
   thermalGrass?: Node<"float">;

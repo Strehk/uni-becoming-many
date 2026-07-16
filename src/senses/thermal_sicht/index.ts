@@ -100,6 +100,9 @@ export function createThermalSicht(): ShaderSense {
   const birdHeat = scalarUniform(0.98);
   const birdGlow = scalarUniform(0.9);
   const animalVariation = scalarUniform(0.03);
+  // Ground mammals (deer, fox) — their own warmth, a touch hotter than the birds.
+  const mammalHeat = scalarUniform(1.0);
+  const mammalGlow = scalarUniform(1.1);
   const treeHeat = scalarUniform(0.42);
   const treeGlow = scalarUniform(0.14);
   const natureVariation = scalarUniform(0.025);
@@ -146,6 +149,8 @@ export function createThermalSicht(): ShaderSense {
       birdHeat,
       birdGlow,
       animalVariation,
+      mammalHeat,
+      mammalGlow,
       treeHeat,
       treeGlow,
       natureVariation,
@@ -201,6 +206,22 @@ export function createThermalSicht(): ShaderSense {
       },
       { key: "birdHeat", label: "Vögel · Wärme", type: "range", min: 0, max: 1, step: 0.01 },
       { key: "birdGlow", label: "Vögel · Leuchtstärke", type: "range", min: 0, max: 3, step: 0.05 },
+      {
+        key: "mammalHeat",
+        label: "Tiere (Hirsch/Fuchs) · Wärme",
+        type: "range",
+        min: 0,
+        max: 2,
+        step: 0.01,
+      },
+      {
+        key: "mammalGlow",
+        label: "Tiere (Hirsch/Fuchs) · Leuchtstärke",
+        type: "range",
+        min: 0,
+        max: 3,
+        step: 0.05,
+      },
       {
         key: "animalVariation",
         label: "Tiervariation",
@@ -321,13 +342,18 @@ export function createThermalSicht(): ShaderSense {
 
     build(surface) {
       const bird = clamp(surface.thermalBird, 0, 1);
+      const mammal = clamp(surface.thermalMammal, 0, 1);
       const tree = clamp(surface.thermalTree, 0, 1);
       const grass = clamp(surface.thermalGrass, 0, 1);
       const water = clamp(surface.thermalWater, 0, 1);
       const explicitGround = clamp(surface.thermalGround, 0, 1);
-      const classified = clamp(bird.add(tree).add(grass).add(water).add(explicitGround), 0, 1);
+      const classified = clamp(
+        bird.add(mammal).add(tree).add(grass).add(water).add(explicitGround),
+        0,
+        1,
+      );
       const ground = max(explicitGround, oneMinus(classified));
-      const weight = max(bird.add(tree).add(grass).add(water).add(ground), 1);
+      const weight = max(bird.add(mammal).add(tree).add(grass).add(water).add(ground), 1);
 
       // ── Fels: steile Bodenflächen sind Gestein — Wärmespeicher, deutlich wärmer
       // als offener Boden. Über die Flächenneigung klassifiziert, kein eigener Kanal.
@@ -337,6 +363,7 @@ export function createThermalSicht(): ShaderSense {
 
       const baseHeat = bird
         .mul(birdHeat)
+        .add(mammal.mul(mammalHeat))
         .add(tree.mul(treeHeat))
         .add(grass.mul(grassHeat))
         .add(water.mul(waterHeat))
@@ -344,7 +371,7 @@ export function createThermalSicht(): ShaderSense {
         .add(rockiness.mul(rockHeat))
         .div(weight);
 
-      const animalShift = surface.thermalObjectVariation.mul(animalVariation).mul(bird);
+      const animalShift = surface.thermalObjectVariation.mul(animalVariation).mul(bird.add(mammal));
       const natureMembership = clamp(tree.add(grass), 0, 1);
       const natureShift = surface.thermalObjectVariation.mul(natureVariation).mul(natureMembership);
 
@@ -375,14 +402,14 @@ export function createThermalSicht(): ShaderSense {
         max(gamma, 0.001),
       );
 
-      const objectMask = clamp(bird.add(tree), 0, 1);
+      const objectMask = clamp(bird.add(mammal).add(tree), 0, 1);
       const radial = projectedCenterWarmth(surface, centerFalloff);
       const paletteStep = clamp(centerWarmth.mul(PALETTE_STEP), 0, 1);
       const edgeT = min(mapped, oneMinus(paletteStep));
       const objectT = edgeT.add(radial.mul(paletteStep));
       const centeredPosition = mix(mapped, objectT, objectMask);
 
-      const living = clamp(bird.add(tree).add(grass), 0, 1);
+      const living = clamp(bird.add(mammal).add(tree).add(grass), 0, 1);
       const objectDistance = cameraPos.distance(surface.thermalCenter);
       const cooling = smoothstep(range.mul(0.15), max(range, 0.001), objectDistance)
         .mul(distanceCooling)
@@ -407,7 +434,7 @@ export function createThermalSicht(): ShaderSense {
       const coldBandWidth = max(warmThreshold.sub(thresholdCold).mul(PALETTE_STEP), 0.001);
       const coldVisibility = smoothstep(thresholdCold, thresholdCold.add(coldBandWidth), rawHeat);
       const hotGlow = pow(palettePosition, 3).mul(coldVisibility);
-      const categoryGlow = bird.mul(birdGlow).add(tree.mul(treeGlow));
+      const categoryGlow = bird.mul(birdGlow).add(mammal.mul(mammalGlow)).add(tree.mul(treeGlow));
       const gain = float(1).add(hotGlow.mul(bloom.add(categoryGlow)));
       return max(saturated, 0).mul(environmentBrightness).mul(gain).mul(coldVisibility);
     },

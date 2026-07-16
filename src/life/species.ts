@@ -443,7 +443,8 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   bush: {
     id: "bush",
     targetHeight: 1.4,
-    perChunkCap: 70,
+    // Cheapest bush (~462 tris) — raised to fill in for the retired high-poly bush-3.
+    perChunkCap: 120,
     biomes: {
       [Biome.Forest]: 0.85,
       [Biome.Grassland]: 0.4,
@@ -460,7 +461,7 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "bush-2": {
     id: "bush-2",
     targetHeight: 1.2,
-    perChunkCap: 50,
+    perChunkCap: 85,
     biomes: { [Biome.Forest]: 0.75, [Biome.Grassland]: 0.35, [Biome.Hills]: 0.35 },
     maxSlope: 0.6,
     scale: [0.7, 1.4],
@@ -472,6 +473,9 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   "bush-3": {
     id: "bush-3",
     targetHeight: 1.5,
+    // High-poly bush (~15 k tris/instance). Buffers are sized from this cap, but the
+    // shipped config pins its spawn to 0 (speciesCap override) — it dominated the flora
+    // triangle budget. Raise it live via "Erweitert · pro Art".
     perChunkCap: 40,
     biomes: { [Biome.Forest]: 0.7, [Biome.Grassland]: 0.4, [Biome.Hills]: 0.4, [Biome.Taiga]: 0.4 },
     maxSlope: 0.6,
@@ -496,7 +500,8 @@ export const SPECIES: Readonly<Record<SpeciesId, SpeciesDef>> = {
   shrub: {
     id: "shrub",
     targetHeight: 1.0,
-    perChunkCap: 36,
+    // Cheap shrub (~120 tris) — raised to keep the understorey full without bush-3.
+    perChunkCap: 60,
     biomes: { [Biome.Grassland]: 0.5, [Biome.Forest]: 0.2, [Biome.Hills]: 0.35 },
     maxSlope: 0.6,
     scale: [0.7, 1.4],

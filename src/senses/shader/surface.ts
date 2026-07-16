@@ -23,6 +23,8 @@ export interface SurfaceDesc {
   distance?: FloatLike;
   light?: FloatLike;
   thermalBird?: FloatLike;
+  /** Ground mammals (deer, fox) — warm bodies with their own Infrarot heat knob. */
+  thermalMammal?: FloatLike;
   thermalTree?: FloatLike;
   thermalGround?: FloatLike;
   thermalGrass?: FloatLike;
@@ -40,6 +42,7 @@ export interface SenseSurface {
   distance: Node<"float">;
   light: Node<"float">;
   thermalBird: Node<"float">;
+  thermalMammal: Node<"float">;
   thermalTree: Node<"float">;
   thermalGround: Node<"float">;
   thermalGrass: Node<"float">;
@@ -68,6 +71,7 @@ export function normalizeSurface(desc: SurfaceDesc = {}): SenseSurface {
     distance: desc.distance !== undefined ? F(desc.distance) : positionView.z.negate(),
     light: desc.light !== undefined ? F(desc.light) : lambertLight(),
     thermalBird: F(desc.thermalBird ?? 0.0),
+    thermalMammal: F(desc.thermalMammal ?? 0.0),
     thermalTree: F(desc.thermalTree ?? 0.0),
     thermalGround: F(desc.thermalGround ?? 0.0),
     thermalGrass: F(desc.thermalGrass ?? 0.0),

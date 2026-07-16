@@ -401,6 +401,8 @@ export async function createCreatures(
   const materialFor = (
     source: THREE.Material,
     fallbackColor?: THREE.Color,
+    /** Ground mammal (deer/fox) → its own Infrarot heat channel, not the bird one. */
+    mammal = false,
   ): THREE.MeshBasicNodeMaterial => {
     const color =
       fallbackColor ??
@@ -409,7 +411,7 @@ export async function createCreatures(
         : new THREE.Color(0x8e98a8));
     const sourceMap =
       "map" in source && source.map instanceof THREE.Texture ? source.map : undefined;
-    const key = `${source.uuid}:${color.getHexString()}`;
+    const key = `${source.uuid}:${color.getHexString()}:${mammal ? "m" : "b"}`;
     const cached = materials.get(key);
     if (cached) return cached.material;
 
@@ -432,7 +434,8 @@ export async function createCreatures(
           uvSignal: float(0.4),
           distance: positionView.z.negate(),
           light: facing.mul(0.65).add(0.35),
-          thermalBird: float(1),
+          thermalBird: float(mammal ? 0 : 1),
+          thermalMammal: float(mammal ? 1 : 0),
           thermalObjectVariation: thermalVariation,
           thermalCenter: modelPosition,
           thermalRadius: modelRadius,
@@ -510,12 +513,16 @@ export async function createCreatures(
     THREE.AnimationClip.findByName(foxGltf.animations, FOX_WALK_CLIP) ?? foxGltf.animations[0];
   if (!foxWalkClip) throw new Error("[creatures] walk animation missing from fox-walk.glb");
 
-  const applyAnimalMaterials = (model: THREE.Object3D, fallbackColor?: THREE.Color): void => {
+  const applyAnimalMaterials = (
+    model: THREE.Object3D,
+    fallbackColor?: THREE.Color,
+    mammal = false,
+  ): void => {
     model.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return;
       child.material = Array.isArray(child.material)
-        ? child.material.map((source) => materialFor(source, fallbackColor))
-        : materialFor(child.material, fallbackColor);
+        ? child.material.map((source) => materialFor(source, fallbackColor, mammal))
+        : materialFor(child.material, fallbackColor, mammal);
       child.frustumCulled = false;
     });
   };
@@ -562,7 +569,7 @@ export async function createCreatures(
   const buildDeer = (homeKey: string, home: THREE.Vector3): Deer => {
     const model = cloneSkeleton(deerSource);
     // The deer mesh already faces the wrapper's +Z travel direction.
-    applyAnimalMaterials(model);
+    applyAnimalMaterials(model, undefined, true); // deer = warm mammal
     const object = new THREE.Group();
     object.add(model);
     const mixer = new THREE.AnimationMixer(model);
@@ -587,7 +594,7 @@ export async function createCreatures(
 
   const buildFox = (homeKey: string, home: THREE.Vector3): Fox => {
     const model = cloneSkeleton(foxSource);
-    applyAnimalMaterials(model, new THREE.Color(0xb85f35));
+    applyAnimalMaterials(model, new THREE.Color(0xb85f35), true); // fox = warm mammal
     const object = new THREE.Group();
     object.add(model);
     const mixer = new THREE.AnimationMixer(model);
