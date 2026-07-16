@@ -179,7 +179,6 @@ const PARAM_GROUPS: Group[] = [
       { key: "snowSoftness", label: "Snow softness", min: 0, max: 0.5, step: 0.01 },
       { key: "rockSlopeThreshold", label: "Rock slope", min: 0, max: 1, step: 0.01 },
       { key: "treeDensity", label: "Tree density", min: 0, max: 3, step: 0.05 },
-      { key: "rockDensity", label: "Rock density", min: 0, max: 3, step: 0.05 },
     ],
   },
   {

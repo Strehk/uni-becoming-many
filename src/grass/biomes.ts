@@ -4,24 +4,29 @@
 // grass species' biome affinities in `src/life/species.ts` (grass + grass-short,
 // now removed). This is the single source of truth for WHERE the GPU grass grows.
 //
-// The per-pixel grass mask a chunk contributes is `affinity[biome] × vegetation ×
-// slopeGate × (water ? 0 : 1)` — the same rejection layers `src/life/scatter.ts`
-// uses, collapsed into one scalar that the field texture carries to the GPU.
+// The per-pixel grass mask is deliberately simple: every dry terrain cell grows
+// grass. Mountains, snow, rock, desert and low-vegetation cells therefore remain
+// covered; only the terrain's semantic water mask cuts the field away.
 
 import { BIOME_COUNT, Biome } from "../terrain/index.ts";
 
-/** Steeper than this and grass stops (with a linear taper up to it). */
-const MAX_SLOPE = 0.7;
-
-/** Per-biome grass affinity, 0..1. Biomes absent from this map never grow grass. */
+/** Per-biome density, 0..1. Every biome starts enabled; ocean/lake/river cells
+ * are rejected by `water`, not by their discrete biome id. */
 const AFFINITY: Partial<Record<Biome, number>> = {
+  [Biome.Ocean]: 1.0,
+  [Biome.Coast]: 1.0,
+  [Biome.Beach]: 1.0,
   [Biome.Grassland]: 1.0,
-  [Biome.Hills]: 0.6,
-  [Biome.Tundra]: 0.4,
-  [Biome.Forest]: 0.35,
-  [Biome.Taiga]: 0.3,
-  [Biome.Beach]: 0.2,
-  [Biome.Wetland]: 0.15,
+  [Biome.Forest]: 1.0,
+  [Biome.Wetland]: 1.0,
+  [Biome.Desert]: 1.0,
+  [Biome.Hills]: 1.0,
+  [Biome.RockyMountain]: 1.0,
+  [Biome.SnowMountain]: 1.0,
+  [Biome.Lake]: 1.0,
+  [Biome.River]: 1.0,
+  [Biome.Tundra]: 1.0,
+  [Biome.Taiga]: 1.0,
 };
 
 /** Dense BASE affinity table indexed by biome id (avoids indexing a numeric-enum
@@ -60,13 +65,14 @@ export function setGrassBiomeConfig(mul: {
   scale(Biome.Hills, mul.hills);
 }
 
-/** Grass suitability 0..1 for one field cell. `biome`/`vegetation`/`slope`/`water`
- *  are the per-cell values from a chunk's `ChunkFields`. */
-export function grassMask(biome: number, vegetation: number, slope: number, water: number): number {
+/** Grass suitability 0..1 for one field cell. Vegetation and slope are accepted
+ * for the shared field contract but intentionally do not suppress dry grass. */
+export function grassMask(
+  biome: number,
+  _vegetation: number,
+  _slope: number,
+  water: number,
+): number {
   if (water !== 0) return 0;
-  const affinity = GRASS_AFFINITY[biome] ?? 0;
-  if (affinity <= 0) return 0;
-  if (slope >= MAX_SLOPE) return 0;
-  const slopeGate = 1 - slope / MAX_SLOPE;
-  return affinity * vegetation * slopeGate;
+  return GRASS_AFFINITY[biome] ?? 1;
 }

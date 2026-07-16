@@ -240,6 +240,7 @@ const creatures = await createCreatures(renderer.scene, bus, (x, z) => world.gro
   layers: senses.shader.compositor,
   config: floraFaunaConfig.fauna,
   groundObstacles: (x, z, radius) => life.treeObstaclesAround(x, z, radius),
+  waterAt: (x, z) => life.isWaterAt(x, z),
   // Butterflies flit toward real blooming flora — flowers ("blume") and the
   // scented bushes ("kraut") the scatter placed around the player.
   floraAttractors: (x, z, radius) =>

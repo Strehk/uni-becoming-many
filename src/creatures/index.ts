@@ -245,6 +245,11 @@ export interface Creatures {
   debugSnapshot(): {
     readonly visibility: { readonly birds: boolean; readonly groundFauna: boolean };
     readonly streamedChunks: number;
+    readonly mosquitoes: {
+      readonly swarms: number;
+      readonly particles: number;
+      readonly placed: boolean;
+    };
     readonly flying: Readonly<
       Record<FlyingKind, { readonly flocks: number; readonly animals: number }>
     >;
@@ -305,6 +310,9 @@ export interface CreatureSenseOptions {
   config?: FaunaConfig;
   /** Live tree-trunk query from the flora scatter. */
   groundObstacles?: GroundObstacleSource;
+  /** Semantic terrain-water lookup. A terrain height also exists below water,
+   *  so fauna placement must reject ocean/lake/river cells explicitly. */
+  waterAt?: (x: number, z: number) => boolean;
   /** Nearby flower/bush world positions — butterflies flit toward these. Returns
    *  the (x, z) of blooming flora within `radius`; empty far from any meadow. */
   floraAttractors?: (x: number, z: number, radius: number) => readonly { x: number; z: number }[];
@@ -618,6 +626,11 @@ export async function createCreatures(
   };
 
   const pose = signals.playerPose.peek();
+  const waterAt = (x: number, z: number): boolean => senseOpts.waterAt?.(x, z) ?? false;
+  const dryGroundAt = (x: number, z: number): number | null => {
+    const y = ground(x, z);
+    return y === null || waterAt(x, z) ? null : y;
+  };
 
   // Live fauna config — the update loop reads roam/speed from here; counts drive
   // the flock/mushroom rebuilds in `reconfigure`.
@@ -629,30 +642,41 @@ export async function createCreatures(
   // A flock waypoint: somewhere in the flock's roam ring around the player, at
   // soaring altitude over the local terrain (player height as the fallback
   // while the chunk under it is still streaming).
+  const rollDryGroundPoint = (
+    target: THREE.Vector3,
+    ring: { min: number; max: number },
+  ): boolean => {
+    for (let attempt = 0; attempt < 32; attempt++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = ring.min + Math.sqrt(Math.random()) * Math.max(0, ring.max - ring.min);
+      const x = pose.x + Math.cos(a) * r;
+      const z = pose.z + Math.sin(a) * r;
+      const y = dryGroundAt(x, z);
+      if (y === null) continue;
+      target.set(x, y, z);
+      return true;
+    }
+    return false;
+  };
+
   const rollWaypoint = (
     target: THREE.Vector3,
     ring: { min: number; max: number },
     kind: FlyingKind,
-  ): void => {
+  ): boolean => {
     const profile = KIND_PROFILES[kind];
-    let x: number;
-    let z: number;
     // Butterflies pick a real flower/bush in the ring when one is nearby, so they
     // congregate over meadows instead of wandering empty ground.
     const attractor = profile.attractFlora ? pickFloraAttractor(ring.max) : null;
-    if (attractor) {
-      x = attractor.x;
-      z = attractor.z;
-    } else {
-      const a = Math.random() * Math.PI * 2;
-      const r = ring.min + Math.random() * (ring.max - ring.min);
-      x = pose.x + Math.cos(a) * r;
-      z = pose.z + Math.sin(a) * r;
+    const attractorY = attractor ? dryGroundAt(attractor.x, attractor.z) : null;
+    if (attractor && attractorY !== null) {
+      target.set(attractor.x, attractorY, attractor.z);
+    } else if (!rollDryGroundPoint(target, ring)) {
+      return false;
     }
-    const g = ground(x, z);
     const [lo, hi] = profile.lift;
-    const y = (g ?? pose.y) + lo + Math.random() * (hi - lo);
-    target.set(x, y, z);
+    target.y += lo + Math.random() * (hi - lo);
+    return true;
   };
 
   /** A random flowering-flora point within `radius` of the player, or null when
@@ -668,6 +692,7 @@ export async function createCreatures(
   // keep a valid reference; motion caches target objects, so it re-reads on the
   // `creatures:birds-changed` event that `rebuildFlocks` emits.
   const birds: Bird[] = [];
+  let flyingPlacementPending = false;
 
   const randomFlockSize = (rawMin: number, rawMax: number): number => {
     const a = Math.max(1, Math.round(rawMin));
@@ -694,6 +719,8 @@ export async function createCreatures(
       for (let f = 0; f < count; f++) {
         const perFlock = randomFlockSize(rawMinPerFlock, rawMaxPerFlock);
         const ring = ringFor(f, count, roamScale);
+        const start = new THREE.Vector3();
+        if (!rollDryGroundPoint(start, ring)) continue;
         const flockIndex = flocks.length;
         const flock: Flock = {
           waypoint: new THREE.Vector3(),
@@ -703,23 +730,31 @@ export async function createCreatures(
           ringCount: count,
           members: [],
         };
-        rollWaypoint(flock.waypoint, ring, kind);
+        if (!rollWaypoint(flock.waypoint, ring, kind)) continue;
         flocks.push(flock);
 
         // Each flock spawns as a loose, species-pure cloud in its own ring, at
         // the kind's own altitude band over the local ground (low for meise /
         // butterflies, soaring for birds / bats).
         const profile = KIND_PROFILES[kind];
-        const a = Math.random() * Math.PI * 2;
-        const r = ring.min + Math.random() * (ring.max - ring.min) * 0.7;
-        const cx = pose.x + Math.cos(a) * r;
-        const cz = pose.z + Math.sin(a) * r;
+        const cx = start.x;
+        const cz = start.z;
         const spread = kind === "butterfly" ? 8 : kind === "meise" ? 16 : 24;
         for (let i = 0; i < perFlock; i++) {
           const { root, mixer } = buildAnimal(kind);
-          const sx = cx + (Math.random() - 0.5) * spread;
-          const sz = cz + (Math.random() - 0.5) * spread;
-          const sg = ground(sx, sz) ?? pose.y;
+          let sx = cx;
+          let sz = cz;
+          let sg = start.y;
+          for (let attempt = 0; attempt < 12; attempt++) {
+            const candidateX = cx + (Math.random() - 0.5) * spread;
+            const candidateZ = cz + (Math.random() - 0.5) * spread;
+            const candidateY = dryGroundAt(candidateX, candidateZ);
+            if (candidateY === null) continue;
+            sx = candidateX;
+            sz = candidateZ;
+            sg = candidateY;
+            break;
+          }
           root.position.set(
             sx,
             sg + profile.lift[0] + Math.random() * (profile.lift[1] - profile.lift[0]),
@@ -771,13 +806,16 @@ export async function createCreatures(
       fauna.butterflyMaxPerFlock,
       fauna.butterflyRoamScale,
     );
+    const requestedFlocks =
+      fauna.flockCount + fauna.batFlockCount + fauna.meiseFlockCount + fauna.butterflyFlockCount;
+    flyingPlacementPending = requestedFlocks > 0 && flocks.length === 0;
     if (emit) bus.emit("creatures:birds-changed");
   };
   rebuildFlocks(false);
 
   // Model-free world mosquitoes: compact, ground-near swarms whose anchors
   // remain fixed until the player has travelled far beyond their area.
-  const mosquitoes = createMosquitoFlocks(group, ground, fauna);
+  const mosquitoes = createMosquitoFlocks(group, ground, waterAt, fauna, senseOpts.layers);
 
   // ── mushrooms ──
   const mushrooms: THREE.Vector3[] = [];
@@ -791,10 +829,8 @@ export async function createCreatures(
       const r = 10 + Math.sqrt(Math.random()) * fauna.mushroomRadius;
       const x = pose.x + Math.cos(a) * r;
       const z = pose.z + Math.sin(a) * r;
-      const y = ground(x, z);
-      if (y === null) {
-        continue;
-      }
+      const y = dryGroundAt(x, z);
+      if (y === null) continue;
       next.push(new THREE.Vector3(x, y + 0.15, z));
     }
     if (target > 0 && next.length < 4) {
@@ -830,6 +866,7 @@ export async function createCreatures(
   };
 
   const pointIsClear = (x: number, z: number, clearance: number): boolean => {
+    if (waterAt(x, z)) return false;
     const obstacles = senseOpts.groundObstacles?.(x, z, clearance) ?? [];
     return obstacles.every((obstacle) => {
       const dx = x - obstacle.x;
@@ -850,6 +887,11 @@ export async function createCreatures(
     const sz = toZ - fromZ;
     const lengthSq = sx * sx + sz * sz;
     const length = Math.sqrt(lengthSq);
+    const waterSteps = Math.max(1, Math.ceil(length / 4));
+    for (let i = 0; i <= waterSteps; i++) {
+      const t = i / waterSteps;
+      if (waterAt(fromX + sx * t, fromZ + sz * t)) return false;
+    }
     const midX = (fromX + toX) * 0.5;
     const midZ = (fromZ + toZ) * 0.5;
     const obstacles = senseOpts.groundObstacles?.(midX, midZ, length * 0.5 + clearance) ?? [];
@@ -929,7 +971,8 @@ export async function createCreatures(
         deer &&
         i < target &&
         dx * dx + dz * dz <= retainRadiusSq &&
-        ground(deer.object.position.x, deer.object.position.z) !== null
+        ground(deer.object.position.x, deer.object.position.z) !== null &&
+        !waterAt(deer.object.position.x, deer.object.position.z)
       ) {
         continue;
       }
@@ -980,7 +1023,8 @@ export async function createCreatures(
         fox &&
         i < target &&
         dx * dx + dz * dz <= retainRadiusSq &&
-        ground(fox.object.position.x, fox.object.position.z) !== null
+        ground(fox.object.position.x, fox.object.position.z) !== null &&
+        !waterAt(fox.object.position.x, fox.object.position.z)
       ) {
         continue;
       }
@@ -1040,6 +1084,10 @@ export async function createCreatures(
     },
     onChunkBuilt(info: ChunkBuiltInfo): void {
       streamedGroundChunks.add(groundChunkKey(info.gridX, info.gridZ));
+      // Creature creation precedes terrain streaming. If no dry spawn point was
+      // available at boot, retry once real land fields arrive rather than using
+      // the old underwater/unknown-ground fallback.
+      if (flyingPlacementPending) rebuildFlocks(true);
       reconcileDeer(true);
       reconcileFoxes(true);
     },
@@ -1140,6 +1188,11 @@ export async function createCreatures(
       return {
         visibility: { birds: birdGroup.visible, groundFauna: groundFaunaGroup.visible },
         streamedChunks: streamedGroundChunks.size,
+        mosquitoes: {
+          swarms: mosquitoes.swarmCount,
+          particles: mosquitoes.count,
+          placed: mosquitoes.placed,
+        },
         flying,
         deer: deers.map((deer) => {
           const nearby =
@@ -1328,12 +1381,11 @@ export async function createCreatures(
         const centroidDz = centre.z - pose.z;
         const reanchorRadius = ring.max + BOUNDARY_MARGIN * 2;
         if (centroidDx * centroidDx + centroidDz * centroidDz > reanchorRadius * reanchorRadius) {
-          const angle = Math.random() * Math.PI * 2;
-          const radius = ring.min + Math.random() * Math.max(0, ring.max - ring.min);
-          const targetX = pose.x + Math.cos(angle) * radius;
-          const targetZ = pose.z + Math.sin(angle) * radius;
-          const targetY =
-            (ground(targetX, targetZ) ?? pose.y) + MIN_ALTITUDE + 10 + Math.random() * 25;
+          const target = new THREE.Vector3();
+          if (!rollDryGroundPoint(target, ring)) continue;
+          const targetX = target.x;
+          const targetZ = target.z;
+          const targetY = target.y + MIN_ALTITUDE + 10 + Math.random() * 25;
           const offsetX = targetX - centre.x;
           const offsetY = targetY - centre.y;
           const offsetZ = targetZ - centre.z;

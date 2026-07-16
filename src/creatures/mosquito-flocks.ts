@@ -1,16 +1,28 @@
 // ── Becoming Many — persistent ground-near mosquito fauna ─────
 
-import { instancedBufferAttribute, smoothstep, uniform, uv, vec3 } from "three/tsl";
+import {
+  float,
+  instancedBufferAttribute,
+  positionView,
+  smoothstep,
+  uniform,
+  uv,
+  vec3,
+} from "three/tsl";
 import * as THREE from "three/webgpu";
 import type { FaunaConfig } from "../flora-fauna/config.ts";
+import type { FloraLayerCompositor } from "../life/material.ts";
 import { signals } from "../signals/index.ts";
 
 const MAX_SWARMS = 48;
 const MAX_PER_SWARM = 400;
 export const MAX_FAUNA_MOSQUITOES = MAX_SWARMS * MAX_PER_SWARM;
 
-const ANCHOR_MIN_RADIUS = 12;
-const ANCHOR_MAX_RADIUS = 85;
+// Like the modelled fauna, mosquito swarms occupy individual player-centred
+// distance rings. Their entire envelope is lower and nearer than the flying
+// bird/bat rings because mosquitoes remain a ground-near species.
+const NEAR_RING = { min: 5, max: 18 };
+const FAR_RING = { min: 35, max: 65 };
 const REANCHOR_DISTANCE = 110;
 const GROUND_HEIGHT = 0.9;
 const BASE_RADIUS = 1.45;
@@ -21,6 +33,7 @@ const MAX_FORCE = 13;
 const NEIGHBOUR_SAMPLES = 8;
 
 type GroundSource = (x: number, z: number) => number | null;
+type WaterSource = (x: number, z: number) => boolean;
 
 interface Swarm {
   readonly start: number;
@@ -30,7 +43,9 @@ interface Swarm {
 
 export interface MosquitoFlocks {
   readonly maxPoints: number;
+  readonly swarmCount: number;
   readonly count: number;
+  readonly placed: boolean;
   getWorldPositions(): Float32Array;
   reconfigure(config: FaunaConfig): void;
   update(dt: number): void;
@@ -57,11 +72,15 @@ function signedNoise(index: number, channel: number, step: number): number {
 export function createMosquitoFlocks(
   parent: THREE.Object3D,
   ground: GroundSource,
+  waterAt: WaterSource,
   initialConfig: FaunaConfig,
+  layers?: FloraLayerCompositor,
 ): MosquitoFlocks {
   let config = structuredClone(initialConfig);
   let activeCount = 0;
   let activeWorldPositions = new Float32Array(0);
+  const emptyWorldPositions = new Float32Array(0);
+  let anchorsReady = false;
   let elapsed = 0;
 
   const localPositions = new Float32Array(MAX_FAUNA_MOSQUITOES * 3);
@@ -78,10 +97,40 @@ export function createMosquitoFlocks(
   const material = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false });
   material.blending = THREE.NormalBlending;
   material.toneMapped = false;
-  material.positionNode = instancedBufferAttribute<"vec3">(positionAttribute, "vec3");
-  material.colorNode = vec3(0.012, 0.014, 0.02);
+  // Sprite geometry has no authored normal. Flat shading derives the correct
+  // camera-facing normal from screen-space derivatives, so the shared thermal
+  // shader can evaluate form without a missing-normal WebGPU warning.
+  Object.assign(material, { flatShading: true });
+  const instancePosition = instancedBufferAttribute<"vec3">(positionAttribute, "vec3");
+  material.positionNode = instancePosition;
+  const albedo = vec3(0.012, 0.014, 0.02);
+  const rewireMaterial = (): void => {
+    material.colorNode = layers
+      ? layers.buildColorNode(
+          {
+            albedo,
+            tempK: float(310),
+            uvSignal: float(0),
+            distance: positionView.z.negate(),
+            light: float(1),
+            // Mosquitoes use the existing warm-animal category. The instance
+            // position is both sprite centre and thermal object centre.
+            thermalBird: float(1),
+            thermalObjectVariation: float(0),
+            thermalCenter: instancePosition,
+            thermalRadius: float(0.07),
+          },
+          albedo,
+        )
+      : albedo;
+    material.needsUpdate = true;
+  };
+  rewireMaterial();
+  const unsubscribeLayers = layers?.onStructureChange(rewireMaterial);
   material.opacityNode = smoothstep(0.5, 0.12, uv().sub(0.5).length()).mul(0.9);
-  material.scaleNode = uniform(0.026);
+  // Still reads as a tiny insect up close, but remains a visible particle at the
+  // outer fauna ring instead of collapsing below one pixel almost immediately.
+  material.scaleNode = uniform(0.07);
 
   const particles = new THREE.Sprite(material);
   particles.name = "fauna-mosquito-flocks";
@@ -92,20 +141,27 @@ export function createMosquitoFlocks(
 
   const pose = signals.playerPose.peek();
 
-  const rollAnchor = (target: THREE.Vector3): void => {
+  const ringFor = (index: number, count: number): { min: number; max: number } => {
+    const t = count <= 1 ? 0 : index / (count - 1);
+    return {
+      min: THREE.MathUtils.lerp(NEAR_RING.min, FAR_RING.min, t),
+      max: THREE.MathUtils.lerp(NEAR_RING.max, FAR_RING.max, t),
+    };
+  };
+
+  const rollAnchor = (index: number, count: number): THREE.Vector3 | null => {
+    const ring = ringFor(index, count);
     for (let attempt = 0; attempt < 16; attempt++) {
       const angle = Math.random() * Math.PI * 2;
-      const radius =
-        ANCHOR_MIN_RADIUS + Math.sqrt(Math.random()) * (ANCHOR_MAX_RADIUS - ANCHOR_MIN_RADIUS);
+      const radius = ring.min + Math.sqrt(Math.random()) * (ring.max - ring.min);
       const x = pose.x + Math.cos(angle) * radius;
       const z = pose.z + Math.sin(angle) * radius;
       const y = ground(x, z);
-      if (y !== null) {
-        target.set(x, y + GROUND_HEIGHT, z);
-        return;
+      if (y !== null && !waterAt(x, z)) {
+        return new THREE.Vector3(x, y + GROUND_HEIGHT, z);
       }
     }
-    target.set(pose.x, (ground(pose.x, pose.z) ?? pose.y) + GROUND_HEIGHT, pose.z);
+    return null;
   };
 
   const updateWorldPositions = (): void => {
@@ -125,15 +181,34 @@ export function createMosquitoFlocks(
     positionAttribute.needsUpdate = true;
   };
 
-  const repositionSwarms = (): void => {
-    for (const swarm of swarms) rollAnchor(swarm.anchor);
+  /** Transactional placement: until every swarm has real streamed ground, keep
+   *  the particle draw hidden and retry on following frames. This avoids the old
+   *  boot fallback that stacked all swarms at the uninitialised player origin. */
+  const repositionSwarms = (): boolean => {
+    const nextAnchors: THREE.Vector3[] = [];
+    for (let index = 0; index < swarms.length; index++) {
+      const next = rollAnchor(index, swarms.length);
+      if (!next) return false;
+      nextAnchors.push(next);
+    }
+    for (let index = 0; index < swarms.length; index++) {
+      const swarm = swarms[index];
+      const next = nextAnchors[index];
+      if (!swarm || !next) return false;
+      swarm.anchor.copy(next);
+    }
+    anchorsReady = true;
     anchorOrigin.set(pose.x, pose.z);
     updateWorldPositions();
+    particles.visible = activeCount > 0;
+    return true;
   };
 
   const rebuild = (): void => {
     swarms.length = 0;
     activeCount = 0;
+    anchorsReady = false;
+    particles.visible = false;
     const swarmCount = THREE.MathUtils.clamp(Math.round(config.mosquitoSwarmCount), 0, MAX_SWARMS);
     for (let flock = 0; flock < swarmCount; flock++) {
       const count = Math.min(
@@ -141,7 +216,6 @@ export function createMosquitoFlocks(
         MAX_FAUNA_MOSQUITOES - activeCount,
       );
       const swarm: Swarm = { start: activeCount, count, anchor: new THREE.Vector3() };
-      rollAnchor(swarm.anchor);
       swarms.push(swarm);
 
       for (let localIndex = 0; localIndex < count; localIndex++) {
@@ -166,20 +240,25 @@ export function createMosquitoFlocks(
     }
     activeWorldPositions = worldPositions.subarray(0, activeCount * 3);
     particles.count = Math.max(1, activeCount);
-    particles.visible = activeCount > 0;
     anchorOrigin.set(pose.x, pose.z);
-    updateWorldPositions();
+    if (activeCount > 0) repositionSwarms();
   };
 
   rebuild();
 
   return {
     maxPoints: MAX_FAUNA_MOSQUITOES,
+    get swarmCount(): number {
+      return anchorsReady ? swarms.length : 0;
+    },
     get count(): number {
-      return activeCount;
+      return anchorsReady ? activeCount : 0;
+    },
+    get placed(): boolean {
+      return anchorsReady;
     },
     getWorldPositions(): Float32Array {
-      return activeWorldPositions;
+      return anchorsReady ? activeWorldPositions : emptyWorldPositions;
     },
     reconfigure(next: FaunaConfig): void {
       const countsChanged =
@@ -190,13 +269,17 @@ export function createMosquitoFlocks(
       if (countsChanged) rebuild();
     },
     update(dt: number): void {
-      if (dt <= 0 || activeCount === 0) return;
-      elapsed += dt;
+      if (activeCount === 0) return;
+      // Terrain streams after creatures are created. Placement therefore retries
+      // independently of virtual time, just like ground-fauna reconciliation.
+      if (!anchorsReady && !repositionSwarms()) return;
       const dx = pose.x - anchorOrigin.x;
       const dz = pose.z - anchorOrigin.y;
       if (dx * dx + dz * dz > REANCHOR_DISTANCE * REANCHOR_DISTANCE) {
         repositionSwarms();
       }
+      if (dt <= 0) return;
+      elapsed += dt;
 
       const spread = Math.max(0.1, config.mosquitoSpread);
       const radiusLimit = BASE_RADIUS * spread;
@@ -274,17 +357,26 @@ export function createMosquitoFlocks(
             nextVy *= velocityScale;
             nextVz *= velocityScale;
           }
+          const proposedY = py + nextVy * step;
+          // The soft boids force shapes the cloud; this hard safety envelope is
+          // what guarantees that numerical overshoot never sends a mosquito
+          // below the terrain. The centre remains only 0.9 m above ground.
+          const minLocalY = -GROUND_HEIGHT + 0.18;
+          const nextY = THREE.MathUtils.clamp(proposedY, minLocalY, heightLimit);
+          if (proposedY < minLocalY) nextVy = Math.abs(nextVy) * 0.35;
+          else if (proposedY > heightLimit) nextVy = -Math.abs(nextVy) * 0.35;
           velocities[index] = nextVx;
           velocities[index + 1] = nextVy;
           velocities[index + 2] = nextVz;
           localPositions[index] = px + nextVx * step;
-          localPositions[index + 1] = py + nextVy * step;
+          localPositions[index + 1] = nextY;
           localPositions[index + 2] = pz + nextVz * step;
         }
       }
       updateWorldPositions();
     },
     dispose(): void {
+      unsubscribeLayers?.();
       particles.removeFromParent();
       material.dispose();
     },

@@ -2,14 +2,23 @@
   "version": 1,
   "provider": "worldgen",
   "config": {
-    "seed": 1337,
+    "seed": 2048,
     "amplitude": 1,
     "frequency": 1,
     "octaves": 4
   },
   "params": {
     "biomeLakeFrequency": 0,
-    "biomeOceanFrequency": 0.3,
-    "biomeOceanSize": 0.2
+    "biomeOceanFrequency": 0.95,
+    "biomeOceanSize": 0.55,
+    "biomeSnowMountainFrequency": 0,
+    "biomeRockyMountainFrequency": 0.15,
+    "mountainStrength": 0.05,
+    "heightScale": 0.5,
+    "biomeHillsFrequency": 0.65,
+    "ridgeStrength": 0.31,
+    "biomeLakeSize": 0.2,
+    "waterLevel": 0.17,
+    "noiseScale": 135
   }
 }

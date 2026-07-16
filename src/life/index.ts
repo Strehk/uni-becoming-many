@@ -145,7 +145,10 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
   // module + the effective-cap lookup below.
   let config: FloraConfig = opts.config ?? DEFAULT_CONFIG.flora;
   setWoodlandConfig(config);
-  const capOf = new Map<SpeciesId, number>(SPECIES_IDS.map((id) => [id, effectiveCap(id, config)]));
+  const activeSpeciesIds = SPECIES_IDS.filter((id) => SPECIES_CATEGORY[id] !== "rock");
+  const capOf = new Map<SpeciesId, number>(
+    activeSpeciesIds.map((id) => [id, effectiveCap(id, config)]),
+  );
 
   /** The species' biome-affinity table with the config's biome-specific extras
    *  folded in (flowerMeadow/bushMeadow multiply the category's Grassland entry). */
@@ -216,7 +219,7 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
   // (the order is also the PRNG salt, so it must not be re-derived elsewhere).
   // Buffers are sized for the density CEILING (reserveCap = baseCap × MAX_DENSITY),
   // so live density edits re-scatter into the same buffers without reallocation.
-  const species = SPECIES_IDS.map((id) => {
+  const species = activeSpeciesIds.map((id) => {
     const def = SPECIES[id];
     const partList = parts.get(id);
     if (!partList) throw new Error(`[life] no geometry loaded for species "${id}"`);
@@ -255,9 +258,13 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
     const spots: ScentSpot[] = [];
     const obstacles: TreeObstacle[] = [];
     const anchors: RootAnchor[] = [];
-    for (const [index, s] of species.entries()) {
+    for (const s of species) {
       const cap = capOf.get(s.id) ?? s.def.perChunkCap;
-      const block = scatterChunk(info, entry, s.def, s.affinity, index, cap, s.mods);
+      // Keep the registry index as the deterministic PRNG salt even though rock
+      // species are no longer instantiated. Removing them must not reshuffle the
+      // placement of every species that followed them in SPECIES_IDS.
+      const speciesSalt = SPECIES_IDS.indexOf(s.id);
+      const block = scatterChunk(info, entry, s.def, s.affinity, speciesSalt, cap, s.mods);
       s.instances.addChunk(k, block);
 
       const category = SPECIES_CATEGORY[s.id];
@@ -444,7 +451,7 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
     applyConfig(next: FloraConfig): void {
       config = next;
       setWoodlandConfig(config);
-      for (const id of SPECIES_IDS) capOf.set(id, effectiveCap(id, config));
+      for (const id of activeSpeciesIds) capOf.set(id, effectiveCap(id, config));
       for (const s of species) {
         s.affinity = affinityFor(s.id);
         s.mods = modsFor(s.id);

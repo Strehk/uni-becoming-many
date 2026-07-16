@@ -51,7 +51,6 @@ const GROUPS: Group[] = [
         step: 0.05,
       },
       { kind: "slider", key: "flora.mushroomDensity", label: "Pilze", min: 0, max: 2, step: 0.05 },
-      { kind: "slider", key: "flora.rockDensity", label: "Steine", min: 0, max: 2, step: 0.05 },
       {
         kind: "slider",
         key: "flora.deadwoodDensity",
@@ -235,20 +234,6 @@ const GROUPS: Group[] = [
         min: 4,
         max: 120,
         step: 1,
-      },
-    ],
-  },
-  {
-    title: "Steine",
-    open: false,
-    specs: [
-      {
-        kind: "slider",
-        key: "flora.rockSlopeBias",
-        label: "Hang-Vorliebe",
-        min: 0,
-        max: 1,
-        step: 0.05,
       },
     ],
   },

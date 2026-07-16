@@ -236,7 +236,7 @@ export const DEFAULT_CONFIG: FloraFaunaConfig = {
     undergrowthDensity: 1,
     flowerDensity: 1,
     mushroomDensity: 1,
-    rockDensity: 1,
+    rockDensity: 0,
     deadwoodDensity: 1,
     nadelAnteil: 0.5,
     mischBreite: 0.3,
