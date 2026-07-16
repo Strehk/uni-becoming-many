@@ -10,7 +10,7 @@
 // controller's one handler applies them (density → re-scatter, counts → rebuild).
 
 import type { Bus } from "../signals/index.ts";
-import { DEFAULT_CONFIG, type FloraFaunaConfig } from "./config.ts";
+import { DEFAULT_CONFIG, type FloraFaunaConfig, normalizeFaunaConfig } from "./config.ts";
 import type { FloraFaunaController, FloraFaunaStateFile } from "./index.ts";
 import savedFloraFaunaState from "./state.json";
 
@@ -53,7 +53,7 @@ export function configFromState(state: unknown): FloraFaunaConfig {
 
   return {
     flora: { ...DEFAULT_CONFIG.flora, ...config.flora },
-    fauna,
+    fauna: normalizeFaunaConfig(fauna),
   };
 }
 

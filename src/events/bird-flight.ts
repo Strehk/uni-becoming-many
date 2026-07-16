@@ -29,6 +29,7 @@ import type { AnchorPose, EventGroundSource } from "./types.ts";
 export interface LoadedBirdModel {
   scene: THREE.Object3D;
   animations: THREE.AnimationClip[];
+  cleanup?: () => void;
 }
 
 export interface BirdFlightOptions {
@@ -157,6 +158,7 @@ export class BirdFlight {
   private modelScene: THREE.Object3D | null = null;
   private carrier: THREE.Object3D | null = null;
   private routeLine: THREE.Line | null = null;
+  private modelCleanup: (() => void) | null = null;
 
   private introPath: THREE.Vector3[] | null = null;
   private introTimes: number[] = [];
@@ -218,6 +220,7 @@ export class BirdFlight {
     }
 
     this.modelScene = loaded.scene;
+    this.modelCleanup = loaded.cleanup ?? null;
     if (this.options.scale != null) {
       this.modelScene.scale.setScalar(this.options.scale);
     }
@@ -317,6 +320,8 @@ export class BirdFlight {
 
   dispose(): void {
     this.root.removeFromParent();
+    this.modelCleanup?.();
+    this.modelCleanup = null;
 
     if (this.mixer && this.modelScene) {
       this.mixer.stopAllAction();

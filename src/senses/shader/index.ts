@@ -60,7 +60,7 @@ const LAYER_EASE_SECONDS = 2.5;
 /** The structural interface the terrain material consumes (declared terrain-side too —
  *  structurally identical, so no import direction terrain → senses is needed). */
 export interface ShaderLayerCompositor {
-  buildColorNode(surface: SurfaceDesc): Node<"vec3">;
+  buildColorNode(surface: SurfaceDesc, baseColor?: Node<"vec3">): Node<"vec3">;
   onStructureChange(cb: () => void): () => void;
 }
 
@@ -167,7 +167,7 @@ export function createShaderSenses(bus: Bus): ShaderSenses {
   return {
     system,
     compositor: {
-      buildColorNode: (surface) => system.buildColorNode(surface),
+      buildColorNode: (surface, baseColor) => system.buildColorNode(surface, baseColor),
       onStructureChange: (cb) => system.on(cb),
     },
     controls() {

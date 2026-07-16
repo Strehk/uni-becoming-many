@@ -346,6 +346,7 @@ const events = createEvents({
   camera: renderer.camera,
   bus,
   uniforms: senses.uniforms,
+  layers: senses.shader.compositor,
 });
 window.addEventListener("pagehide", () => events.dispose());
 

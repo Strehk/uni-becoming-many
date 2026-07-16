@@ -136,9 +136,12 @@ export class SenseSystem {
   }
 
   // ── compositing ──
-  buildColorNode(surfaceDesc: SurfaceDesc = {}): Node<"vec3"> {
+  buildColorNode(
+    surfaceDesc: SurfaceDesc = {},
+    baseColor: Node<"vec3"> = uBaseColor.rgb,
+  ): Node<"vec3"> {
     const surface = normalizeSurface(surfaceDesc);
-    let out: Node<"vec3"> = uBaseColor.rgb;
+    let out: Node<"vec3"> = baseColor;
     for (const s of this.senses) {
       const col = s.build(surface);
       // Perception bubble: full effect up to `range`, soft fade behind (base beyond).

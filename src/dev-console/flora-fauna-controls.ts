@@ -23,6 +23,7 @@ export interface FloraFaunaControls {
 
 type Spec =
   | { kind: "slider"; key: string; label: string; min: number; max: number; step: number }
+  | { kind: "count"; key: string; label: string; min: number; max: number; step: number }
   | { kind: "number"; key: string; label: string; min: number; max: number; step: number };
 type Group = { title: string; open?: boolean; specs: Spec[] };
 
@@ -258,9 +259,9 @@ const GROUPS: Group[] = [
     title: "Fauna · Vögel",
     open: true,
     specs: [
-      { kind: "number", key: "fauna.flockCount", label: "Schwärme", min: 1, max: 12, step: 1 },
+      { kind: "count", key: "fauna.flockCount", label: "Schwärme", min: 1, max: 48, step: 1 },
       {
-        kind: "slider",
+        kind: "count",
         key: "fauna.birdMinPerFlock",
         label: "Vögel / Schwarm · Min",
         min: 1,
@@ -268,7 +269,7 @@ const GROUPS: Group[] = [
         step: 1,
       },
       {
-        kind: "slider",
+        kind: "count",
         key: "fauna.birdMaxPerFlock",
         label: "Vögel / Schwarm · Max",
         min: 1,
@@ -298,15 +299,15 @@ const GROUPS: Group[] = [
     open: true,
     specs: [
       {
-        kind: "number",
+        kind: "count",
         key: "fauna.batFlockCount",
         label: "Schwärme",
         min: 1,
-        max: 12,
+        max: 48,
         step: 1,
       },
       {
-        kind: "slider",
+        kind: "count",
         key: "fauna.batMinPerFlock",
         label: "Fledermäuse / Schwarm · Min",
         min: 1,
@@ -314,7 +315,7 @@ const GROUPS: Group[] = [
         step: 1,
       },
       {
-        kind: "slider",
+        kind: "count",
         key: "fauna.batMaxPerFlock",
         label: "Fledermäuse / Schwarm · Max",
         min: 1,
@@ -343,21 +344,21 @@ const GROUPS: Group[] = [
     title: "Fauna · Meisen",
     open: true,
     specs: [
-      { kind: "number", key: "fauna.meiseFlockCount", label: "Schwärme", min: 0, max: 12, step: 1 },
+      { kind: "count", key: "fauna.meiseFlockCount", label: "Schwärme", min: 0, max: 48, step: 1 },
       {
-        kind: "slider",
+        kind: "count",
         key: "fauna.meiseMinPerFlock",
         label: "Meisen / Schwarm · Min",
         min: 1,
-        max: 30,
+        max: 80,
         step: 1,
       },
       {
-        kind: "slider",
+        kind: "count",
         key: "fauna.meiseMaxPerFlock",
         label: "Meisen / Schwarm · Max",
         min: 1,
-        max: 30,
+        max: 80,
         step: 1,
       },
       {
@@ -383,27 +384,27 @@ const GROUPS: Group[] = [
     open: true,
     specs: [
       {
-        kind: "number",
+        kind: "count",
         key: "fauna.butterflyFlockCount",
         label: "Gruppen",
         min: 0,
-        max: 20,
+        max: 48,
         step: 1,
       },
       {
-        kind: "slider",
+        kind: "count",
         key: "fauna.butterflyMinPerFlock",
         label: "Falter / Gruppe · Min",
         min: 1,
-        max: 20,
+        max: 80,
         step: 1,
       },
       {
-        kind: "slider",
+        kind: "count",
         key: "fauna.butterflyMaxPerFlock",
         label: "Falter / Gruppe · Max",
         min: 1,
-        max: 20,
+        max: 80,
         step: 1,
       },
       {
@@ -429,15 +430,15 @@ const GROUPS: Group[] = [
     open: true,
     specs: [
       {
-        kind: "number",
+        kind: "count",
         key: "fauna.mosquitoSwarmCount",
         label: "Schwärme",
         min: 0,
-        max: 12,
+        max: 48,
         step: 1,
       },
       {
-        kind: "slider",
+        kind: "count",
         key: "fauna.mosquitoMinPerSwarm",
         label: "Mücken / Schwarm · Min",
         min: 1,
@@ -445,7 +446,7 @@ const GROUPS: Group[] = [
         step: 1,
       },
       {
-        kind: "slider",
+        kind: "count",
         key: "fauna.mosquitoMaxPerSwarm",
         label: "Mücken / Schwarm · Max",
         min: 1,
@@ -474,7 +475,7 @@ const GROUPS: Group[] = [
     title: "Fauna · Pilze",
     open: true,
     specs: [
-      { kind: "number", key: "fauna.mushroomCount", label: "Anzahl", min: 0, max: 120, step: 1 },
+      { kind: "count", key: "fauna.mushroomCount", label: "Anzahl", min: 0, max: 480, step: 1 },
       {
         kind: "slider",
         key: "fauna.mushroomRadius",
@@ -489,7 +490,7 @@ const GROUPS: Group[] = [
     title: "Fauna · Hirsch",
     open: true,
     specs: [
-      { kind: "number", key: "fauna.deerCount", label: "Anzahl", min: 0, max: 16, step: 1 },
+      { kind: "count", key: "fauna.deerCount", label: "Anzahl", min: 0, max: 64, step: 1 },
       { kind: "slider", key: "fauna.deerScale", label: "Größe ×", min: 0.4, max: 2, step: 0.05 },
       { kind: "slider", key: "fauna.deerSpeed", label: "Tempo (m/s)", min: 0.3, max: 3, step: 0.1 },
       {
@@ -514,7 +515,7 @@ const GROUPS: Group[] = [
     title: "Fauna · Fuchs",
     open: true,
     specs: [
-      { kind: "number", key: "fauna.foxCount", label: "Anzahl", min: 0, max: 24, step: 1 },
+      { kind: "count", key: "fauna.foxCount", label: "Anzahl", min: 0, max: 96, step: 1 },
       { kind: "slider", key: "fauna.foxScale", label: "Größe ×", min: 0.01, max: 2, step: 0.01 },
       { kind: "slider", key: "fauna.foxSpeed", label: "Tempo (m/s)", min: 0.3, max: 4, step: 0.1 },
       {
@@ -601,31 +602,41 @@ export function createFloraFaunaControls(bus: Bus, config: FloraFaunaConfig): Fl
     label.textContent = spec.label;
     const start = startValue(config, spec.key);
 
-    if (spec.kind === "slider") {
-      // The readout is an EDITABLE number field: typing commits unclamped, so
-      // the slider range is a convenience, never a limit.
+    if (spec.kind === "slider" || spec.kind === "count") {
+      // Counts use the same field + slider UI as continuous values, but their
+      // supported range is a real runtime capacity rather than a display hint.
+      const boundedCount = spec.kind === "count";
       const value = document.createElement("input");
       value.type = "number";
       value.className = "ff-valnum";
+      if (boundedCount) {
+        value.min = String(spec.min);
+        value.max = String(spec.max);
+      }
       value.step = String(spec.step);
       const input = document.createElement("input");
       input.type = "range";
       input.min = String(spec.min);
       input.max = String(spec.max);
       input.step = String(spec.step);
-      input.value = String(clamp(start, spec.min, spec.max));
-      value.value = fmt(start, spec.step);
+      const displayStart = boundedCount ? Math.round(clamp(start, spec.min, spec.max)) : start;
+      input.value = String(clamp(displayStart, spec.min, spec.max));
+      value.value = fmt(displayStart, spec.step);
       input.addEventListener("input", () => {
         const v = Number.parseFloat(input.value);
         if (document.activeElement !== value) value.value = fmt(v, spec.step);
         emit(spec.key, v);
       });
-      value.addEventListener("change", () => {
-        const v = Number.parseFloat(value.value);
-        if (!Number.isFinite(v)) return;
-        input.value = String(clamp(v, spec.min, spec.max)); // slider display only
+      const commitValue = (): void => {
+        const raw = Number.parseFloat(value.value);
+        if (!Number.isFinite(raw)) return;
+        const v = boundedCount ? Math.round(clamp(raw, spec.min, spec.max)) : raw;
+        input.value = String(clamp(v, spec.min, spec.max));
+        if (boundedCount) value.value = fmt(v, spec.step);
         emit(spec.key, v);
-      });
+      };
+      value.addEventListener("input", commitValue);
+      value.addEventListener("change", commitValue);
       value.addEventListener("keydown", (e) => e.stopPropagation()); // typing here ≠ global hotkeys
       row.append(label, value, input);
       widgets.push({

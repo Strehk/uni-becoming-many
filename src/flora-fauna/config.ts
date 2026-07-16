@@ -308,6 +308,34 @@ const CATEGORY_KEY: Record<FloraCategory, keyof FloraConfig> = {
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 
+/** Keep runtime allocation/count controls inside the capacities exposed by the
+ * dev console. This also protects booted state files and non-UI bus producers. */
+export function normalizeFaunaConfig(fauna: FaunaConfig): FaunaConfig {
+  const count = (value: number, min: number, max: number): number =>
+    clamp(Math.round(value), min, max);
+  return {
+    ...fauna,
+    flockCount: count(fauna.flockCount, 1, 48),
+    birdMinPerFlock: count(fauna.birdMinPerFlock, 1, 80),
+    birdMaxPerFlock: count(fauna.birdMaxPerFlock, 1, 80),
+    batFlockCount: count(fauna.batFlockCount, 1, 48),
+    batMinPerFlock: count(fauna.batMinPerFlock, 1, 80),
+    batMaxPerFlock: count(fauna.batMaxPerFlock, 1, 80),
+    meiseFlockCount: count(fauna.meiseFlockCount, 0, 48),
+    meiseMinPerFlock: count(fauna.meiseMinPerFlock, 1, 80),
+    meiseMaxPerFlock: count(fauna.meiseMaxPerFlock, 1, 80),
+    butterflyFlockCount: count(fauna.butterflyFlockCount, 0, 48),
+    butterflyMinPerFlock: count(fauna.butterflyMinPerFlock, 1, 80),
+    butterflyMaxPerFlock: count(fauna.butterflyMaxPerFlock, 1, 80),
+    mosquitoSwarmCount: count(fauna.mosquitoSwarmCount, 0, 48),
+    mosquitoMinPerSwarm: count(fauna.mosquitoMinPerSwarm, 1, 400),
+    mosquitoMaxPerSwarm: count(fauna.mosquitoMaxPerSwarm, 1, 400),
+    mushroomCount: count(fauna.mushroomCount, 0, 480),
+    deerCount: count(fauna.deerCount, 0, 64),
+    foxCount: count(fauna.foxCount, 0, 96),
+  };
+}
+
 /** The base cap × global × category multiplier (or an explicit per-species
  *  override), rounded and clamped to `[0, baseCap × MAX_DENSITY]` so it never
  *  exceeds the pre-sized instance buffers. */
