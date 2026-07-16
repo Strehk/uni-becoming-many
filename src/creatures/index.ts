@@ -234,7 +234,11 @@ export interface Creatures {
    *  the duft sense drops a scent trail along these. */
   groundAnimalPositions(): { x: number; y: number; z: number }[];
   /** Apply the sense visibility gates while simulations continue in the background. */
-  setVisibility(birdsVisible: boolean, groundFaunaVisible: boolean): void;
+  setVisibility(
+    birdsVisible: boolean,
+    groundFaunaVisible: boolean,
+    mosquitoesVisible: boolean,
+  ): void;
   /** Terrain streaming hooks: ground fauna is scattered and released with chunks. */
   onChunkBuilt(info: ChunkBuiltInfo): void;
   onChunkDisposed(cell: ChunkCell): void;
@@ -1099,11 +1103,16 @@ export async function createCreatures(
     birds,
     mosquitoes,
     mushrooms,
-    setVisibility(birdsVisible: boolean, groundFaunaVisible: boolean): void {
+    setVisibility(
+      birdsVisible: boolean,
+      groundFaunaVisible: boolean,
+      mosquitoesVisible: boolean,
+    ): void {
       // Simulations keep advancing while hidden, so perception modules continue
       // reading live positions and animation.
       birdGroup.visible = birdsVisible;
       groundFaunaGroup.visible = groundFaunaVisible;
+      mosquitoes.setVisible(mosquitoesVisible);
     },
     onChunkBuilt(info: ChunkBuiltInfo): void {
       streamedGroundChunks.add(groundChunkKey(info.gridX, info.gridZ));

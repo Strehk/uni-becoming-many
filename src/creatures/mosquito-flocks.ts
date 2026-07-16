@@ -47,6 +47,8 @@ export interface MosquitoFlocks {
   readonly count: number;
   readonly placed: boolean;
   getWorldPositions(): Float32Array;
+  /** Visual gate only; simulation and motion-sense positions remain live. */
+  setVisible(visible: boolean): void;
   reconfigure(config: FaunaConfig): void;
   update(dt: number): void;
   dispose(): void;
@@ -81,6 +83,7 @@ export function createMosquitoFlocks(
   let activeWorldPositions = new Float32Array(0);
   const emptyWorldPositions = new Float32Array(0);
   let anchorsReady = false;
+  let visibilityAllowed = true;
   let elapsed = 0;
 
   const localPositions = new Float32Array(MAX_FAUNA_MOSQUITOES * 3);
@@ -200,7 +203,7 @@ export function createMosquitoFlocks(
     anchorsReady = true;
     anchorOrigin.set(pose.x, pose.z);
     updateWorldPositions();
-    particles.visible = activeCount > 0;
+    particles.visible = visibilityAllowed && activeCount > 0;
     return true;
   };
 
@@ -259,6 +262,10 @@ export function createMosquitoFlocks(
     },
     getWorldPositions(): Float32Array {
       return anchorsReady ? activeWorldPositions : emptyWorldPositions;
+    },
+    setVisible(visible: boolean): void {
+      visibilityAllowed = visible;
+      particles.visible = visibilityAllowed && anchorsReady && activeCount > 0;
     },
     reconfigure(next: FaunaConfig): void {
       const countsChanged =

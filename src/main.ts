@@ -663,7 +663,10 @@ renderer.start((dtSeconds) => {
     (id) =>
       id !== "motion" && id !== "echo" && !AIR_ONLY_SENSES.has(id) && signals.sense[id].peek() > 0,
   );
-  creatures.setVisibility(birdsRevealed, worldRevealed);
+  // Fauna mosquitoes become visible only through the combined perception of
+  // echo and scent. Either layer on its own (and Luft/all-off) keeps them hidden.
+  const mosquitoesRevealed = signals.sense.echo.peek() > 0 && signals.sense.duft.peek() > 0;
+  creatures.setVisibility(birdsRevealed, worldRevealed, mosquitoesRevealed);
   netzwerk.update(clock.delta); // swarm web + mycelium (fade, rebuild, pulse)
   motion.update(clock.delta); // vertex-motion trails (spawn/fade ring buffer)
   synth.update(dtSeconds); // push the signal packet into the synth iframe
