@@ -68,6 +68,42 @@ export const SPATIAL_FARBEN = {
   kompass_n: "#cad5df", kompass_o: "#cad5df", kompass_s: "#cad5df", kompass_w: "#cad5df",
 };
 
+/* ── Aggregat-Orte fürs Dropdown ─────────────────────────────────────────
+   EIN Dropdown-Eintrag, der für VIELE Anker steht — SpatialAudio nimmt den
+   nächsten davon. So braucht das Modul nicht pro Ort eine eigene Zeile. */
+export const DUFT_IDS = SPATIAL_QUELLEN
+  .map(([id]) => id).filter(id => id.startsWith("duft_"));
+export const DUFT_GRUPPEN = {
+  blumen: ["duft_blume", "duft_lavendel", "duft_rose", "duft_sonnenblume", "duft_mohn", "duft_glocke", "duft_klee"],
+  baeume: ["duft_baum", "duft_kiefer"],
+  kraut:  ["duft_kraut", "duft_pilz"],
+  tiere:  ["duft_tier"],
+};
+/* Zusatz-Optionen, die VOR den Einzel-Orten im Dropdown stehen. */
+export const ORT_AGGREGATE = [
+  ["alle", "alle orte"],
+  ["gruppe_blumen", "alle blumen"], ["gruppe_baeume", "alle bäume"],
+  ["gruppe_kraut", "alle kräuter"], ["gruppe_tiere", "alle tiere"],
+];
+/* Volle Dropdown-Liste: Aggregate zuerst, dann alle Einzel-Orte. */
+export const ORT_QUELLEN = [...ORT_AGGREGATE, ...SPATIAL_QUELLEN];
+/* Aggregat/Einzel-Quelle → konkrete Anker-Ids (für SpatialAudio). */
+export function expandOrtQuelle(q) {
+  if (q === "alle") return DUFT_IDS;
+  if (q.startsWith("gruppe_")) return DUFT_GRUPPEN[q.slice(7)] || [];
+  return [q];
+}
+/* Ist die Quelle ein Ort / eine Richtung (inkl. Aggregate)? */
+export function isOrtQuelle(q) {
+  return q === "alle" || q.startsWith("gruppe_") ||
+    q.startsWith("duft_") || q.startsWith("ort_") || q.startsWith("kompass_");
+}
+/* Zeigt diese Ort-Quelle Distanz-Regler? Alles außer Kompass (Richtungen
+   dämpfen nie) — also Einzel-Düfte UND Aggregate. */
+export function ortHasDistance(q) {
+  return isOrtQuelle(q) && !q.startsWith("kompass_");
+}
+
 /* Ziele auf dem Master-Modul (Pseudo-layerId "master" — die Master-Kette
    existiert immer, unabhängig davon, ob die Karte gerade offen ist). */
 export const MASTER_TARGETS = [
@@ -127,7 +163,7 @@ export class FlightMap {
   }
 
   /* ---------- Orts-Bindungen (räumliches Hören) ---------- */
-  isSpatial(q) { return q.startsWith("duft_") || q.startsWith("ort_") || q.startsWith("kompass_"); }
+  isSpatial(q) { return isOrtQuelle(q); }
 
   /* Belegbare Ort-Ziele (jede Karte hat genau eine Ort-Buchse). */
   ortTargets() {

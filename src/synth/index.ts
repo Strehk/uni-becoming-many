@@ -54,6 +54,10 @@ interface SynthApp {
 }
 interface SynthEngine {
   isAudible?: () => boolean;
+  /** true once start() fully ran (incl. Tone.Transport.start()); the unlock loop
+   *  must wait on THIS, not isAudible() — the context can be "running" while the
+   *  transport is still stopped and every loop/melody layer stays silent. */
+  isStarted?: () => boolean;
 }
 interface SynthWindow {
   __bmFrame?: Record<string, unknown>;
@@ -151,7 +155,10 @@ export function createSynthOverlay(options: SynthOverlayOptions): SynthOverlay {
     if (!win) {
       return;
     }
-    if (win.bmEngine?.isAudible?.()) {
+    // Only stop forwarding once the transport is genuinely started — a merely
+    // "running" context (isAudible) leaves the loop/melody layers silent because
+    // engine.start() → Tone.Transport.start() was never reached.
+    if (win.bmEngine?.isStarted?.() && win.bmEngine?.isAudible?.()) {
       detachUnlock();
       return;
     }

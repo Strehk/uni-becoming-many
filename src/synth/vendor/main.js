@@ -34,7 +34,10 @@ import savedState from "./state.json";   // committете Komposition (Theatre-M
   // until reload. Detached the moment audio is audible.
   const unlockEvents = ["pointerdown", "keydown", "touchend"];
   const tryStart = () => {
-    if (engine.isAudible()) {
+    // Erst abklinken, wenn der Transport WIRKLICH läuft — nicht schon, wenn der
+    // Kontext "running" ist (sonst würde Tone.Transport.start() nie erreicht und
+    // die Loop-/Melodie-Layer blieben stumm).
+    if (engine.running && engine.isAudible()) {
       for (const ev of unlockEvents) window.removeEventListener(ev, tryStart);
       return;
     }

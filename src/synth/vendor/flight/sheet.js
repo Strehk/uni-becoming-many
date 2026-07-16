@@ -4,10 +4,8 @@
    derselben FlightMap und halten sich über deren Emitter synchron.
    mappingRow() wird auch vom Kabel-Popover wiederverwendet. */
 
-import { QUELLEN, FLIGHT_KURVEN, SPATIAL_QUELLEN } from "./mapping.js";
+import { QUELLEN, FLIGHT_KURVEN, ORT_QUELLEN, ortHasDistance } from "./mapping.js";
 import { Knob } from "../ui/widgets.js";
-
-const isAnchorQuelle = (quelle) => quelle.startsWith("duft_") || quelle.startsWith("ort_");
 
 const h = (tag, cls, html) => {
   const el = document.createElement(tag);
@@ -38,7 +36,7 @@ function spatialRow(map, m) {
 
   const selRow = h("div", "fl-selrow");
   // Quellen-Wechsel feuert den Emitter: Knob-Zeile und Kabel ziehen um.
-  selRow.append(selectEl(SPATIAL_QUELLEN, m.quelle, v => { m.quelle = v; map.emit(); }));
+  selRow.append(selectEl(ORT_QUELLEN, m.quelle, v => { m.quelle = v; map.emit(); }));
   selRow.append(h("span", "fl-arrow", "→"));
   const tOpts = map.ortTargets().map(t => [t.id, t.label]);
   selRow.append(selectEl(tOpts, m.layerId + "|" + m.control,
@@ -48,7 +46,7 @@ function spatialRow(map, m) {
   selRow.append(del);
   row.append(selRow);
 
-  if (isAnchorQuelle(m.quelle)) {
+  if (ortHasDistance(m.quelle)) {
     if (!m.spatial) m.spatial = { ref: 0.15, roll: 0.45 };
     const knobs = h("div", "knob-row wrap");
     const mk = (label, value, onChange) => {

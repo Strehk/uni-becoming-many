@@ -10,7 +10,7 @@ import { SpatialAudio } from "../core/spatial.js";
 import { CHORD_PALETTE } from "../core/chords.js";
 import { Knob, XYPad } from "./widgets.js";
 import { FlightModule } from "../flight/module.js";
-import { FlightMap, SPATIAL_QUELLEN } from "../flight/mapping.js";
+import { FlightMap, ORT_QUELLEN, ortHasDistance } from "../flight/mapping.js";
 import { loadLayout, applyLayout, toggleLayoutPanel } from "./settings.js";
 import { MasterModule } from "./master.js";
 import { LfoModule } from "./lfo.js";
@@ -291,24 +291,26 @@ export class App {
       if (!FlightModule.active) FlightModule.open(this);
     }
 
-    // Standard: der Duft-Sinn (chemie) hört an ALLEN Duftquellen.
-    this.connectDuftToAllOrte();
+    // Standard: EIN Luft·Chor-Layer, an ALLE Orte gebunden.
+    this.ensureAllOrteChorLayer();
     this.flightMap.emit();
   }
 
-  /* Standard-Verbindung: den Duft-Sinn (chemie) an JEDE Duftquelle binden —
-     aber nur, wenn er noch gar keinen Ort hat (eine bewusst geladene/gesetzte
-     Auswahl bleibt unangetastet). */
-  connectDuftToAllOrte() {
-    const info = this.layers.find(x => x.layer.sense.id === "chemie");
+  /* Standard-Verbindung: einen Luft·Chor-Layer anlegen und an "alle orte"
+     binden (EINE Bindung) — die räumliche Grund-Stimme der Welt. Nur, wenn noch
+     kein Layer an "alle" hängt (bewusst geladene Zustände bleiben unangetastet).
+     Gate/Regler wie zuvor der Duft-Layer, damit er mit dem Duft-Sinn angeht. */
+  ensureAllOrteChorLayer() {
+    if (this.flightMap.list.some(m => m.control === "ort" && m.quelle === "alle")) return;
+    const info = this.addLayer("luft", 3);   // 3 = Chor-Variante der Luft
     if (!info) return;
-    const layerId = info.layer.id;
-    if (this.flightMap.list.some(m => m.layerId === layerId && m.control === "ort")) return;
-    let added = false;
-    SPATIAL_QUELLEN.forEach(([q]) => {
-      if (q.startsWith("duft_") && this.flightMap.add(layerId + "|ort", q)) added = true;
-    });
-    if (added) this.fillCard(info);   // Ort-Sektion der Karte neu zeigen
+    info.layer.gate = "sinn_duft";
+    info.layer.setVolume(0.68);
+    info.layer.setRoom(0.34);
+    info.layer.setCut(0.9);
+    this.setLayerMuted(info, true);          // startet stumm, Gate schaltet frei
+    this.flightMap.add(info.layer.id + "|ort", "alle");
+    this.fillCard(info);
   }
 
   /* ---------- Komposition speichern / laden (Theatre-Manier) ---------- */
@@ -563,27 +565,16 @@ export class App {
       const bindings = this.flightMap.list.filter(
         x => x.layerId === layer.id && x.control === "ort");
       bindings.forEach(m => wrap.append(this.ortRow(layer, m, build)));
-      // "+ ort" (ein weiterer) und "alle düfte" (jede freie Duftquelle auf
-      // einmal) — nur solange noch freie Quellen übrig sind.
-      if (bindings.length < SPATIAL_QUELLEN.length) {
+      // "+ ort" — eine weitere Zeile; Aggregate ("alle orte", Kategorien) machen
+      // Mehrfach-Zeilen meist überflüssig, daher kein Sammel-Knopf mehr.
+      if (bindings.length < ORT_QUELLEN.length) {
         const used = new Set(bindings.map(m => m.quelle));
-        const btns = h("div", "ort-add-row");
         const add = h("button", "fl-add ort-add", bindings.length ? "+ ort" : "+ ort wählen");
         add.addEventListener("click", () => {
-          const free = SPATIAL_QUELLEN.find(([v]) => !used.has(v));
+          const free = ORT_QUELLEN.find(([v]) => !used.has(v));
           if (free && this.flightMap.add(layer.id + "|ort", free[0])) build();
         });
-        btns.append(add);
-        const freeDuft = SPATIAL_QUELLEN.filter(([v]) => v.startsWith("duft_") && !used.has(v));
-        if (freeDuft.length) {
-          const all = h("button", "fl-add ort-add", "alle düfte");
-          all.addEventListener("click", () => {
-            freeDuft.forEach(([v]) => this.flightMap.add(layer.id + "|ort", v));
-            build();
-          });
-          btns.append(all);
-        }
-        wrap.append(btns);
+        wrap.append(add);
       }
     };
     build();
@@ -596,7 +587,7 @@ export class App {
     const row = h("div", "card-ort", "<span>ort</span>");
 
     const sel = document.createElement("select");
-    SPATIAL_QUELLEN.forEach(([val, label]) => {
+    ORT_QUELLEN.forEach(([val, label]) => {
       const op = document.createElement("option");
       op.value = val; op.textContent = label;
       sel.append(op);
@@ -610,9 +601,9 @@ export class App {
       m.quelle = sel.value; this.flightMap.emit(); refresh();
     });
 
-    // Distanz-Regler (nur für Ort-Wolken duft_/ort_ — Kompass dämpft nie).
+    // Distanz-Regler (Einzel-Düfte UND Aggregate; Kompass dämpft nie).
     const knobs = h("div", "knob-row wrap ort-knobs");
-    if (m.quelle.startsWith("duft_") || m.quelle.startsWith("ort_")) {
+    if (ortHasDistance(m.quelle)) {
       if (!m.spatial) m.spatial = { ref: 0.15, roll: 0.45 };
       const mk = (label, value, onChange) => {
         const k = new Knob({ label, value, color: layer.sense.color, onChange });

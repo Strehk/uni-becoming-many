@@ -4,7 +4,7 @@
     "root": "A2",
     "scale": "pent. moll",
     "pulse": 54,
-    "master": 0.8
+    "master": 0.77
   },
   "fx": {
     "eqlow": 0.5,
@@ -27,8 +27,8 @@
       "macro": 0.3,
       "melody": 0.25,
       "xy": [
-        0.07954554518253443,
-        0.1797408478163106
+        0.06666666666666667,
+        0.16826388888888888
       ],
       "params": [
         0.15,
@@ -39,9 +39,9 @@
     {
       "sense": "echo",
       "variant": 3,
-      "muted": false,
+      "muted": true,
       "gate": "sinn_echo",
-      "volume": 0.68,
+      "volume": 0.2547916666666667,
       "room": 1,
       "cut": 0.5876302083333333,
       "macro": 1,
@@ -59,7 +59,7 @@
       "sense": "motion",
       "variant": 0,
       "muted": true,
-      "gate": "aus",
+      "gate": "sinn_magnetfeld",
       "volume": 0.2033854166666667,
       "room": 0,
       "cut": 0.9,
@@ -75,30 +75,11 @@
       ]
     },
     {
-      "sense": "infrarot",
-      "variant": 0,
-      "muted": true,
-      "gate": "sinn_infrarot",
-      "volume": 0.7174739583333334,
-      "room": 0.34,
-      "cut": 0.9,
-      "macro": 0.45,
-      "melody": 0.28,
-      "xy": [
-        0.49818908622632396,
-        0.45065030524531924
-      ],
-      "params": [
-        0.35,
-        0.45
-      ]
-    },
-    {
       "sense": "licht",
       "variant": 0,
       "muted": true,
-      "gate": "sinn_uv",
-      "volume": 0.2168489583333334,
+      "gate": "sinn_motion",
+      "volume": 0.1071614583333334,
       "room": 0.34,
       "cut": 0.9,
       "macro": 0.5,
@@ -124,7 +105,7 @@
       "melody": 0,
       "xy": [
         0.3,
-        0.36206319108200047
+        0.8322637652575294
       ],
       "params": [
         0.45,
@@ -152,41 +133,42 @@
       ]
     },
     {
-      "sense": "sicht",
-      "variant": 0,
+      "sense": "luft",
+      "variant": 3,
       "muted": true,
-      "gate": "sinn_rundum",
-      "volume": 0.5876302083333333,
-      "room": 0.34,
+      "gate": "sinn_duft",
+      "volume": 0.07864583333333339,
+      "room": 0.9500520833333335,
       "cut": 0.9,
       "macro": 0.15,
-      "melody": 0.45,
+      "melody": 0.3,
       "xy": [
-        0.35,
-        0.7
+        0.8125637173364811,
+        0.6842601102941177
       ],
       "params": [
-        0.3,
-        0.5
+        0,
+        0.55
       ]
     },
     {
-      "sense": "chemie",
-      "variant": 0,
+      "sense": "rhythmus",
+      "variant": 1,
       "muted": true,
-      "gate": "sinn_duft",
-      "volume": 0.68,
-      "room": 0.34,
-      "cut": 0.9,
-      "macro": 0.4,
-      "melody": 0.3,
+      "gate": "sinn_infrarot",
+      "volume": 0.25684895833333327,
+      "room": 0.14388020833333331,
+      "cut": 0.3003385416666666,
+      "macro": 0,
+      "melody": 0,
       "xy": [
-        0.3,
-        0.6
+        0.8181754768668831,
+        0.9376450706276915
       ],
       "params": [
-        0.3,
-        0.5
+        0.6344791666666667,
+        0.8355208333333333,
+        0.6455989583333333
       ]
     }
   ],
@@ -223,7 +205,7 @@
     },
     {
       "quelle": "richtung",
-      "layer": 5,
+      "layer": 4,
       "control": "pady",
       "min": 0,
       "max": 1,
@@ -236,6 +218,44 @@
       "layer": 0,
       "control": "pady",
       "min": 0.10885416666666667,
+      "max": 1,
+      "staerke": 1,
+      "glatt": 0.4,
+      "kurve": "linear"
+    },
+    {
+      "quelle": "alle",
+      "layer": 6,
+      "control": "ort",
+      "min": 0,
+      "max": 1,
+      "staerke": 1,
+      "glatt": 0.4,
+      "kurve": "linear",
+      "spatial": {
+        "ref": 0.05729166666666666,
+        "roll": 0.45
+      }
+    },
+    {
+      "quelle": "duft_tier",
+      "layer": 7,
+      "control": "ort",
+      "min": 0,
+      "max": 1,
+      "staerke": 1,
+      "glatt": 0.4,
+      "kurve": "linear",
+      "spatial": {
+        "ref": 0.15880208333333334,
+        "roll": 1
+      }
+    },
+    {
+      "quelle": "lfo_a",
+      "layer": 7,
+      "control": "pady",
+      "min": 0,
       "max": 1,
       "staerke": 1,
       "glatt": 0.4,

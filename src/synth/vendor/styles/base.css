@@ -122,8 +122,7 @@ header.top {
 .card-ort .ort-knobs .knob { width: 52px; gap: 3px; }
 .card-ort .ort-knobs .knob-face { width: 42px; height: 42px; }
 .card-ort .ort-del { width: 32px; height: 32px; border-radius: 8px; font-size: 12px; }
-.card-ort-wrap .ort-add-row { display: flex; gap: 6px; margin: 2px 12px 0 14px; }
-.card-ort-wrap .ort-add { height: 34px; width: auto; flex: 1; }
+.card-ort-wrap .ort-add { height: 34px; width: auto; margin: 2px 12px 0 14px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c);
   box-shadow: 0 0 10px var(--c); flex: none; }
 .card-title { flex: 1; min-width: 0; }

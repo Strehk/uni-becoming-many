@@ -15,6 +15,7 @@
    des Hörers zu gleiten). Welt-Einheiten = Audio-Meter. */
 
 import * as Tone from "tone";
+import { expandOrtQuelle } from "../flight/mapping.js";
 
 /* Kompass-Richtungen (n = +Z wie world.forward() bei yaw 0); die Quelle
    sitzt in konstanter Entfernung um den Hörer — nur die Richtung zählt. */
@@ -109,11 +110,14 @@ export const SpatialAudio = {
       if (!pose) break;
       let best = null, bestT = null, bestD2 = Infinity;
       for (const b of bs) {
-        const t = resolve(b.m.quelle);
-        if (!t) continue;
-        const dx = t.x - L.x, dy = t.y - L.y, dz = t.z - L.z;
-        const d2 = dx * dx + dy * dy + dz * dz;
-        if (d2 < bestD2) { bestD2 = d2; best = b; bestT = t; }
+        // Aggregate ("alle", "gruppe_…") expandieren → nächsten Anker der Menge.
+        for (const q of expandOrtQuelle(b.m.quelle)) {
+          const t = resolve(q);
+          if (!t) continue;
+          const dx = t.x - L.x, dy = t.y - L.y, dz = t.z - L.z;
+          const d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 < bestD2) { bestD2 = d2; best = b; bestT = t; }
+        }
       }
       if (!best) continue;
       this.ensure(layer);

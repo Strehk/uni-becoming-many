@@ -83,6 +83,12 @@ export class Engine {
     catch (e) { return false; }
   }
 
+  /* true, sobald start() vollständig lief — inkl. Tone.Transport.start().
+     Die Entriegelungs-Schleifen müssen HIERAUF warten, nicht auf isAudible():
+     der Kontext kann "running" sein (Drones klingen), während der Transport
+     noch steht und alle Loop-/Melodie-Layer stumm bleiben. */
+  isStarted() { return this.running; }
+
   setRoot(note)  { this.world.rootMidi = Tone.Frequency(note).toMidi(); }
   setScale(name) {
     if (SCALES[name]) { this.world.scaleName = name; this.world.scale = SCALES[name]; }
