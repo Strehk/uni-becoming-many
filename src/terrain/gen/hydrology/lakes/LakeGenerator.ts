@@ -24,8 +24,13 @@ export function detectLakes(
   spillTolerance: number,
   lakeFrequency: number,
   maxHeight: number,
+  lakeSize = 1,
 ): LakeResult {
   const eps = Math.max(0.0015, spillTolerance * (1.4 - lakeFrequency));
+  // Filled basins are deepest in their centre. Requiring more depth trims only
+  // their outer shoreline and therefore changes lake footprint without moving
+  // or randomly cutting up a basin. Size 1 preserves the authored result.
+  const sizeAdjustedEps = eps / Math.max(0.1, lakeSize);
   const lakeDepth = new Float32Array(N);
   const lakeSurface = new Float32Array(N);
   const lakeMask = new Uint8Array(N);
@@ -34,7 +39,7 @@ export function detectLakes(
     const d = fi - (height[i] ?? 0);
     // No perched mountain lakes: a basin whose flat surface sits above maxHeight
     // is left as dry terrain (its detail noise read as broken slabs up there).
-    if (d > eps && fi >= seaLevel && fi <= maxHeight) {
+    if (d > sizeAdjustedEps && fi >= seaLevel && fi <= maxHeight) {
       lakeMask[i] = 1;
       lakeDepth[i] = d;
       lakeSurface[i] = fi;

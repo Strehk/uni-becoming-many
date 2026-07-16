@@ -7,5 +7,9 @@
     "frequency": 1,
     "octaves": 4
   },
-  "params": {}
+  "params": {
+    "biomeLakeFrequency": 0,
+    "biomeOceanFrequency": 0.3,
+    "biomeOceanSize": 0.2
+  }
 }

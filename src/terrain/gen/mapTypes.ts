@@ -65,6 +65,27 @@ export interface GenParams {
   moistureScale: number;
   biomeScale: number;
 
+  // biome frequency multipliers. 1 = authored distribution, 0 suppresses a
+  // biome, values above 1 expand it against neighbouring suitable biomes.
+  biomeOceanFrequency: number;
+  /** Horizontal scale of ocean basins. 1 = authored size, lower = smaller seas. */
+  biomeOceanSize: number;
+  biomeCoastFrequency: number;
+  biomeBeachFrequency: number;
+  biomeGrasslandFrequency: number;
+  biomeForestFrequency: number;
+  biomeWetlandFrequency: number;
+  biomeDesertFrequency: number;
+  biomeHillsFrequency: number;
+  biomeRockyMountainFrequency: number;
+  biomeSnowMountainFrequency: number;
+  biomeLakeFrequency: number;
+  /** Horizontal footprint of filled lake basins. 1 = authored size. */
+  biomeLakeSize: number;
+  biomeRiverFrequency: number;
+  biomeTundraFrequency: number;
+  biomeTaigaFrequency: number;
+
   // rivers
   riversEnabled: boolean; // false = rivers excluded from world generation
   riverSourceCount: number; // sources per region
@@ -147,6 +168,23 @@ export const DEFAULT_PARAMS: GenParams = {
   temperatureGradient: 0.5,
   moistureScale: 900,
   biomeScale: 1.0,
+
+  biomeOceanFrequency: 1,
+  biomeOceanSize: 1,
+  biomeCoastFrequency: 1,
+  biomeBeachFrequency: 1,
+  biomeGrasslandFrequency: 1,
+  biomeForestFrequency: 1,
+  biomeWetlandFrequency: 1,
+  biomeDesertFrequency: 1,
+  biomeHillsFrequency: 1,
+  biomeRockyMountainFrequency: 1,
+  biomeSnowMountainFrequency: 1,
+  biomeLakeFrequency: 1,
+  biomeLakeSize: 1,
+  biomeRiverFrequency: 1,
+  biomeTundraFrequency: 1,
+  biomeTaigaFrequency: 1,
 
   riversEnabled: false, // rivers excluded from world generation
   riverSourceCount: 10,

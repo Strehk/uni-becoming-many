@@ -40,10 +40,54 @@ export const WORLDGEN_PARAMS: GenParams = {
   // lapse is decoupled from this (see fields.ts) so a lower sea level no longer
   // over-cools the world into tundra.
   waterLevel: 0.22,
+  // Smaller, rarer water bodies are a better fit for the flight-scale world.
+  // Both remain fully adjustable in the world controls.
+  biomeOceanFrequency: 0.7,
+  biomeOceanSize: 0.65,
+  biomeLakeFrequency: 0.55,
+  biomeLakeSize: 0.5,
+  // Lake generation used to remain hard-disabled, which made every lake slider
+  // inert. Enable it for the flight world; the conservative controls above keep
+  // the default lakes sparse and compact.
+  lakesEnabled: true,
   // Wider moisture period (source 900) so forest/desert/wetland regions are
   // larger; pairs with the widened temperature bands in fields.ts.
   moistureScale: 1800,
 };
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.min(max, Math.max(min, value));
+
+/**
+ * Fold biome-frequency controls that affect physical terrain into the effective
+ * worker params. The raw slider values remain serialisable overrides; this
+ * derived copy is what generation consumes.
+ */
+export function applyBiomeFrequencyParams(params: GenParams): GenParams {
+  return {
+    ...params,
+    // Ocean frequency changes actual water coverage, not merely the biome label.
+    waterLevel: clamp(
+      params.waterLevel + (Math.max(0, params.biomeOceanFrequency) - 1) * 0.08,
+      0.02,
+      0.92,
+    ),
+    // Lowering a lake's flat water sheet below its spill naturally pulls the
+    // shoreline inward. At 1 the authored level remains byte-for-byte unchanged.
+    lakeLevelDrop: clamp(
+      params.lakeLevelDrop + (1 - Math.max(0.1, params.biomeLakeSize)) * 0.02,
+      0.0005,
+      0.08,
+    ),
+    // Snow Mountain frequency also moves the rendered snow line so its visual
+    // response matches the classification/WFC response.
+    snowHeight: clamp(
+      params.snowHeight - (Math.max(0, params.biomeSnowMountainFrequency) - 1) * 0.08,
+      0.35,
+      1.2,
+    ),
+  };
+}
 
 /** Fold a flat TerrainConfig onto the full GenParams. */
 export function configToParams(cfg: TerrainConfig): GenParams {

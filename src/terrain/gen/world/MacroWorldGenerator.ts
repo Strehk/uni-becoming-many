@@ -65,7 +65,7 @@ export class MacroWorldGenerator {
       const h = blockHeight[i] ?? 0;
       const t = blockTemp[i] ?? 0;
       const m = blockMoist[i] ?? 0;
-      srcAllowed[i] = uplandSourceAllowed(h, t, m) ? 1 : 0;
+      srcAllowed[i] = uplandSourceAllowed(h, t, m, params) ? 1 : 0;
     }
 
     // Extract the region interior (RM×RM) for WFC priors + storage.
@@ -92,9 +92,9 @@ export class MacroWorldGenerator {
         const h = macroHeight[i] ?? 0;
         const t = macroTemp[i] ?? 0;
         const m = macroMoisture[i] ?? 0;
-        priors.set(tilePriors(h, t, m), i * MACRO_TILE_COUNT);
+        priors.set(tilePriors(h, t, m, params), i * MACRO_TILE_COUNT);
         if (lx === 0 || ly === 0 || lx === RM - 1 || ly === RM - 1) {
-          pinned[i] = argmaxTile(h, t, m);
+          pinned[i] = argmaxTile(h, t, m, params);
         }
       }
     }
@@ -118,18 +118,20 @@ export class MacroWorldGenerator {
     // riversEnabled). When off, their fields stay empty (zero depth, no polylines)
     // so every downstream stamp is a no-op — the drainage substrate (filled/accum)
     // is still computed since Pass B relief and biome classification read it.
-    const lakes = params.lakesEnabled
-      ? detectLakes(
-          blockHeight,
-          filled,
-          receiver,
-          NB,
-          seaLevel,
-          params.lakeSpillTolerance,
-          params.lakeFrequency,
-          params.lakeMaxHeight,
-        )
-      : { lakeDepth: new Float32Array(NB), lakeSurface: new Float32Array(NB), spillIdx: [] };
+    const lakes =
+      params.lakesEnabled && params.biomeLakeFrequency > 0
+        ? detectLakes(
+            blockHeight,
+            filled,
+            receiver,
+            NB,
+            seaLevel,
+            params.lakeSpillTolerance,
+            params.lakeFrequency * params.biomeLakeFrequency,
+            params.lakeMaxHeight,
+            params.biomeLakeSize,
+          )
+        : { lakeDepth: new Float32Array(NB), lakeSurface: new Float32Array(NB), spillIdx: [] };
     const lakeMask = new Uint8Array(NB);
     for (let i = 0; i < NB; i++) lakeMask[i] = (lakes.lakeDepth[i] ?? 0) > 0 ? 1 : 0;
 
@@ -137,27 +139,33 @@ export class MacroWorldGenerator {
     const rectMinY = ry * RM * cs;
     const rectMaxX = (rx + 1) * RM * cs;
     const rectMaxY = (ry + 1) * RM * cs;
-    const rivers = params.riversEnabled
-      ? traceRivers({
-          filled,
-          receiver,
-          accum,
-          lakeMask,
-          srcAllowed,
-          W: BW,
-          H: BW,
-          blockOriginMx,
-          blockOriginMy,
-          cs,
-          seaLevel,
-          rectMinX,
-          rectMinY,
-          rectMaxX,
-          rectMaxY,
-          params,
-          seed: deriveSeed(params.seed, rx, ry, 0x917) >>> 0,
-        })
-      : emptyNetwork();
+    const riverFrequency = Math.max(0, params.biomeRiverFrequency);
+    const rivers =
+      params.riversEnabled && riverFrequency > 0
+        ? traceRivers({
+            filled,
+            receiver,
+            accum,
+            lakeMask,
+            srcAllowed,
+            W: BW,
+            H: BW,
+            blockOriginMx,
+            blockOriginMy,
+            cs,
+            seaLevel,
+            rectMinX,
+            rectMinY,
+            rectMaxX,
+            rectMaxY,
+            params: {
+              ...params,
+              riverSourceCount: Math.round(params.riverSourceCount * riverFrequency),
+              riverDensity: params.riverDensity * riverFrequency,
+            },
+            seed: deriveSeed(params.seed, rx, ry, 0x917) >>> 0,
+          })
+        : emptyNetwork();
 
     // Extract interior drainage fields + normalise accumulation (log scale).
     const macroFilled = new Float32Array(n);

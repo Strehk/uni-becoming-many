@@ -10,7 +10,7 @@
 //
 // PURE CPU — no three, no DOM.
 
-import { MACRO_TILE_COUNT, MacroTile } from "../mapTypes.ts";
+import { type GenParams, MACRO_TILE_COUNT, MacroTile } from "../mapTypes.ts";
 import { bandScore } from "./WfcTile.ts";
 import { TILE_BY_ID } from "./biomeTiles.ts";
 
@@ -157,7 +157,12 @@ export const FULL_DOMAIN = (1 << MACRO_TILE_COUNT) - 1;
  * the three band scores times the tile's base weight; a tiny floor keeps the
  * domain from ever being fully empty.
  */
-export function tilePriors(height: number, temp: number, moisture: number): Float32Array {
+export function tilePriors(
+  height: number,
+  temp: number,
+  moisture: number,
+  params: GenParams,
+): Float32Array {
   const w = new Float32Array(MACRO_TILE_COUNT);
   for (let t = 0; t < MACRO_TILE_COUNT; t++) {
     const tile = TILE_BY_ID[t];
@@ -168,14 +173,19 @@ export function tilePriors(height: number, temp: number, moisture: number): Floa
     const sH = bandScore(height, tile.heightBand);
     const sM = bandScore(moisture, tile.moistureBand);
     const sT = bandScore(temp, tile.tempBand);
-    w[t] = tile.weight * (sH * sH) * sM * sT + 1e-4;
+    w[t] = tile.weight * tileFrequency(tile.id, params) * (sH * sH) * sM * sT + 1e-6;
   }
   return w;
 }
 
 /** The single best tile id for a cell (used for deterministic seam-pinned borders). */
-export function argmaxTile(height: number, temp: number, moisture: number): number {
-  const w = tilePriors(height, temp, moisture);
+export function argmaxTile(
+  height: number,
+  temp: number,
+  moisture: number,
+  params: GenParams,
+): number {
+  const w = tilePriors(height, temp, moisture, params);
   let best = 0;
   for (let t = 1; t < w.length; t++) if ((w[t] ?? 0) > (w[best] ?? 0)) best = t;
   return best;
@@ -186,6 +196,41 @@ export function argmaxTile(height: number, temp: number, moisture: number): numb
  * argmax tile has `canSpawnRiverSource`). Pure function of the fields, so identical
  * across region seams. Biases where river headwaters become visible.
  */
-export function uplandSourceAllowed(height: number, temp: number, moisture: number): boolean {
-  return TILE_BY_ID[argmaxTile(height, temp, moisture)]?.canSpawnRiverSource ?? false;
+export function uplandSourceAllowed(
+  height: number,
+  temp: number,
+  moisture: number,
+  params: GenParams,
+): boolean {
+  return TILE_BY_ID[argmaxTile(height, temp, moisture, params)]?.canSpawnRiverSource ?? false;
+}
+
+/** Map visible-biome frequency controls onto the structural macro tile set. */
+function tileFrequency(tile: MacroTile, params: GenParams): number {
+  switch (tile) {
+    case MacroTile.Ocean:
+      return Math.max(0, params.biomeOceanFrequency);
+    case MacroTile.Coast:
+      return Math.max(0, params.biomeCoastFrequency);
+    case MacroTile.Lowland:
+    case MacroTile.Grassland:
+      return Math.max(0, params.biomeGrasslandFrequency);
+    case MacroTile.Forest:
+      return Math.max(0, params.biomeForestFrequency);
+    case MacroTile.Wetland:
+      return Math.max(0, params.biomeWetlandFrequency);
+    case MacroTile.Desert:
+      return Math.max(0, params.biomeDesertFrequency);
+    case MacroTile.Hills:
+      return Math.max(0, params.biomeHillsFrequency);
+    case MacroTile.RockyMountain:
+      return Math.max(0, params.biomeRockyMountainFrequency);
+    case MacroTile.SnowMountain:
+      return Math.max(0, params.biomeSnowMountainFrequency);
+    case MacroTile.LakeCandidate:
+      return Math.max(0, params.biomeLakeFrequency);
+    case MacroTile.RiverSource:
+    case MacroTile.RiverCorridor:
+      return Math.max(0, params.biomeRiverFrequency);
+  }
 }

@@ -17,7 +17,7 @@ import { TerrainDetailGenerator } from "../gen/height/TerrainDetailGenerator.ts"
 import { TerrainSampler } from "../gen/height/TerrainSampler.ts";
 import { buildChunkArrays } from "../gen/height/mesh.ts";
 import type { GenParams } from "../gen/mapTypes.ts";
-import { configToParams } from "../gen/params.ts";
+import { applyBiomeFrequencyParams, configToParams } from "../gen/params.ts";
 import { buildWaterArrays } from "../gen/water/water-mesh.ts";
 import { WorldMapGenerator } from "../gen/world/WorldMapGenerator.ts";
 import type { TerrainConfig } from "../provider.ts";
@@ -46,7 +46,7 @@ function ensureConfig(cfg: TerrainConfig, override?: Record<string, number>): vo
   const next = JSON.stringify({ cfg, params: override });
   if (next === sig) return;
   sig = next;
-  params = { ...configToParams(cfg), ...(override ?? {}) };
+  params = applyBiomeFrequencyParams({ ...configToParams(cfg), ...(override ?? {}) });
   detail = new TerrainDetailGenerator(params);
   gen.clearCaches();
 }
