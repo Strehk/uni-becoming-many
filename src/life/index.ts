@@ -230,7 +230,7 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
       foliageAtlas,
       reserveCap(id),
     );
-    for (const mesh of instances.meshes) group.add(mesh);
+    group.add(instances.group); // one parent per species; chunk meshes come and go
     return { id, def, instances, affinity: affinityFor(id), mods: modsFor(id) };
   });
 

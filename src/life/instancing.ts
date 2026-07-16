@@ -1,32 +1,22 @@
-// ── Becoming Many — Species Instancing ─────────────────────────
+// ── Becoming Many — Species Instancing (per-chunk, frustum-culled) ─────
 //
-// One global InstancedMesh per species-part, backed by a PACKED instance buffer:
-// live instances sit contiguously in [0, liveCount), and `mesh.count` is exactly
-// liveCount. Nothing phantom is ever drawn. A chunk that streams in appends its
-// placed instances to the tail; a chunk that streams out is removed by shifting the
-// tail down over its hole (a native copyWithin) and shrinking the count.
+// One InstancedMesh PER (species-part × live chunk). Each chunk mesh:
+//   - shares the part's shape (position/normal/index/uv) BY REFERENCE — no clone,
+//     so 49 chunks of a species cost one copy of the geometry, not 49;
+//   - owns small per-chunk instance buffers (matrix + tint + thermal), sized to the
+//     chunk's actual instance count (no phantom instances);
+//   - carries a tight bounding sphere over the chunk's footprint and is
+//     `frustumCulled = true`, so three skips every chunk outside the view cone —
+//     the "only draw what you look at" that game engines do. Looking one way culls
+//     the chunks behind you, roughly halving the flora drawn.
 //
-// Why packed and not fixed per-chunk slots: with slots, `count` had to cover the
-// whole capacity (49 blocks × cap) so the tail's empty slots still ran the vertex
-// shader as degenerate triangles — ~30 k phantom instances for ~10 k real ones. The
-// draw cost is `count`, so the only way to stop paying for absent plants is to keep
-// `count` at the real total.
+// Trade-off vs the old single packed mesh: more draw calls (species-part × VISIBLE
+// chunks instead of × 1), but far fewer triangles rasterised. On desktop the call
+// budget is cheap; VR (double render) would want to watch it.
 //
-// The instance matrix is a StorageInstancedBufferAttribute, not a plain
-// InstancedBufferAttribute. three picks its matrix-instancing strategy from
-// `mesh.count`: a small count selects a UNIFORM binding, which it then sizes to the
-// WHOLE array and blows the 64 KB uniform-buffer limit as soon as capacity is large
-// (grass: 49 × 320 mat4). A storage attribute takes the count-independent storage
-// path (no such limit), which is the whole reason `count` can float freely here.
-// This is also the GPU-resident buffer AGENT.md's "Rendering BufferArray" endorses.
-//
-// `frustumCulled = false` is forced: one mesh spans the whole streamed window, so
-// its bounds never leave the frustum and maintaining them would be churn. Culling is
-// coarse (whole flora set) — the per-chunk streaming radius is the real cull.
-//
-// Uploads happen only on the discrete stream events that touch a buffer, not per
-// frame; a still player uploads nothing. Parts of a species share the packing
-// (identical transforms) but keep their own buffers, written together.
+// removeChunk detaches the SHARED attributes before disposing a chunk geometry, so
+// `geometry.dispose()` frees only the per-chunk instance buffers and never the
+// shared shape other chunks still reference.
 //
 // IMPORTANT — see AGENT.md "WebGPU rendering": classes from `three/webgpu`.
 
@@ -45,54 +35,41 @@ import type { LifeUniforms } from "./uniforms.ts";
 const MAT4 = 16;
 const VEC3 = 3;
 
-interface PartMesh {
-  readonly mesh: THREE.InstancedMesh;
-  readonly matrix: THREE.StorageInstancedBufferAttribute;
-  readonly tint: THREE.InstancedBufferAttribute;
-  readonly thermalCenter: THREE.InstancedBufferAttribute;
-  readonly thermalRadius: THREE.InstancedBufferAttribute;
-  readonly thermalVariation: THREE.InstancedBufferAttribute;
-  /** The part's material colour — the base every instance tint is jittered around. */
+/** The shared, chunk-independent data for one species-part (its shape + material). */
+interface PartSource {
+  readonly geometry: THREE.BufferGeometry;
+  readonly material: THREE.Material;
   readonly baseColor: THREE.Color;
-}
-
-/** Where one live chunk's instances sit in the packed buffer. */
-interface Block {
-  offset: number;
-  length: number;
+  readonly foliage: boolean;
 }
 
 export class SpeciesInstances {
   readonly def: SpeciesDef;
-  private readonly parts: PartMesh[] = [];
-  private readonly capacity: number;
-  private readonly materials: FloraMaterialHandle[] = [];
+  /** Parent of every live chunk mesh; added to the scene once by the caller. */
+  readonly group: THREE.Group;
 
-  /** Packing state — shared by every part (their transforms are identical). */
+  private readonly sources: PartSource[] = [];
+  private readonly materials: FloraMaterialHandle[] = [];
+  /** Live chunk → its per-part InstancedMeshes (empty array for a plant-free chunk). */
+  private readonly chunkMeshes = new Map<string, THREE.InstancedMesh[]>();
   private liveCount = 0;
-  private readonly order: string[] = [];
-  private readonly blocks = new Map<string, Block>();
 
   constructor(
     def: SpeciesDef,
     parts: readonly FloraPart[],
-    maxLiveChunks: number,
+    _maxLiveChunks: number,
     u: KitUniforms,
     life: LifeUniforms,
     layers?: FloraLayerCompositor,
     foliageAtlas?: THREE.Texture,
-    /** Per-chunk cap the buffers are SIZED for — the density ceiling. Defaults to
-     *  the base cap; the flora config passes a larger reserve so live density
-     *  edits re-scatter into the same buffers without reallocation. */
-    reserveCap: number = def.perChunkCap,
+    _reserveCap: number = def.perChunkCap,
   ) {
     this.def = def;
-    // Worst case: every live chunk fills its reserve cap at once.
-    this.capacity = maxLiveChunks * reserveCap;
+    this.group = new THREE.Group();
+    this.group.name = `flora:${def.id}`;
 
     // Two material variants at most: solid parts share one graph, foliage parts
-    // (atlas-cutout cards, see material.ts) share the other. Built lazily — a
-    // rock never pays for the foliage material and vice versa.
+    // (atlas-cutout cards) share the other. Built lazily.
     let solid: FloraMaterialHandle | undefined;
     let foliage: FloraMaterialHandle | undefined;
     const materialFor = (part: FloraPart): FloraMaterialHandle => {
@@ -105,53 +82,15 @@ export class SpeciesInstances {
     };
 
     for (const part of parts) {
-      const geometry = part.geometry;
-      // Storage attribute for the matrix → count-independent instancing strategy.
-      const matrix = new THREE.StorageInstancedBufferAttribute(
-        new Float32Array(this.capacity * MAT4),
-        MAT4,
-      );
-      const tint = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity * VEC3), VEC3);
-      const thermalCenter = new THREE.InstancedBufferAttribute(
-        new Float32Array(this.capacity * VEC3),
-        VEC3,
-      );
-      const thermalRadius = new THREE.InstancedBufferAttribute(new Float32Array(this.capacity), 1);
-      const thermalVariation = new THREE.InstancedBufferAttribute(
-        new Float32Array(this.capacity),
-        1,
-      );
-      geometry.setAttribute("instanceTint", tint);
-      geometry.setAttribute("instanceThermalCenter", thermalCenter);
-      geometry.setAttribute("instanceThermalRadius", thermalRadius);
-      geometry.setAttribute("instanceThermalVariation", thermalVariation);
-
       const handle = materialFor(part);
       if (!this.materials.includes(handle)) this.materials.push(handle);
-      const mesh = new THREE.InstancedMesh(geometry, handle.material, this.capacity);
-      mesh.frustumCulled = false;
-      mesh.instanceMatrix = matrix; // replace the default plain attribute
-      mesh.count = 0; // packed total; grows as chunks stream in
-      matrix.setUsage(THREE.DynamicDrawUsage);
-      tint.setUsage(THREE.DynamicDrawUsage);
-      thermalCenter.setUsage(THREE.DynamicDrawUsage);
-      thermalRadius.setUsage(THREE.DynamicDrawUsage);
-      thermalVariation.setUsage(THREE.DynamicDrawUsage);
-
-      this.parts.push({
-        mesh,
-        matrix,
-        tint,
-        thermalCenter,
-        thermalRadius,
-        thermalVariation,
+      this.sources.push({
+        geometry: part.geometry,
+        material: handle.material,
         baseColor: part.baseColor,
+        foliage: part.foliage,
       });
     }
-  }
-
-  get meshes(): readonly THREE.InstancedMesh[] {
-    return this.parts.map((p) => p.mesh);
   }
 
   /** Live (drawn) instance count across this species — for diagnostics. */
@@ -164,139 +103,152 @@ export class SpeciesInstances {
     for (const handle of this.materials) handle.rewire();
   }
 
-  /** Append one chunk's placed instances to the packed tail. */
+  /** Build one chunk's per-part meshes and add them to the group. */
   addChunk(key: string, block: ScatterBlock): void {
-    if (this.blocks.has(key)) return;
+    if (this.chunkMeshes.has(key)) return;
     const used = block.count;
     if (used === 0) {
-      // Track an empty block so removeChunk stays symmetric, but touch no buffers.
-      this.blocks.set(key, { offset: this.liveCount, length: 0 });
-      this.order.push(key);
-      return;
-    }
-    if (this.liveCount + used > this.capacity) {
-      console.warn(`[life] ${this.def.id}: instance buffer full, dropping chunk ${key}`);
+      this.chunkMeshes.set(key, []); // symmetric bookkeeping, no GPU work
       return;
     }
 
-    const offset = this.liveCount;
-    for (const part of this.parts) {
-      part.matrix.array.set(block.matrices.subarray(0, used * MAT4), offset * MAT4);
+    // Chunk bounding sphere: bbox of the instance feet + the plant's own height,
+    // in world space (the meshes sit at the origin; instances carry world matrices).
+    let minX = Number.POSITIVE_INFINITY;
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxScale = 0;
+    for (let i = 0; i < used; i++) {
+      const m = i * MAT4;
+      const x = block.matrices[m + 12] ?? 0;
+      const y = block.matrices[m + 13] ?? 0;
+      const z = block.matrices[m + 14] ?? 0;
+      const sx = block.matrices[m] ?? 1;
+      const sy = block.matrices[m + 1] ?? 0;
+      const sz = block.matrices[m + 2] ?? 0;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z;
+      if (z > maxZ) maxZ = z;
+      if (y < minY) minY = y;
+      const s = Math.hypot(sx, sy, sz);
+      if (s > maxScale) maxScale = s;
+    }
+    const cx = (minX + maxX) * 0.5;
+    const cz = (minZ + maxZ) * 0.5;
+    const top = this.def.targetHeight * (maxScale || 1);
+    const cy = minY + top * 0.5;
+    const sphereRadius =
+      Math.hypot(maxX - cx, maxZ - cz, top * 0.5) + this.def.targetHeight * maxScale * 0.5;
+    const centre = new THREE.Vector3(cx, cy, cz);
 
-      const tints = part.tint.array;
-      const centers = part.thermalCenter.array;
-      const radii = part.thermalRadius.array;
-      const variations = part.thermalVariation.array;
+    const meshes: THREE.InstancedMesh[] = [];
+    for (const source of this.sources) {
+      // Plain geometry SHARING the part's shape attributes by reference; the
+      // per-instance data below rides InstancedBufferAttributes (not an
+      // InstancedBufferGeometry, whose Infinity instanceCount breaks the draw).
+      const geometry = new THREE.BufferGeometry();
+      geometry.index = source.geometry.index;
+      const pos = source.geometry.getAttribute("position");
+      const nrm = source.geometry.getAttribute("normal");
+      const uvA = source.geometry.getAttribute("uv");
+      if (pos) geometry.setAttribute("position", pos);
+      if (nrm) geometry.setAttribute("normal", nrm);
+      if (source.foliage && uvA) geometry.setAttribute("uv", uvA);
+
+      // Per-chunk instance attributes, sized to the real count.
+      const tint = new THREE.InstancedBufferAttribute(new Float32Array(used * VEC3), VEC3);
+      const thermalCenter = new THREE.InstancedBufferAttribute(new Float32Array(used * VEC3), VEC3);
+      const thermalRadius = new THREE.InstancedBufferAttribute(new Float32Array(used), 1);
+      const thermalVariation = new THREE.InstancedBufferAttribute(new Float32Array(used), 1);
+
+      const tints = tint.array as Float32Array;
+      const centers = thermalCenter.array as Float32Array;
+      const radii = thermalRadius.array as Float32Array;
+      const variations = thermalVariation.array as Float32Array;
       for (let i = 0; i < used; i++) {
-        const j = (offset + i) * VEC3;
-        const matrixOffset = i * MAT4;
+        const j = i * VEC3;
+        const m = i * MAT4;
         const jitter = block.jitter[i] ?? 1;
-        tints[j] = part.baseColor.r * jitter;
-        tints[j + 1] = part.baseColor.g * jitter;
-        tints[j + 2] = part.baseColor.b * jitter;
+        tints[j] = source.baseColor.r * jitter;
+        tints[j + 1] = source.baseColor.g * jitter;
+        tints[j + 2] = source.baseColor.b * jitter;
 
-        const x = block.matrices[matrixOffset + 12] ?? 0;
-        const y = block.matrices[matrixOffset + 13] ?? 0;
-        const z = block.matrices[matrixOffset + 14] ?? 0;
-        const sx = block.matrices[matrixOffset] ?? 1;
-        const sy = block.matrices[matrixOffset + 1] ?? 0;
-        const sz = block.matrices[matrixOffset + 2] ?? 0;
+        const x = block.matrices[m + 12] ?? 0;
+        const y = block.matrices[m + 13] ?? 0;
+        const z = block.matrices[m + 14] ?? 0;
+        const sx = block.matrices[m] ?? 1;
+        const sy = block.matrices[m + 1] ?? 0;
+        const sz = block.matrices[m + 2] ?? 0;
         const scale = Math.hypot(sx, sy, sz);
         const height = this.def.targetHeight * scale;
         centers[j] = x;
         centers[j + 1] = y + height * 0.5;
         centers[j + 2] = z;
-        radii[offset + i] = height * 0.55;
-        variations[offset + i] = stableThermalVariation(x, z);
+        radii[i] = height * 0.55;
+        variations[i] = stableThermalVariation(x, z);
       }
+      geometry.setAttribute("instanceTint", tint);
+      geometry.setAttribute("instanceThermalCenter", thermalCenter);
+      geometry.setAttribute("instanceThermalRadius", thermalRadius);
+      geometry.setAttribute("instanceThermalVariation", thermalVariation);
 
-      this.markDirty(part);
-      part.mesh.count = offset + used;
+      const mesh = new THREE.InstancedMesh(geometry, source.material, used);
+      mesh.instanceMatrix.array.set(block.matrices.subarray(0, used * MAT4));
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.count = used;
+      // Frustum culling ON — the whole point: skip this chunk when it's off-screen.
+      mesh.frustumCulled = true;
+      mesh.boundingSphere = new THREE.Sphere(centre.clone(), sphereRadius);
+      mesh.name = `${this.def.id}:${key}`;
+      this.group.add(mesh);
+      meshes.push(mesh);
     }
 
-    this.blocks.set(key, { offset, length: used });
-    this.order.push(key);
-    this.liveCount = offset + used;
+    this.chunkMeshes.set(key, meshes);
+    this.liveCount += used;
   }
 
-  /** Remove a chunk's instances by shifting the packed tail down over its hole. */
+  /** Remove and free one chunk's meshes (keeps the shared shape intact). */
   removeChunk(key: string): void {
-    const block = this.blocks.get(key);
-    if (!block) return;
-    const idx = this.order.indexOf(key);
-    if (idx >= 0) this.order.splice(idx, 1);
-    this.blocks.delete(key);
-
-    if (block.length > 0) {
-      const tailStart = block.offset + block.length;
-      const moved = this.liveCount - tailStart;
-      if (moved > 0) {
-        for (const part of this.parts) {
-          part.matrix.array.copyWithin(
-            block.offset * MAT4,
-            tailStart * MAT4,
-            this.liveCount * MAT4,
-          );
-          part.tint.array.copyWithin(block.offset * VEC3, tailStart * VEC3, this.liveCount * VEC3);
-          part.thermalCenter.array.copyWithin(
-            block.offset * VEC3,
-            tailStart * VEC3,
-            this.liveCount * VEC3,
-          );
-          part.thermalRadius.array.copyWithin(block.offset, tailStart, this.liveCount);
-          part.thermalVariation.array.copyWithin(block.offset, tailStart, this.liveCount);
-        }
-      }
-      this.liveCount -= block.length;
-
-      // The tail moved, so every block after the hole shifted down. Recompute
-      // offsets by walking the surviving order (≤ 49 entries — trivial).
-      let off = 0;
-      for (const k of this.order) {
-        const b = this.blocks.get(k);
-        if (b) {
-          b.offset = off;
-          off += b.length;
-        }
-      }
-      for (const part of this.parts) {
-        this.markDirty(part);
-        part.mesh.count = this.liveCount;
-      }
+    const meshes = this.chunkMeshes.get(key);
+    if (!meshes) return;
+    for (const mesh of meshes) {
+      this.freeChunkMesh(mesh);
+      this.liveCount -= mesh.count;
     }
+    this.chunkMeshes.delete(key);
   }
 
-  /** Drop every chunk's instances (packing state only — buffers keep their
-   *  capacity). Used by a live density re-scatter: clear, then re-`addChunk` all
-   *  cached chunks with new caps. */
+  /** Drop every chunk's meshes (e.g. a live density re-scatter, then re-addChunk). */
   clear(): void {
-    this.blocks.clear();
-    this.order.length = 0;
-    this.liveCount = 0;
-    for (const part of this.parts) {
-      this.markDirty(part);
-      part.mesh.count = 0;
+    for (const meshes of this.chunkMeshes.values()) {
+      for (const mesh of meshes) this.freeChunkMesh(mesh);
     }
+    this.chunkMeshes.clear();
+    this.liveCount = 0;
   }
 
-  private markDirty(part: PartMesh): void {
-    part.matrix.needsUpdate = true;
-    part.tint.needsUpdate = true;
-    part.thermalCenter.needsUpdate = true;
-    part.thermalRadius.needsUpdate = true;
-    part.thermalVariation.needsUpdate = true;
+  /** Detach the shared shape, then dispose so only the per-chunk buffers are freed. */
+  private freeChunkMesh(mesh: THREE.InstancedMesh): void {
+    mesh.removeFromParent();
+    const g = mesh.geometry;
+    // Null the SHARED attributes so dispose() never frees another chunk's shape.
+    g.index = null;
+    g.deleteAttribute("position");
+    g.deleteAttribute("normal");
+    g.deleteAttribute("uv");
+    g.dispose(); // frees the instanceTint/thermal* buffers only
+    mesh.dispose(); // frees instanceMatrix
   }
 
   dispose(): void {
-    for (const part of this.parts) {
-      part.mesh.removeFromParent();
-      part.mesh.dispose();
-      part.mesh.geometry.dispose();
-    }
-    this.parts.length = 0;
-    this.blocks.clear();
-    this.order.length = 0;
-    this.liveCount = 0;
+    this.clear();
+    this.group.removeFromParent();
+    for (const source of this.sources) source.geometry.dispose();
+    this.sources.length = 0;
     for (const handle of this.materials) handle.material.dispose();
     this.materials.length = 0;
   }
