@@ -8,7 +8,7 @@
 
 import { SignalWorld } from "./world.js";
 import { MappingSheet } from "./sheet.js";
-import { FLIGHT_QUELLEN, SENSE_QUELLEN, SPATIAL_QUELLEN, SPATIAL_FARBEN } from "./mapping.js";
+import { FLIGHT_QUELLEN, SENSE_QUELLEN } from "./mapping.js";
 import { Ports } from "../patch/ports.js";
 import { Cables } from "../patch/cables.js";
 import { MasterModule } from "../ui/master.js";
@@ -60,10 +60,8 @@ export const FlightModule = {
       Ports.register({ id: `flight|out|${id}`, dir: "out", el: this.portEls[id],
         color: SENSE_COLOR, label });
     });
-    SPATIAL_QUELLEN.forEach(([id, label]) => {
-      Ports.register({ id: `flight|out|${id}`, dir: "out", el: this.portEls[id],
-        color: SPATIAL_FARBEN[id], label });
-    });
+    // Orte (Duft-/Kompass-Anker) werden nicht mehr verkabelt, sondern pro Karte
+    // per Dropdown gewählt (App.makeOrtRow) — daher keine Spatial-Ausgänge hier.
   },
 
   close() {
@@ -139,7 +137,6 @@ export const FlightModule = {
       hud,
       mkPorts(FLIGHT_QUELLEN, "#7fd4e8"),
       mkPorts(SENSE_QUELLEN, SENSE_COLOR),
-      mkPorts(SPATIAL_QUELLEN, (id) => SPATIAL_FARBEN[id], "spatial"),
     );
   },
 

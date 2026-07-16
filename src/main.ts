@@ -370,12 +370,13 @@ const offTheatrePosition = theatre.onPositionChange((seconds) => {
 window.addEventListener("pagehide", offTheatrePosition);
 
 // End-of-piece credits / thank-you screen. Visibility + fade are authored on the Theatre timeline
-// (`credits.opacity`); one canvas-textured panel serves both presentations — a camera-following
-// billboard on desktop, world-locked in front of the player in VR (see src/experience/credits.ts).
+// (`credits.opacity`); one canvas-textured panel rides a few metres ahead of the player in the
+// flight direction (the rig's heading), so you always fly toward it — in VR you can look around it
+// while it stays ahead on your course, never left fixed in the world (see src/experience/credits.ts).
 const credits = createCredits({
   scene: renderer.scene,
   camera: renderer.camera,
-  renderer: renderer.instance,
+  rig: player.rig,
 });
 window.addEventListener("pagehide", () => credits.dispose());
 

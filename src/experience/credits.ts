@@ -1,14 +1,13 @@
 /**
  * Credits / thank-you screen — the end-of-piece panel, shown in both desktop and VR.
  *
- * A single canvas-textured plane serves both presentations (one code path, per the design):
- *   - **Desktop**: the panel follows the camera each frame — a head-locked billboard held a few
- *     metres ahead at eye level, upright and facing the viewer, so it stays centred and readable
- *     while the flight continues underneath.
- *   - **VR**: the panel is *world-locked*. On the rising edge (the first frame its opacity clears
- *     zero) it snaps into world space a few metres in front of the player's current gaze, facing
- *     them, and then stays fixed — the player can look around it ("fixed in space before the
- *     player"). It re-anchors next time it appears.
+ * A single canvas-textured plane serves both presentations (one code path): the panel rides a few
+ * metres ahead of the player in the **flight direction** (the rig's heading), held at eye level,
+ * upright, and facing the viewer. It is anchored to where you are *travelling*, not where you look —
+ * so in VR you can turn your head and look around it while it stays ahead on your course, and you
+ * keep flying toward it instead of straight through a panel left fixed in the world. On desktop,
+ * where heading and horizontal gaze coincide (the rig yaws to steer; only pitch is a head-look),
+ * this reads exactly like the former head-locked billboard.
  *
  * Visibility + fade are authored on the Theatre timeline (`credits.opacity`, 0..1) and read into
  * {@link Credits.update} each frame — the one authored input. The panel's own alpha (the text
@@ -41,10 +40,10 @@ const PANEL_H = (PANEL_W * CANVAS_H) / CANVAS_W;
 
 export interface CreditsOptions {
   scene: THREE.Scene;
-  /** The presenting camera (VR reads the headset pose through it; desktop reads the rig). */
+  /** The presenting camera — its world pose gives eye position/height (VR headset or desktop rig). */
   camera: THREE.Camera;
-  /** The renderer, for the `xr.isPresenting` check that switches world-lock vs billboard. */
-  renderer: THREE.WebGPURenderer;
+  /** The player rig: it only ever yaws, so its forward is the flight direction the panel rides ahead of. */
+  rig: THREE.Object3D;
 }
 
 export interface Credits {
@@ -57,7 +56,7 @@ export interface Credits {
 }
 
 export function createCredits(options: CreditsOptions): Credits {
-  const { scene, camera, renderer } = options;
+  const { scene, camera, rig } = options;
 
   const canvasTexture = drawCreditsTexture(CREDITS_CONTENT);
 
@@ -80,21 +79,22 @@ export function createCredits(options: CreditsOptions): Credits {
 
   // Scratch — reused each frame, never allocated in the hot path.
   const camPos = new THREE.Vector3();
-  const camQuat = new THREE.Quaternion();
+  const rigQuat = new THREE.Quaternion();
   const forward = new THREE.Vector3();
   const lastForward = new THREE.Vector3(0, 0, -1);
   const target = new THREE.Vector3();
 
-  /** Place the panel a fixed distance ahead at eye level, upright, facing the viewer. */
+  /** Place the panel a fixed distance ahead along the flight heading, at eye level, facing you. */
   function placeInFront(): void {
     camera.getWorldPosition(camPos);
-    camera.getWorldQuaternion(camQuat);
-    // Yaw-only forward: flatten the view direction so the panel sits ahead at eye height and stays
-    // upright even if the viewer is looking up or down when it appears.
-    forward.set(0, 0, -1).applyQuaternion(camQuat);
+    // Flight heading: the rig only ever yaws, so its forward IS the travel direction. Flatten it to
+    // horizontal so the panel sits at eye height and stays upright — and, crucially for VR, so it
+    // rides ahead of where you are *going*, independent of where the head is looking.
+    rig.getWorldQuaternion(rigQuat);
+    forward.set(0, 0, -1).applyQuaternion(rigQuat);
     forward.y = 0;
     if (forward.lengthSq() < 1e-6) {
-      forward.copy(lastForward); // looking near-straight up/down: keep the last good heading
+      forward.copy(lastForward); // degenerate heading: keep the last good one
     } else {
       forward.normalize();
     }
@@ -106,30 +106,17 @@ export function createCredits(options: CreditsOptions): Credits {
     mesh.lookAt(target); // +Z (the plane's face) toward the viewer, kept vertical
   }
 
-  // True once the VR panel has been anchored for the current appearance; reset when it hides.
-  let anchored = false;
-
   function update(opacity: number): void {
     if (opacity <= 0.001) {
       mesh.visible = false;
       uOpacity.value = 0;
-      anchored = false;
       return;
     }
     mesh.visible = true;
     uOpacity.value = Math.min(1, opacity);
-
-    if (renderer.xr.isPresenting) {
-      // VR: world-lock. Anchor once on the rising edge, then leave it fixed in space.
-      if (!anchored) {
-        placeInFront();
-        anchored = true;
-      }
-    } else {
-      // Desktop: follow the camera every frame (head-locked billboard).
-      placeInFront();
-      anchored = false;
-    }
+    // Desktop and VR alike: follow every frame, riding a fixed distance ahead of the flight heading
+    // so the player always flies toward the panel (never through one left fixed in the world).
+    placeInFront();
   }
 
   function dispose(): void {

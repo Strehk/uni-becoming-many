@@ -51,13 +51,20 @@ export const SPATIAL_QUELLEN = [
   ["duft_blume", "duft blume"], ["duft_lavendel", "duft lavendel"],
   ["duft_baum", "duft baum"], ["duft_kiefer", "duft kiefer"],
   ["duft_kraut", "duft kraut"], ["duft_pilz", "duft pilz"],
+  // Neue Duftquellen (die authored Blumen + Tierfährte aus SCENT_TYPES).
+  ["duft_rose", "duft rose"], ["duft_sonnenblume", "duft sonnenblume"],
+  ["duft_mohn", "duft mohn"], ["duft_glocke", "duft glocke"],
+  ["duft_klee", "duft klee"], ["duft_tier", "tierfährte"],
   ["kompass_n", "kompass n"], ["kompass_o", "kompass o"],
   ["kompass_s", "kompass s"], ["kompass_w", "kompass w"],
 ];
-/* Ankerfarben — Welt (Punktwolken) und Flug-Karte (Buchsen) teilen sie. */
+/* Ankerfarben — Welt (Punktwolken) und Flug-Karte (Buchsen) teilen sie.
+   Deckungsgleich mit SCENT_TYPES.color in src/senses/duft/params.ts. */
 export const SPATIAL_FARBEN = {
   duft_blume: "#ff4f9a", duft_lavendel: "#8a5cff", duft_baum: "#ffb340",
   duft_kiefer: "#2fd6a3", duft_kraut: "#b8e02e", duft_pilz: "#8a6f4d",
+  duft_rose: "#ff2e5e", duft_sonnenblume: "#ffd21f", duft_mohn: "#ff5a2e",
+  duft_glocke: "#3aa0ff", duft_klee: "#6ee06a", duft_tier: "#e86a3a",
   kompass_n: "#cad5df", kompass_o: "#cad5df", kompass_s: "#cad5df", kompass_w: "#cad5df",
 };
 
@@ -226,9 +233,10 @@ export class FlightMap {
     // Orts-Buchsen nehmen nur Orts-/Richtungs-Quellen an — und umgekehrt.
     if (this.isSpatial(quelle) !== (control === "ort")) return null;
     if (control === "ort") {
-      // Mono-Buchse: ein zweites Kabel ERSETZT die Quelle (Knobs bleiben).
-      const ex = this.list.find(x => x.layerId === layerId && x.control === "ort");
-      if (ex) { ex.quelle = quelle; this.emit(); return ex; }
+      // Mehrere Orte pro Sinn erlaubt — nur dieselbe Quelle nicht doppelt.
+      const ex = this.list.find(
+        x => x.layerId === layerId && x.control === "ort" && x.quelle === quelle);
+      if (ex) return ex;
     }
     const base = this.readTarget(layerId, control);
     if (base == null) return null;

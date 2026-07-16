@@ -10,7 +10,7 @@ import { SpatialAudio } from "../core/spatial.js";
 import { CHORD_PALETTE } from "../core/chords.js";
 import { Knob, XYPad } from "./widgets.js";
 import { FlightModule } from "../flight/module.js";
-import { FlightMap } from "../flight/mapping.js";
+import { FlightMap, SPATIAL_QUELLEN } from "../flight/mapping.js";
 import { loadLayout, applyLayout, toggleLayoutPanel } from "./settings.js";
 import { MasterModule } from "./master.js";
 import { LfoModule } from "./lfo.js";
@@ -360,6 +360,10 @@ export class App {
       if (c.spatial && m.spatial) { m.spatial.ref = c.spatial.ref; m.spatial.roll = c.spatial.roll; }
     }
 
+    // Karten neu befüllen, damit die Ort-Dropdowns die eben geladenen
+    // Ort-Bindungen zeigen (die Kabel entstanden erst NACH dem ersten fillCard).
+    this.layers.forEach(info => this.fillCard(info));
+
     if (Array.isArray(state.lfo)) LfoModule.applyState(state.lfo);
 
     if (!FlightModule.active) FlightModule.open(this);
@@ -427,15 +431,12 @@ export class App {
     const delBtn = h("button", "icon-btn", "×");
     delBtn.title = "sinn entfernen";
     delBtn.addEventListener("click", () => this.removeLayer(info));
-    // Ort-Buchse (räumliche Bindung) gehört zu keinem Regler → Karten-Kopf
-    const ortWrap = h("div", "port-wrap head-port");
-    ortWrap.append(this.makeJack(layer, "ort", "ort"), h("div", "port-label", "ort"));
     head.append(
       h("span", "dot"),
       h("div", "card-title",
         `<div class="name">${layer.sense.name} <span class="variant-tag">· ${v.name}</span></div>
          <div class="sub">${v.desc}</div>`),
-      ortWrap, moreBtn, muteBtn, delBtn,
+      moreBtn, muteBtn, delBtn,
     );
 
     info.pad = new XYPad({
@@ -485,7 +486,79 @@ export class App {
     gateSel.addEventListener("change", () => { layer.gate = gateSel.value; });
     gateWrap.append(gateSel);
 
-    card.append(head, gateWrap, info.pad.el, knobs);
+    card.append(head, gateWrap, this.makeOrtSection(layer), info.pad.el, knobs);
+  }
+
+  /* Ort-Wahl per Dropdown (ersetzt das frühere Ort-Kabel): an welchen Duft-/
+     Richtungs-Ankern diese Karte räumlich hört. MEHRERE Orte sind erlaubt —
+     jede Bindung eine Zeile; die Audio-Seite (SpatialAudio) legt den Sinn an
+     den jeweils NÄCHSTEN der gewählten Orte. Jede Bindung lebt wie zuvor als
+     "ort"-Mapping in der FlightMap. */
+  makeOrtSection(layer) {
+    const wrap = h("div", "card-ort-wrap");
+    wrap.style.setProperty("--c", layer.sense.color);
+    const build = () => {
+      wrap.innerHTML = "";
+      const bindings = this.flightMap.list.filter(
+        x => x.layerId === layer.id && x.control === "ort");
+      bindings.forEach(m => wrap.append(this.ortRow(layer, m, build)));
+      // "+ ort" nur, solange noch freie Quellen übrig sind.
+      if (bindings.length < SPATIAL_QUELLEN.length) {
+        const add = h("button", "fl-add ort-add", bindings.length ? "+ ort" : "+ ort wählen");
+        add.addEventListener("click", () => {
+          const used = new Set(bindings.map(m => m.quelle));
+          const free = SPATIAL_QUELLEN.find(([v]) => !used.has(v));
+          if (free && this.flightMap.add(layer.id + "|ort", free[0])) build();
+        });
+        wrap.append(add);
+      }
+    };
+    build();
+    return wrap;
+  }
+
+  /* Eine einzelne Ort-Zeile: Dropdown (welcher Ort) + Distanz-Regler daneben +
+     löschen. `refresh` baut die ganze Ort-Sektion neu (Knobs/„+ ort"). */
+  ortRow(layer, m, refresh) {
+    const row = h("div", "card-ort", "<span>ort</span>");
+
+    const sel = document.createElement("select");
+    SPATIAL_QUELLEN.forEach(([val, label]) => {
+      const op = document.createElement("option");
+      op.value = val; op.textContent = label;
+      sel.append(op);
+    });
+    sel.value = m.quelle;
+    sel.addEventListener("change", () => {
+      // Dieselbe Quelle nicht zweimal am selben Sinn.
+      const dup = this.flightMap.list.some(
+        x => x !== m && x.layerId === layer.id && x.control === "ort" && x.quelle === sel.value);
+      if (dup) { sel.value = m.quelle; return; }
+      m.quelle = sel.value; this.flightMap.emit(); refresh();
+    });
+
+    // Distanz-Regler (nur für Ort-Wolken duft_/ort_ — Kompass dämpft nie).
+    const knobs = h("div", "knob-row wrap ort-knobs");
+    if (m.quelle.startsWith("duft_") || m.quelle.startsWith("ort_")) {
+      if (!m.spatial) m.spatial = { ref: 0.15, roll: 0.45 };
+      const mk = (label, value, onChange) => {
+        const k = new Knob({ label, value, color: layer.sense.color, onChange });
+        knobs.append(k.el);
+      };
+      mk("nah-radius", m.spatial.ref, v => { m.spatial.ref = v; });
+      mk("abfall", m.spatial.roll, v => { m.spatial.roll = v; });
+    }
+
+    const del = h("button", "icon-btn ort-del", "×");
+    del.title = "ort entfernen";
+    del.addEventListener("click", (e) => {
+      e.preventDefault();
+      this.flightMap.remove(m);
+      refresh();
+    });
+
+    row.append(sel, knobs, del);
+    return row;
   }
 
   removeLayer(info) {

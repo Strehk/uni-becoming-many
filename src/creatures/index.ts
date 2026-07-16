@@ -911,6 +911,27 @@ export async function createCreatures(
     return true;
   };
 
+  // Ground fauna are land animals: they never spawn on, nor walk into, water.
+  // Best-effort — `waterAt` reports false for terrain that isn't streamed yet.
+  const isWaterAt = senseOpts.waterAt;
+  const pointIsDry = (x: number, z: number): boolean => !isWaterAt || !isWaterAt(x, z);
+  /** True if the straight segment from→to stays out of water (sampled every ~4 m). */
+  const routeAvoidsWater = (
+    fromX: number,
+    fromZ: number,
+    toX: number,
+    toZ: number,
+  ): boolean => {
+    if (!isWaterAt) return true;
+    const length = Math.hypot(toX - fromX, toZ - fromZ);
+    const steps = Math.max(1, Math.ceil(length / 4));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      if (isWaterAt(fromX + (toX - fromX) * t, fromZ + (toZ - fromZ) * t)) return false;
+    }
+    return true;
+  };
+
   const findOpenPoint = (
     target: THREE.Vector3,
     minRadius: number,
@@ -927,8 +948,10 @@ export async function createCreatures(
       const y = ground(x, z);
       const slope = slopeAt(x, z);
       if (y === null || slope === null || slope > MAX_GROUND_SLOPE) continue;
+      if (!pointIsDry(x, z)) continue;
       if (!pointIsClear(x, z, clearance)) continue;
       if (routeFrom && !routeIsClear(routeFrom.x, routeFrom.z, x, z, clearance)) continue;
+      if (routeFrom && !routeAvoidsWater(routeFrom.x, routeFrom.z, x, z)) continue;
       target.set(x, y, z);
       return true;
     }
@@ -1274,13 +1297,19 @@ export async function createCreatures(
           targetDistance < DEER_WAYPOINT_REACHED || w.waypointAge >= DEER_WAYPOINT_TIMEOUT;
         const routeBlocked =
           w.routeCheckAge >= 1.25 &&
-          !routeIsClear(
+          (!routeIsClear(
             w.object.position.x,
             w.object.position.z,
             w.waypoint.x,
             w.waypoint.z,
             tuning.clearance,
-          );
+          ) ||
+            !routeAvoidsWater(
+              w.object.position.x,
+              w.object.position.z,
+              w.waypoint.x,
+              w.waypoint.z,
+            ));
         if (needsWaypoint || routeBlocked) {
           if (!rollWalkerWaypoint(w, tuning)) {
             w.action.timeScale = 0;

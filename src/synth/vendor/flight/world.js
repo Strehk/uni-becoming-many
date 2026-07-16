@@ -17,6 +17,9 @@
 const ANCHOR_IDS = [
   "duft_blume", "duft_lavendel", "duft_baum",
   "duft_kiefer", "duft_kraut", "duft_pilz",
+  // Neue Duftquellen (deckungsgleich mit SCENT_TYPES / SPATIAL_QUELLEN).
+  "duft_rose", "duft_sonnenblume", "duft_mohn",
+  "duft_glocke", "duft_klee", "duft_tier",
 ];
 
 export class SignalWorld {

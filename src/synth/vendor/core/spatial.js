@@ -84,30 +84,47 @@ export const SpatialAudio = {
     // Flug zu: Listener bleibt stehen, die Panner gleiten zu ihm zurück
     // (der Klang "kommt heim" — passt zum verschwundenen Kabel).
 
-    // Ziel jedes gebundenen Layers auflösen (Anker- oder Kompass-Position)
-    for (const b of bindings) {
-      if (!pose) break;
-      const q = b.m.quelle;
-      let tx = null, ty = 0, tz = 0;
+    // Ziel eines gebundenen Layers auflösen: Anker- oder Kompass-Position.
+    const resolve = (q) => {
       const dir = COMPASS[q];
-      if (dir) {
-        tx = L.x + dir[0] * CONST_DIST;
-        ty = L.y + dir[1] * CONST_DIST;
-        tz = L.z + dir[2] * CONST_DIST;
-      } else if (anchors) {
+      if (dir) return { x: L.x + dir[0] * CONST_DIST, y: L.y + dir[1] * CONST_DIST,
+                        z: L.z + dir[2] * CONST_DIST, dir };
+      if (anchors) {
         const a = anchors.find(a => a.id === q);
-        if (a) { tx = a.x; ty = a.y; tz = a.z; }
+        if (a) return { x: a.x, y: a.y, z: a.z, dir: null };
       }
-      if (tx == null) continue;
-      this.ensure(b.layer);
-      const s = this.state.get(b.layer);
-      s.wantX = tx; s.wantY = ty; s.wantZ = tz; s.wantKey = q;
-      // Distanz-Charakter der Bindung (nur Orts-Wolken; Kompass dämpft nie)
-      const p = b.layer.panner;
-      if (dir) {
+      return null;
+    };
+
+    // Mehrere Orte pro Sinn: pro Layer die Bindungen sammeln und den NÄCHSTEN
+    // wählen — der Klang sitzt am nächstgelegenen der gewählten Orte und gleitet
+    // beim Weiterziehen weich zum nächsten hinüber (ein Panner pro Layer).
+    const byLayer = new Map();
+    for (const b of bindings) {
+      let arr = byLayer.get(b.layer);
+      if (!arr) { arr = []; byLayer.set(b.layer, arr); }
+      arr.push(b);
+    }
+    for (const [layer, bs] of byLayer) {
+      if (!pose) break;
+      let best = null, bestT = null, bestD2 = Infinity;
+      for (const b of bs) {
+        const t = resolve(b.m.quelle);
+        if (!t) continue;
+        const dx = t.x - L.x, dy = t.y - L.y, dz = t.z - L.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < bestD2) { bestD2 = d2; best = b; bestT = t; }
+      }
+      if (!best) continue;
+      this.ensure(layer);
+      const s = this.state.get(layer);
+      s.wantX = bestT.x; s.wantY = bestT.y; s.wantZ = bestT.z; s.wantKey = best.m.quelle;
+      // Distanz-Charakter der aktiven (nächsten) Bindung — Kompass dämpft nie.
+      const p = layer.panner;
+      if (bestT.dir) {
         if (p.rolloffFactor !== 0) p.rolloffFactor = 0;
       } else {
-        const sp = b.m.spatial || { ref: 0.15, roll: 0.45 };
+        const sp = best.m.spatial || { ref: 0.15, roll: 0.45 };
         const ref = 6 + sp.ref * 54, roll = 0.4 + sp.roll * 2.2;
         if (p.refDistance !== ref) p.refDistance = ref;
         if (p.rolloffFactor !== roll) p.rolloffFactor = roll;
