@@ -242,6 +242,9 @@ export interface Creatures {
   debugSnapshot(): {
     readonly visibility: { readonly birds: boolean; readonly groundFauna: boolean };
     readonly streamedChunks: number;
+    readonly flying: Readonly<
+      Record<FlyingKind, { readonly flocks: number; readonly animals: number }>
+    >;
     readonly deer: readonly {
       x: number;
       y: number;
@@ -1092,9 +1095,20 @@ export async function createCreatures(
       }
     },
     debugSnapshot() {
+      const flying = {
+        bird: { flocks: 0, animals: 0 },
+        bat: { flocks: 0, animals: 0 },
+        meise: { flocks: 0, animals: 0 },
+        butterfly: { flocks: 0, animals: 0 },
+      } satisfies Record<FlyingKind, { flocks: number; animals: number }>;
+      for (const flock of flocks) {
+        flying[flock.kind].flocks++;
+        flying[flock.kind].animals += flock.members.length;
+      }
       return {
         visibility: { birds: birdGroup.visible, groundFauna: groundFaunaGroup.visible },
         streamedChunks: streamedGroundChunks.size,
+        flying,
         deer: deers.map((deer) => {
           const nearby =
             senseOpts.groundObstacles?.(

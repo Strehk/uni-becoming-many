@@ -344,13 +344,20 @@ const GROUPS: Group[] = [
     title: "Fauna · Meisen",
     open: true,
     specs: [
-      { kind: "count", key: "fauna.meiseFlockCount", label: "Schwärme", min: 0, max: 48, step: 1 },
+      {
+        kind: "count",
+        key: "fauna.meiseFlockCount",
+        label: "Schwärme · Anzahl",
+        min: 0,
+        max: 48,
+        step: 1,
+      },
       {
         kind: "count",
         key: "fauna.meiseMinPerFlock",
         label: "Meisen / Schwarm · Min",
         min: 1,
-        max: 80,
+        max: 120,
         step: 1,
       },
       {
@@ -358,7 +365,7 @@ const GROUPS: Group[] = [
         key: "fauna.meiseMaxPerFlock",
         label: "Meisen / Schwarm · Max",
         min: 1,
-        max: 80,
+        max: 120,
         step: 1,
       },
       {
@@ -386,9 +393,9 @@ const GROUPS: Group[] = [
       {
         kind: "count",
         key: "fauna.butterflyFlockCount",
-        label: "Gruppen",
+        label: "Gruppen · Anzahl",
         min: 0,
-        max: 48,
+        max: 80,
         step: 1,
       },
       {

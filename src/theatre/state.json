@@ -32,7 +32,9 @@
               "[\"tracks\",\"magnetic\"]": "umsmv0jocw",
               "[\"tracks\",\"overload\"]": "yIfzh2i35k",
               "[\"tracks\",\"finale\"]": "9ib58DOeSq",
-              "[\"events\",\"birdCircle\"]": "track:events.birdCircle"
+              "[\"events\",\"birdCircle\"]": "track:events.birdCircle",
+              "[\"events\",\"batFlight\"]": "h7djlU3sLO",
+              "[\"events\",\"mosquitoSwarm\"]": "wx9rTamXuU"
             },
             "trackData": {
               "track:unrest": {
@@ -115,7 +117,7 @@
                   },
                   {
                     "id": "qXE2ZZjLf1",
-                    "position": 403.167,
+                    "position": 402.6,
                     "connectedRight": false,
                     "handles": [0.5, 1, 0.5, 0],
                     "type": "bezier",
@@ -145,7 +147,7 @@
                   },
                   {
                     "id": "nqlKaj5Ooq",
-                    "position": 403.167,
+                    "position": 402.633,
                     "connectedRight": false,
                     "handles": [0.5, 1, 0.5, 0],
                     "type": "bezier",
@@ -189,7 +191,7 @@
                   },
                   {
                     "id": "0eEFrugCkR",
-                    "position": 403.033,
+                    "position": 402.6,
                     "connectedRight": false,
                     "handles": [0.5, 1, 0.5, 0],
                     "type": "bezier",
@@ -219,7 +221,7 @@
                   },
                   {
                     "id": "9yQQjCSdHL",
-                    "position": 403.2,
+                    "position": 402.7,
                     "connectedRight": false,
                     "handles": [0.5, 1, 0.5, 0],
                     "type": "bezier",
@@ -249,7 +251,7 @@
                   },
                   {
                     "id": "H-NE4y0Pdc",
-                    "position": 403.167,
+                    "position": 402.667,
                     "connectedRight": false,
                     "handles": [0.5, 1, 0.5, 0],
                     "type": "bezier",
@@ -279,7 +281,7 @@
                   },
                   {
                     "id": "0EQRu5MXO_",
-                    "position": 403.133,
+                    "position": 402.7,
                     "connectedRight": false,
                     "handles": [0.5, 1, 0.5, 0],
                     "type": "bezier",
@@ -482,28 +484,88 @@
                 "__debugName": "events.birdCircle",
                 "keyframes": [
                   {
-                    "id": "kf-ev-bird-0",
+                    "id": "UueWNYldiv",
                     "position": 0,
                     "connectedRight": true,
                     "handles": [0.5, 1, 0.5, 0],
-                    "type": "hold",
+                    "type": "bezier",
                     "value": 0
                   },
                   {
-                    "id": "kf-ev-bird-1",
-                    "position": 12,
+                    "id": "-Ff2Uir2S_",
+                    "position": 279.067,
                     "connectedRight": true,
                     "handles": [0.5, 1, 0.5, 0],
-                    "type": "hold",
+                    "type": "bezier",
+                    "value": 0
+                  },
+                  {
+                    "id": "lntNAI3xlg",
+                    "position": 279.433,
+                    "connectedRight": true,
+                    "handles": [0.5, 1, 0.5, 0],
+                    "type": "bezier",
                     "value": 1
-                  },
+                  }
+                ]
+              },
+              "h7djlU3sLO": {
+                "type": "BasicKeyframedTrack",
+                "__debugName": "arc:[\"events\",\"batFlight\"]",
+                "keyframes": [
                   {
-                    "id": "kf-ev-bird-2",
-                    "position": 14,
+                    "id": "j_q0FtJq_1",
+                    "position": 0,
                     "connectedRight": true,
                     "handles": [0.5, 1, 0.5, 0],
-                    "type": "hold",
+                    "type": "bezier",
                     "value": 0
+                  },
+                  {
+                    "id": "7MwFc5rPXN",
+                    "position": 118.467,
+                    "connectedRight": true,
+                    "handles": [0.5, 1, 0.5, 0],
+                    "type": "bezier",
+                    "value": 0
+                  },
+                  {
+                    "id": "w3RmdncazN",
+                    "position": 118.867,
+                    "connectedRight": true,
+                    "handles": [0.5, 1, 0.5, 0],
+                    "type": "bezier",
+                    "value": 1
+                  }
+                ]
+              },
+              "wx9rTamXuU": {
+                "type": "BasicKeyframedTrack",
+                "__debugName": "arc:[\"events\",\"mosquitoSwarm\"]",
+                "keyframes": [
+                  {
+                    "id": "wnHIYHcPd2",
+                    "position": 0,
+                    "connectedRight": true,
+                    "handles": [0.5, 1, 0.5, 0],
+                    "type": "bezier",
+                    "value": 0
+                  },
+                  {
+                    "id": "LX7s8PBIPC",
+                    "position": 164.267,
+                    "connectedRight": true,
+                    "handles": [0.5, 1, 0.5, 0],
+                    "type": "bezier",
+                    "value": 0
+                  },
+                  {
+                    "id": "5RlWIjdMnB",
+                    "position": 164.533,
+                    "connectedRight": true,
+                    "handles": [0.5, 1, 0.5, 0],
+                    "type": "bezier",
+                    "value": 1
                   }
                 ]
               }
@@ -589,6 +651,7 @@
   },
   "definitionVersion": "0.4.0",
   "revisionHistory": [
+    "0HmCuMGs4YiNwCi4",
     "XpclRYqDzoI7gS54",
     "Q84OpdcquZqCdxp1",
     "Ulkdo0pQumgvAXIT",
