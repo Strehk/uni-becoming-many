@@ -20,6 +20,7 @@
  * the same limitation as the one-shot cues). In a normal forward-playing run that's inaudible; it
  * only shows if you pause or scrub mid-movement while authoring in Studio.
  */
+import { asset } from "../asset-url.ts";
 import type { SoundBus } from "./index.ts";
 
 export interface Movement {
@@ -44,56 +45,56 @@ export const MOVEMENTS: readonly Movement[] = [
   {
     id: "intro",
     label: "① Intro",
-    src: "/audio/movements/bm-1-intro.mp3",
+    src: asset("audio/movements/bm-1-intro.mp3"),
     duration: 71.188,
     gain: 0.85,
   },
   {
     id: "scent",
     label: "② Scent",
-    src: "/audio/movements/bm-2-scent.mp3",
+    src: asset("audio/movements/bm-2-scent.mp3"),
     duration: 43.369,
     gain: 0.85,
   },
   {
     id: "depth",
     label: "③ Depth",
-    src: "/audio/movements/bm-3-depth.mp3",
+    src: asset("audio/movements/bm-3-depth.mp3"),
     duration: 45.247,
     gain: 0.85,
   },
   {
     id: "motion",
     label: "④ Motion",
-    src: "/audio/movements/bm-4-motion.mp3",
+    src: asset("audio/movements/bm-4-motion.mp3"),
     duration: 48.319,
     gain: 0.85,
   },
   {
     id: "infrared",
     label: "⑤ Infrared",
-    src: "/audio/movements/bm-5-infrared.mp3",
+    src: asset("audio/movements/bm-5-infrared.mp3"),
     duration: 62.484,
     gain: 0.85,
   },
   {
     id: "magnetic",
     label: "⑥ Magnetic Field",
-    src: "/audio/movements/bm-6-magnetic-field.mp3",
+    src: asset("audio/movements/bm-6-magnetic-field.mp3"),
     duration: 44.82,
     gain: 0.85,
   },
   {
     id: "overload",
     label: "⑦ Overload",
-    src: "/audio/movements/bm-7-overload.mp3",
+    src: asset("audio/movements/bm-7-overload.mp3"),
     duration: 74.601,
     gain: 0.85,
   },
   {
     id: "finale",
     label: "⑧ Finale",
-    src: "/audio/movements/bm-8-finale.mp3",
+    src: asset("audio/movements/bm-8-finale.mp3"),
     duration: 72.127,
     gain: 0.85,
   },

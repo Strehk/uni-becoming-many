@@ -19,6 +19,7 @@
  */
 import { texture as textureNode, uniform } from "three/tsl";
 import * as THREE from "three/webgpu";
+import { asset } from "../asset-url.ts";
 
 /**
  * The credits content. **Placeholder — edit the title and lines below with the real credits.**
@@ -131,7 +132,7 @@ export function createCredits(options: CreditsOptions): Credits {
 
 /** The display face for the credits — bundled in `public/fonts`, loaded on demand. */
 const FONT_FAMILY = "Heavitas";
-const FONT_URL = "/fonts/Heavitas.ttf";
+const FONT_URL = asset("fonts/Heavitas.ttf");
 
 /**
  * Load Heavitas once and register it with the document, so canvas text draws in it. Resolves after

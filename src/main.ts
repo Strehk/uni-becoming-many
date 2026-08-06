@@ -1,4 +1,5 @@
 import { time } from "three/tsl";
+import { asset } from "./asset-url.ts";
 import { createAtmosphere } from "./atmosphere/index.ts";
 import { SoundBus, SoundDirector } from "./audio/index.ts";
 import { createMovementScore } from "./audio/movements.ts";
@@ -418,14 +419,14 @@ if (import.meta.env.DEV) {
 // placeholders until the sound pipeline lands — a missing file warns once and is otherwise inert.
 const soundBus = new SoundBus();
 const director = new SoundDirector(soundBus, clock, bus);
-director.cue({ id: "chirp", src: "/audio/chirp.ogg", gain: 0.7, trigger: { kind: "event" } });
+director.cue({ id: "chirp", src: asset("audio/chirp.ogg"), gain: 0.7, trigger: { kind: "event" } });
 // One unlock cue per sense: `bus.when` fires on the rising edge of each sense signal
 // (Theatre or manual alike) and emits `cue:sense:<id>` — the director plays the clip
 // once real audio assets land (missing files warn once and stay inert).
 for (const senseId of SENSE_ORDER) {
   director.cue({
     id: `sense:${senseId}`,
-    src: `/audio/sense-${senseId}.ogg`,
+    src: asset(`audio/sense-${senseId}.ogg`),
     gain: 0.8,
     trigger: { kind: "event" },
   });

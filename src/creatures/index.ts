@@ -37,6 +37,7 @@ import {
 } from "three/tsl";
 import * as THREE from "three/webgpu";
 import type { Node } from "three/webgpu";
+import { asset } from "../asset-url.ts";
 import { DEFAULT_CONFIG, type FaunaConfig, normalizeFaunaConfig } from "../flora-fauna/config.ts";
 import type { FloraLayerCompositor } from "../life/material.ts";
 import { distanceFog, viewReveal } from "../render/tsl-kit.ts";
@@ -89,23 +90,23 @@ const MAX_ALTITUDE = 60;
 /** The rigged bird asset (Erasmus' model). Head faces −Z in the file — the
  *  wrapper is turned 180° so our +Z flight forward matches; the armature's
  *  single clip (flap cycle) plays per bird with jittered phase/tempo. */
-const BIRD_MODEL_URL = "/creatures/bird_erasmus.glb";
-const DEER_MODEL_URL = "/creatures/deer_walk.glb";
+const BIRD_MODEL_URL = asset("creatures/bird_erasmus.glb");
+const DEER_MODEL_URL = asset("creatures/deer_walk.glb");
 /** Rigged, walking fox — roams the terrain on the same waypoint logic as the deer. */
-const FOX_MODEL_URL = "/creatures/fox-walk.glb";
+const FOX_MODEL_URL = asset("creatures/fox-walk.glb");
 const FOX_WALK_CLIP = "Armature|Unreal Take|baselayer";
 /** Target wingspan in metres (the file spans ~17.4 units). */
 const BIRD_WINGSPAN = 1.05;
 /** Rigged bat added to the same flock/sense substrate as the birds. */
-const BAT_MODEL_URL = "/creatures/bat_BS_rig.glb";
+const BAT_MODEL_URL = asset("creatures/bat_BS_rig.glb");
 const BAT_WINGSPAN = 0.7;
 const BAT_FLAP_CLIP = "Armature.001Action";
 /** Meise (tit): flies at treetop height and below, everywhere. */
-const MEISE_MODEL_URL = "/creatures/meise.glb";
+const MEISE_MODEL_URL = asset("creatures/meise.glb");
 const MEISE_WINGSPAN = 0.24;
 const MEISE_FLAP_CLIP = "ArmatureAction";
 /** Butterfly: flits very low, near flowers and bushes. */
-const BUTTERFLY_MODEL_URL = "/creatures/butterfly.glb";
+const BUTTERFLY_MODEL_URL = asset("creatures/butterfly.glb");
 const BUTTERFLY_WINGSPAN = 0.09;
 const BUTTERFLY_FLAP_CLIP = "Armature.001Action";
 

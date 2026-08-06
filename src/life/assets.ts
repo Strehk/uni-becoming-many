@@ -19,6 +19,7 @@
 
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import * as THREE from "three/webgpu";
+import { asset } from "../asset-url.ts";
 import { SPECIES, SPECIES_IDS, type SpeciesId } from "./species.ts";
 
 /** One instanced draw's worth of a species: a distinct material on the source mesh. */
@@ -33,7 +34,7 @@ export interface FloraPart {
   readonly foliage: boolean;
 }
 
-const BASE_URL = "/life";
+const BASE_URL = asset("life");
 
 /**
  * Load every species' parts.
