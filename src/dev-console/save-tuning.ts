@@ -39,6 +39,7 @@ export function createSaveTuningControls(opts: {
   serializeSenses(): unknown;
   serializeWorld(): unknown;
   serializeFloraFauna(): unknown;
+  serializePerf(): unknown;
 }): SaveTuningControls {
   injectStyles();
 
@@ -74,12 +75,17 @@ export function createSaveTuningControls(opts: {
     downloadJson("flora-fauna-state.json", opts.serializeFloraFauna()),
   );
 
-  row.append(sensesBtn, worldBtn, floraFaunaBtn);
+  const perfBtn = document.createElement("button");
+  perfBtn.textContent = "⤓ Performance";
+  perfBtn.title = "Performance-Zustand als perf-state.json exportieren";
+  perfBtn.addEventListener("click", () => downloadJson("perf-state.json", opts.serializePerf()));
+
+  row.append(sensesBtn, worldBtn, floraFaunaBtn, perfBtn);
   root.append(row);
 
   const hint = document.createElement("p");
   hint.className = "st-hint";
-  hint.textContent = "→ src/senses · src/terrain · src/flora-fauna /state.json";
+  hint.textContent = "→ src/senses · src/terrain · src/flora-fauna · src/perf /state.json";
   root.append(hint);
 
   return {
@@ -105,7 +111,7 @@ function injectStyles(): void {
 const CSS = `
 .st-root { display: flex; flex-direction: column; gap: 6px; }
 .st-head .devc-h3 { margin: 0; }
-.st-actions { display: flex; gap: 4px; }
+.st-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .st-actions button {
   background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
   border-radius: 3px; color: #a1a1aa; font-size: 11px; padding: 4px 10px; cursor: pointer;

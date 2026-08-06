@@ -39,6 +39,12 @@ export interface LittlePlanetOptions {
   contrast: number;
   vignette: number;
   centerLift: number;
+  /** Capture the cubemap only every Nth frame (≥1). The projection quad still
+   *  draws at full rate — yaw rotates in the quad shader, so turning stays
+   *  smooth; only the captured world content updates at the reduced rate. The
+   *  6-face capture is what multiplies the whole scene's draw calls, so this is
+   *  the biggest rundum perf lever (2 ≈ half the cube cost). */
+  captureInterval: number;
 }
 
 export const LITTLE_PLANET_DEFAULTS: LittlePlanetOptions = {
@@ -51,6 +57,7 @@ export const LITTLE_PLANET_DEFAULTS: LittlePlanetOptions = {
   contrast: 1.08,
   vignette: 0.32,
   centerLift: 0.05,
+  captureInterval: 1,
 };
 
 const _size = new THREE.Vector2();
@@ -72,6 +79,8 @@ export class LittlePlanetRenderer {
   private readonly quadCamera: THREE.OrthographicCamera;
   private readonly quad: THREE.Mesh;
   private readonly material: THREE.MeshBasicNodeMaterial;
+
+  private frameIndex = 0;
 
   private readonly uAspect = uniform(1);
   private readonly uYaw = uniform(0);
@@ -127,6 +136,17 @@ export class LittlePlanetRenderer {
     this.applyOptions();
   }
 
+  /** Resize the cubemap in place (perf knob): face cost scales with size².
+   *  `setSize` keeps the same texture object, so the TSL graph needs no rewire. */
+  setCubeSize(size: number): void {
+    const s = Math.max(64, Math.round(size));
+    if (s === this.options.cubeSize) {
+      return;
+    }
+    this.options = { ...this.options, cubeSize: s };
+    this.cubeTarget.setSize(s, s);
+  }
+
   get currentOptions(): Readonly<LittlePlanetOptions> {
     return this.options;
   }
@@ -158,15 +178,20 @@ export class LittlePlanetRenderer {
     this.cubeCamera.position.copy(_position);
     this.uYaw.value = Math.atan2(_forward.x, _forward.z) + this.options.yawOffset;
 
-    const hiddenStates = hiddenObjects.map((object) => ({ object, visible: object.visible }));
-    for (const { object } of hiddenStates) {
-      object.visible = false;
-    }
+    // Throttled capture: the 6-face pass re-renders the entire scene, so skipping
+    // frames cuts its CPU (per-object uniform uploads) and GPU cost proportionally.
+    this.frameIndex++;
+    if (this.frameIndex % Math.max(1, Math.round(this.options.captureInterval)) === 0) {
+      const hiddenStates = hiddenObjects.map((object) => ({ object, visible: object.visible }));
+      for (const { object } of hiddenStates) {
+        object.visible = false;
+      }
 
-    this.cubeCamera.update(renderer, scene);
+      this.cubeCamera.update(renderer, scene);
 
-    for (const { object, visible } of hiddenStates) {
-      object.visible = visible;
+      for (const { object, visible } of hiddenStates) {
+        object.visible = visible;
+      }
     }
 
     renderer.render(this.quadScene, this.quadCamera);

@@ -130,6 +130,12 @@ export interface Life {
    *  in place (deterministic — same PRNG salt), so the change shows immediately
    *  without terrain regeneration. */
   applyConfig(config: FloraConfig): void;
+  /** Performance knob: only chunks whose centre lies within `metres` of the
+   *  player carry flora instances. Far chunks keep their build info and
+   *  repopulate deterministically on approach (same PRNG salt). The full keep
+   *  window spans ~896 m, while fog swallows detail beyond ~2×fogFar — culling
+   *  distant flora cuts the dominant vertex load without a visible change. */
+  setViewDistance(metres: number): void;
   dispose(): void;
 }
 
@@ -354,6 +360,55 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
     else rootAnchors.delete(k);
   };
 
+  // ── Flora view distance (perf) ────────────────────────────────────────────
+  // Only chunks whose centre is within `viewDistance` of the player are
+  // scattered into the instance buffers; the rest keep their ChunkBuiltInfo and
+  // repopulate deterministically on approach. Depopulation uses a one-chunk
+  // hysteresis band so the boundary never thrashes while flying along it.
+  let viewDistance = Number.POSITIVE_INFINITY;
+  const pose = signals.playerPose.peek();
+
+  const chunkDistSq = (info: ChunkBuiltInfo): number => {
+    const cx = (info.gridX + 0.5) * info.chunkSize;
+    const cz = (info.gridZ + 0.5) * info.chunkSize;
+    const dx = cx - pose.x;
+    const dz = cz - pose.z;
+    return dx * dx + dz * dz;
+  };
+  const withinView = (info: ChunkBuiltInfo): boolean =>
+    chunkDistSq(info) <= viewDistance * viewDistance;
+
+  const populate = (k: string, info: ChunkBuiltInfo): void => {
+    scatterInto(k, info);
+    liveChunks.add(k);
+  };
+  const depopulate = (k: string): void => {
+    for (const s of species) s.instances.removeChunk(k);
+    scentSpots.delete(k);
+    treeObstacles.delete(k);
+    rootAnchors.delete(k);
+    liveChunks.delete(k);
+  };
+
+  /** One gate tick: depopulate everything beyond the hysteresis band, populate
+   *  at most one in-range chunk (scatter is the heavy op — same one-chunk-per-
+   *  frame budget the streaming build uses). */
+  const reconcileViewDistance = (): void => {
+    if (viewDistance === Number.POSITIVE_INFINITY) return;
+    let populated = false;
+    for (const [k, info] of chunkInfos) {
+      const d2 = chunkDistSq(info);
+      const inView = d2 <= viewDistance * viewDistance;
+      if (liveChunks.has(k)) {
+        const keep = viewDistance + info.chunkSize * 0.75;
+        if (d2 > keep * keep) depopulate(k);
+      } else if (inView && !populated) {
+        populate(k, info);
+        populated = true;
+      }
+    }
+  };
+
   // ── Bioluminescence follows the active sense (event-rate → subscribe is right) ──
   let glowTarget = BIOLUMINESCENCE_BY_SENSE[signals.activeSense.peek()] ?? 0;
   life.bioluminescence.value = glowTarget;
@@ -372,22 +427,16 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
 
     onChunkBuilt(info: ChunkBuiltInfo): void {
       const k = key(info.gridX, info.gridZ);
-      if (liveChunks.has(k)) return; // already populated
+      if (chunkInfos.has(k)) return; // already tracked
       chunkInfos.set(k, info);
-      scatterInto(k, info);
-      liveChunks.add(k);
+      if (withinView(info)) populate(k, info);
     },
 
     onChunkDisposed(cell: ChunkCell): void {
       const k = key(cell.gridX, cell.gridZ);
-      if (!liveChunks.has(k)) return;
-
-      for (const s of species) s.instances.removeChunk(k);
-      scentSpots.delete(k);
-      treeObstacles.delete(k);
-      rootAnchors.delete(k);
+      if (!chunkInfos.has(k)) return;
+      if (liveChunks.has(k)) depopulate(k);
       chunkInfos.delete(k);
-      liveChunks.delete(k);
     },
 
     scentSpotsAround(x: number, z: number, radius: number): ScentSpot[] {
@@ -456,16 +505,28 @@ export async function createLife(opts: CreateLifeOptions): Promise<Life> {
         s.affinity = affinityFor(s.id);
         s.mods = modsFor(s.id);
       }
-      // Re-scatter every live chunk with the new caps. Clear packing first, then
-      // replay in the retained chunk order — deterministic, no buffer realloc.
+      // Re-scatter every in-view chunk with the new caps. Clear packing first,
+      // then replay in the retained chunk order — deterministic, no realloc.
+      // Out-of-view chunks stay depopulated; the view-distance gate repopulates
+      // them on approach.
       for (const s of species) s.instances.clear();
       scentSpots.clear();
       treeObstacles.clear();
       rootAnchors.clear();
-      for (const [k, info] of chunkInfos) scatterInto(k, info);
+      liveChunks.clear();
+      for (const [k, info] of chunkInfos) {
+        if (withinView(info)) populate(k, info);
+      }
+    },
+
+    setViewDistance(metres: number): void {
+      viewDistance = metres >= 896 ? Number.POSITIVE_INFINITY : Math.max(150, metres);
+      // Depopulation beyond the new radius + one-per-frame repopulation happen
+      // in `update` via reconcileViewDistance.
     },
 
     update(dt: number): void {
+      reconcileViewDistance(); // 49 distance checks + at most one scatter — cheap
       // peek() in the hot path — never subscribe to per-frame signals.
       life.clock.value = signals.time.peek();
       life.swayStrength.value = config.swayStrength + signals.unrest.peek() * SWAY_GAIN;

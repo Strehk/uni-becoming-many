@@ -6,6 +6,7 @@ import { type Creatures, createCreatures } from "./creatures/index.ts";
 import { createEventControls } from "./dev-console/event-controls.ts";
 import { createFloraFaunaControls } from "./dev-console/flora-fauna-controls.ts";
 import { createDevConsole } from "./dev-console/index.ts";
+import { createPerformanceControls } from "./dev-console/performance-controls.ts";
 import { createSaveTuningControls } from "./dev-console/save-tuning.ts";
 import { createSenseControls } from "./dev-console/sense-controls.ts";
 import { createWorldControls } from "./dev-console/world-controls.ts";
@@ -29,6 +30,7 @@ import { type Grass, createGrass } from "./grass/index.ts";
 import { type ControlOrientation, connectHost } from "./icaros/index.ts";
 import { createLife } from "./life/index.ts";
 import { createMinimap } from "./minimap/index.ts";
+import { applyPerfState, perfStateFrom, savedPerfState, serializePerfState } from "./perf/state.ts";
 import { createPlayer } from "./player/index.ts";
 import { createKeyboardControls } from "./player/keyboard-controls.ts";
 import { syncCameraPos } from "./render/camera-pos.ts";
@@ -39,7 +41,7 @@ import { AIR_ONLY_SENSES, SENSE_ORDER, createSenses } from "./senses/index.ts";
 import { createMagnetfeldSense } from "./senses/magnetfeld/index.ts";
 import { createMotionSense } from "./senses/motion/index.ts";
 import { createNetzwerkSense } from "./senses/netzwerk/index.ts";
-import { createRundumSense } from "./senses/rundum/index.ts";
+import { LITTLE_PLANET_DEFAULTS, createRundumSense } from "./senses/rundum/index.ts";
 import { loadSenseState, savedSenseState, serializeSenseState } from "./senses/state.ts";
 import { bus, signals } from "./signals/index.ts";
 import { createSynthOverlay } from "./synth/index.ts";
@@ -155,6 +157,17 @@ window.addEventListener("pagehide", () => grass.dispose());
 // chunks stream — the dev-console World panel then opens on these values.
 loadTerrainState(savedTerrainState, world);
 
+// Restore the committed performance tuning (render scale / grass window / stream
+// radius) before the first frames, so boot already streams with these values. The
+// dev-console Performance panel then opens on them.
+const perfState = perfStateFrom(savedPerfState);
+applyPerfState(perfState, {
+  setRenderScale: (scale) => renderer.setRenderScale(scale),
+  setGrassPerformance: (perf) => grass.setPerformance(perf),
+  setStreamingRadii: (buildRadius) => world.setStreamingRadii(buildRadius),
+  setFloraViewDistance: (metres) => life.setViewDistance(metres),
+});
+
 // Magnetfeld sense: the sky dome showing the geomagnetic field (9 blendable modes),
 // fading with `signals.sense.magnetfeld` and following the player.
 const magnetfeld = createMagnetfeldSense(renderer.scene, bus);
@@ -201,7 +214,16 @@ const scentAnchors = SCENT_TYPES.map((t) => ({
 }));
 signals.scentAnchors.value = scentAnchors;
 
+// Scent anchors drift with the flight — sampling them at ~15 Hz is plenty for the
+// spatial synth bindings and skips the per-frame scan/sort over every scent spot.
+const SCENT_ANCHOR_STRIDE = 4;
+let scentAnchorFrame = 0;
+
 function publishScentAnchors(): void {
+  scentAnchorFrame = (scentAnchorFrame + 1) % SCENT_ANCHOR_STRIDE;
+  if (scentAnchorFrame !== 0) {
+    return;
+  }
   const nearest = new Map<string, { x: number; y: number; z: number; d2: number }>();
   for (const spot of life.scentSpotsAround(pose.x, pose.z, 114)) {
     const id = scentAnchorIds.get(spot.type);
@@ -526,12 +548,38 @@ const eventControls = createEventControls(bus, events.ids);
 devConsole.addSection(eventControls.element);
 window.addEventListener("pagehide", () => eventControls.dispose());
 
+// Performance: presets (Niedrig/Mittel/Hoch/Ultra) + the highest-impact quality
+// knobs. Render/gras/terrain apply directly (uniform + scheduler writes); flora,
+// fauna and sense budgets ride the existing bus channels their owners debounce.
+const perfControls = createPerformanceControls({
+  bus,
+  perf: perfState,
+  apply: {
+    renderScale: (v) => renderer.setRenderScale(v),
+    grassRadius: (v) => grass.setPerformance({ renderRadius: v }),
+    grassKeepFraction: (v) => grass.setPerformance({ keepFraction: v }),
+    streamBuildRadius: (v) => world.setStreamingRadii(v),
+    floraViewDistance: (v) => life.setViewDistance(v),
+  },
+  floraFauna: floraFauna.config,
+  senseStart: {
+    duftCount: savedSenseState.modules.duft.count,
+    duftCheapNoise: savedSenseState.modules.duft.cheapNoise,
+    motionLifetimeFrames: savedSenseState.modules.motion.lifetimeFrames,
+    rundumCubeSize: LITTLE_PLANET_DEFAULTS.cubeSize,
+    rundumCaptureInterval: LITTLE_PLANET_DEFAULTS.captureInterval,
+  },
+});
+devConsole.addSection(perfControls.element);
+window.addEventListener("pagehide", () => perfControls.dispose());
+
 // Dev-only: export the live sense + world + flora/fauna tuning as committed state.json files.
 if (import.meta.env.DEV) {
   const saveTuning = createSaveTuningControls({
     serializeSenses: () => serializeSenseState(senses.shader, senseModules),
     serializeWorld: () => serializeTerrainState(world),
     serializeFloraFauna: () => serializeFloraFaunaState(floraFauna),
+    serializePerf: () => serializePerfState(perfState),
   });
   devConsole.addSection(saveTuning.element);
   window.addEventListener("pagehide", () => saveTuning.dispose());

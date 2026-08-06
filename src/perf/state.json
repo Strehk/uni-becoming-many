@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "preset": "eigene",
+  "renderScale": 1,
+  "grassRadius": 48,
+  "grassKeepFraction": 1,
+  "streamBuildRadius": 2,
+  "floraViewDistance": 520
+}

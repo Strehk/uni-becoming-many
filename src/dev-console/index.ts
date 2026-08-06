@@ -128,6 +128,9 @@ export function createDevConsole(
   const originalRender = renderer.render.bind(renderer);
   const wrappedRender = ((scene: THREE.Scene, camera: THREE.Camera) => {
     const result = originalRender(scene, camera);
+    if (!open) {
+      return result; // drawer closed: don't resolve GPU timestamps every frame
+    }
     renderer
       .resolveTimestampsAsync()
       .then((ms) => {
@@ -157,6 +160,9 @@ export function createDevConsole(
       frameTimes.shift();
     }
 
+    if (!open) {
+      return; // drawer closed: keep the ring buffer warm, skip graph + text work
+    }
     drawGraph();
 
     if (now - lastTextUpdate < TEXT_INTERVAL_MS) {

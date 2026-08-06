@@ -298,6 +298,7 @@ export class FlightMap {
   }
 
   restore(m) {
+    m.lastOut = null; // nach einem direkten Base-Write darf apply() nicht skippen
     this.writeTarget(m.layerId, m.control, m.base);
   }
 
@@ -328,7 +329,13 @@ export class FlightMap {
       if (m.cur == null) m.cur = val;
       m.cur += (val - m.cur) * (1 - Math.min(0.97, m.glatt * 0.97)); // Trägheit
       const out = m.base + (m.cur - m.base) * m.staerke;
-      this.writeTarget(m.layerId, m.control, Math.max(0, Math.min(1, out)));
+      const clamped = Math.max(0, Math.min(1, out));
+      // Nur bei echter Änderung in die Tone-Timeline schreiben: identische Werte
+      // jede Frame erzeugen sonst ~600 rampTo/cancel-Events pro Sekunde — das war
+      // im Profil ~40 % der gesamten Haupt-Thread-Zeit. 0.0005 auf 0..1 ist unhörbar.
+      if (m.lastOut != null && Math.abs(clamped - m.lastOut) < 0.0005) continue;
+      m.lastOut = clamped;
+      this.writeTarget(m.layerId, m.control, clamped);
     }
   }
 

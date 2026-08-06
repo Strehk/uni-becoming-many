@@ -181,6 +181,11 @@ export function createMosquitoFlocks(
         worldPositions[index + 2] = swarm.anchor.z + (localPositions[index + 2] ?? 0);
       }
     }
+    // Upload only the live slots — the buffer is preallocated for MAX_SWARMS ×
+    // MAX_PER_SWARM (230 KB), but only `particles.count` instances are alive; the
+    // WebGPU backend honours `updateRanges` with a partial `writeBuffer`.
+    positionAttribute.clearUpdateRanges();
+    positionAttribute.addUpdateRange(0, Math.max(1, particles.count) * 3);
     positionAttribute.needsUpdate = true;
   };
 

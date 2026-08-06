@@ -254,6 +254,22 @@ export class TerrainWorld {
     this.rebuild();
   }
 
+  /** Live streaming radii (performance panel). Mutates the scheduler's config in
+   *  place — no rebuild: the next `update` streams chunks out/in to the new window.
+   *  `keepRadius` stays one ring wider (hysteresis). NOTE: the flora instance
+   *  buffers are sized for keepRadius ≤ 3 (49 live chunks, see src/life/index.ts),
+   *  so `buildRadius` is clamped to [1, 2]. */
+  setStreamingRadii(buildRadius: number): void {
+    const build = Math.min(2, Math.max(1, Math.round(buildRadius)));
+    this.scheduler.config.buildRadius = build;
+    this.scheduler.config.keepRadius = build + 1;
+  }
+
+  /** The live chunk build radius (cells around the anchor). */
+  get streamingBuildRadius(): number {
+    return this.scheduler.config.buildRadius;
+  }
+
   /** Clear the live GenParams overlay; the world reverts to configToParams. */
   resetParams(): void {
     if (Object.keys(this.paramsOverride).length === 0) return;

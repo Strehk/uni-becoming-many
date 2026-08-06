@@ -83,6 +83,10 @@ export interface Grass {
   /** Apply the flora config's grass knobs: blade height (live uniforms) and
    *  per-biome density (affinity table + field-texture repaint). */
   applyConfig(tuning: GrassTuning): void;
+  /** Performance panel: desktop draw radius (m) + blade keep fraction. Pure
+   *  uniform writes (effective next frame, no rebuild); the VR profile keeps its
+   *  own fixed values while presenting. */
+  setPerformance(perf: { renderRadius?: number; keepFraction?: number }): void;
   /** Advance one frame (after `world.update`). Skips all GPU work in the void. */
   update(dt: number): void;
   dispose(): void;
@@ -145,6 +149,12 @@ export function createGrass(opts: CreateGrassOptions): Grass {
   const gridCellSize = BLADE_SPACING * BLADE_STEPS_PER_CELL;
   const camPos = new THREE.Vector3();
 
+  // Desktop density profile (performance panel). Defaults = the historical
+  // full-quality values; `update` re-asserts them every frame, so these vars —
+  // not the uniforms — are the tuning surface.
+  let desktopRenderRadius = GRASS_AREA_SIZE * 0.5;
+  let desktopKeepFraction = 1;
+
   return {
     group,
 
@@ -174,6 +184,15 @@ export function createGrass(opts: CreateGrassOptions): Grass {
       fieldTex.invalidate();
     },
 
+    setPerformance(perf): void {
+      if (perf.renderRadius !== undefined) {
+        desktopRenderRadius = Math.min(GRASS_AREA_SIZE * 0.5, Math.max(4, perf.renderRadius));
+      }
+      if (perf.keepFraction !== undefined) {
+        desktopKeepFraction = Math.min(1, Math.max(0, perf.keepFraction));
+      }
+    },
+
     update(_dt: number): void {
       // Void gate: no SURFACE-revealing sense active ⇒ hide + skip ALL GPU work
       // (compute + draw). Air-only senses (duft) never reveal the grass.
@@ -195,8 +214,8 @@ export function createGrass(opts: CreateGrassOptions): Grass {
       // standing in full-density grass regardless (see config.ts). This is the only bit of
       // grass that still needs the VR flag — a density choice, not eye-position math.
       const presenting = renderer.xr.isPresenting;
-      uniforms.compute.uRenderRadius.value = presenting ? VR_RENDER_RADIUS : GRASS_AREA_SIZE * 0.5;
-      uniforms.compute.uKeepFraction.value = presenting ? VR_KEEP_FRACTION : 1;
+      uniforms.compute.uRenderRadius.value = presenting ? VR_RENDER_RADIUS : desktopRenderRadius;
+      uniforms.compute.uKeepFraction.value = presenting ? VR_KEEP_FRACTION : desktopKeepFraction;
 
       // Grid-snap the patch to the camera (blade-spacing grid → world-stable seed).
       const cellX = Math.floor(camPos.x / gridCellSize);

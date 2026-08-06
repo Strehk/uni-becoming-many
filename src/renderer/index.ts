@@ -44,6 +44,14 @@ export interface Renderer {
    */
   start(onFrame?: (dtSeconds: number) => void): void;
   /**
+   * Cap the render pixel ratio (performance panel): the effective ratio becomes
+   * `min(devicePixelRatio, scale)`, so fragment cost scales with `scale²` on
+   * high-DPI displays. Applies immediately (re-sizes the drawing buffer).
+   */
+  setRenderScale(scale: number): void;
+  /** The current render-scale cap (not the effective device ratio). */
+  readonly renderScale: number;
+  /**
    * Replace the default `render(scene, camera)` pass with a custom one (e.g. the
    * 360° little-planet projection). The override receives a `defaultRender` thunk so
    * it can fall back. Pass `null` to restore the default pass. Ignored while an XR
@@ -108,6 +116,15 @@ export async function createRenderer(): Promise<Renderer> {
     camera.updateProjectionMatrix();
   };
 
+  // Render-scale cap (performance panel). Default = full devicePixelRatio, i.e.
+  // exactly the historical behaviour; lowering it trades sharpness for fillrate.
+  let renderScale = window.devicePixelRatio;
+  const setRenderScale = (scale: number): void => {
+    renderScale = Math.max(0.25, scale);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, renderScale));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  };
+
   let renderOverride: ((defaultRender: () => void) => void) | null = null;
 
   function start(onFrame?: (dtSeconds: number) => void): void {
@@ -142,6 +159,10 @@ export async function createRenderer(): Promise<Renderer> {
     scene,
     camera,
     start,
+    setRenderScale,
+    get renderScale(): number {
+      return renderScale;
+    },
     setRenderOverride(override): void {
       renderOverride = override;
     },
