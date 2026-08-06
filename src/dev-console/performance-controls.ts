@@ -18,9 +18,8 @@
 // persist through their own state.json exports. The FPS/CPU/GPU readout already
 // lives in the console head (dev-console/index.ts) — this panel adds no sampling.
 
-import type { FloraFaunaConfig } from "../flora-fauna/config.ts";
-import type { PerfState } from "../perf/state.ts";
-import type { Bus } from "../signals/index.ts";
+import { PRESETS, type Preset } from "../perf/presets.ts";
+import { CUSTOM_PRESET_ID, type PerfRouter } from "../perf/router.ts";
 
 const STYLE_ID = "devc-perf-styles";
 
@@ -32,27 +31,11 @@ export interface PerformanceControls {
 }
 
 export interface PerformanceControlsOptions {
-  bus: Bus;
-  /** The live perf state (mutated in place; serialized by the save button). */
-  perf: PerfState;
-  /** Direct apply hooks for the perf-owned knobs (uniform/scheduler writes). */
-  apply: {
-    renderScale(v: number): void;
-    grassRadius(v: number): void;
-    grassKeepFraction(v: number): void;
-    streamBuildRadius(v: number): void;
-    floraViewDistance(v: number): void;
-  };
-  /** The live flora/fauna config — start values for the bus-driven sliders. */
-  floraFauna: FloraFaunaConfig;
-  /** Committed sense-module start values (from src/senses/state.json). */
-  senseStart: {
-    duftCount: number;
-    duftCheapNoise: boolean;
-    motionLifetimeFrames: number;
-    rundumCubeSize: number;
-    rundumCaptureInterval: number;
-  };
+  /**
+   * The shared knob routing (src/perf/router.ts). Shared with the audience
+   * Einstellungen screen, so a preset chosen there moves these sliders too.
+   */
+  router: PerfRouter;
 }
 
 type KnobSpec = {
@@ -129,120 +112,6 @@ const GROUPS: GroupSpec[] = [
   },
 ];
 
-type Preset = {
-  id: string;
-  label: string;
-  /** Duft cheap-turbulence toggle (~3× cheaper GPU sim). */
-  cheapNoise: boolean;
-  values: Record<string, number>;
-};
-
-// "Hoch" mirrors today's committed tuning (state.json values at the time of the
-// perf audit); Niedrig/Mittel scale down for weaker exhibition machines, Ultra
-// opens the full pixel ratio + longest trails on strong GPUs.
-const PRESETS: Preset[] = [
-  {
-    id: "niedrig",
-    label: "Niedrig",
-    cheapNoise: true,
-    values: {
-      renderScale: 0.75,
-      grassRadius: 16,
-      grassKeepFraction: 0.3,
-      streamBuildRadius: 1,
-      floraViewDistance: 300,
-      "flora.globalDensity": 0.5,
-      "flora.treeDensity": 0.4,
-      "fauna.mosquitoSwarmCount": 4,
-      "fauna.flockCount": 3,
-      "fauna.deerCount": 3,
-      "fauna.foxCount": 4,
-      "fauna.batFlockCount": 2,
-      "fauna.meiseFlockCount": 3,
-      "fauna.butterflyFlockCount": 5,
-      "duft.count": 60000,
-      "rundum.cubeSize": 256,
-      "rundum.captureInterval": 3,
-      "motion.lifetimeFrames": 6,
-    },
-  },
-  {
-    id: "mittel",
-    label: "Mittel",
-    cheapNoise: true,
-    values: {
-      renderScale: 1,
-      grassRadius: 28,
-      grassKeepFraction: 0.6,
-      streamBuildRadius: 2,
-      floraViewDistance: 420,
-      "flora.globalDensity": 0.8,
-      "flora.treeDensity": 0.7,
-      "fauna.mosquitoSwarmCount": 8,
-      "fauna.flockCount": 5,
-      "fauna.deerCount": 8,
-      "fauna.foxCount": 6,
-      "fauna.batFlockCount": 4,
-      "fauna.meiseFlockCount": 4,
-      "fauna.butterflyFlockCount": 7,
-      "duft.count": 150000,
-      "rundum.cubeSize": 512,
-      "rundum.captureInterval": 2,
-      "motion.lifetimeFrames": 10,
-    },
-  },
-  {
-    id: "hoch",
-    label: "Hoch",
-    cheapNoise: false,
-    values: {
-      renderScale: 1.5,
-      grassRadius: 48,
-      grassKeepFraction: 1,
-      streamBuildRadius: 2,
-      floraViewDistance: 640,
-      "flora.globalDensity": 1,
-      "flora.treeDensity": 1,
-      "fauna.mosquitoSwarmCount": 17,
-      "fauna.flockCount": 8,
-      "fauna.deerCount": 18,
-      "fauna.foxCount": 11,
-      "fauna.batFlockCount": 6,
-      "fauna.meiseFlockCount": 6,
-      "fauna.butterflyFlockCount": 9,
-      "duft.count": 400000,
-      "rundum.cubeSize": 1024,
-      "rundum.captureInterval": 2,
-      "motion.lifetimeFrames": 14,
-    },
-  },
-  {
-    id: "ultra",
-    label: "Ultra",
-    cheapNoise: false,
-    values: {
-      renderScale: 2,
-      grassRadius: 48,
-      grassKeepFraction: 1,
-      streamBuildRadius: 2,
-      floraViewDistance: 896,
-      "flora.globalDensity": 1,
-      "flora.treeDensity": 1,
-      "fauna.mosquitoSwarmCount": 17,
-      "fauna.flockCount": 8,
-      "fauna.deerCount": 18,
-      "fauna.foxCount": 11,
-      "fauna.batFlockCount": 6,
-      "fauna.meiseFlockCount": 6,
-      "fauna.butterflyFlockCount": 9,
-      "duft.count": 400000,
-      "rundum.cubeSize": 1024,
-      "rundum.captureInterval": 1,
-      "motion.lifetimeFrames": 20,
-    },
-  },
-];
-
 const decimals = (step: number): number =>
   step >= 1 ? 0 : (String(step).split(".")[1]?.length ?? 2);
 const fmt = (v: number, step: number): string =>
@@ -254,112 +123,8 @@ const fmt = (v: number, step: number): string =>
  */
 export function createPerformanceControls(opts: PerformanceControlsOptions): PerformanceControls {
   injectStyles();
-  const { bus, perf, apply, floraFauna } = opts;
-
-  // Live sense-knob mirror (the modules own the truth; this tracks panel edits).
-  const senseLive = {
-    duftCount: opts.senseStart.duftCount,
-    duftCheapNoise: opts.senseStart.duftCheapNoise,
-    motionLifetimeFrames: opts.senseStart.motionLifetimeFrames,
-    rundumCubeSize: opts.senseStart.rundumCubeSize,
-    rundumCaptureInterval: opts.senseStart.rundumCaptureInterval,
-  };
-
-  /** Route one knob id to its start value + apply action. */
-  const route = (id: string): { get(): number; set(v: number): void } => {
-    switch (id) {
-      case "renderScale":
-        return {
-          get: () => perf.renderScale,
-          set: (v) => {
-            perf.renderScale = v;
-            apply.renderScale(v);
-          },
-        };
-      case "grassRadius":
-        return {
-          get: () => perf.grassRadius,
-          set: (v) => {
-            perf.grassRadius = v;
-            apply.grassRadius(v);
-          },
-        };
-      case "grassKeepFraction":
-        return {
-          get: () => perf.grassKeepFraction,
-          set: (v) => {
-            perf.grassKeepFraction = v;
-            apply.grassKeepFraction(v);
-          },
-        };
-      case "streamBuildRadius":
-        return {
-          get: () => perf.streamBuildRadius,
-          set: (v) => {
-            perf.streamBuildRadius = v;
-            apply.streamBuildRadius(v);
-          },
-        };
-      case "floraViewDistance":
-        return {
-          get: () => perf.floraViewDistance,
-          set: (v) => {
-            perf.floraViewDistance = v;
-            apply.floraViewDistance(v);
-          },
-        };
-      case "duft.count":
-        return {
-          get: () => senseLive.duftCount,
-          set: (v) => {
-            senseLive.duftCount = v;
-            bus.emit("sense:param", { id: "duft", key: "count", value: v });
-          },
-        };
-      case "motion.lifetimeFrames":
-        return {
-          get: () => senseLive.motionLifetimeFrames,
-          set: (v) => {
-            senseLive.motionLifetimeFrames = v;
-            bus.emit("sense:param", { id: "motion", key: "lifetimeFrames", value: v });
-          },
-        };
-      case "rundum.cubeSize":
-        return {
-          get: () => senseLive.rundumCubeSize,
-          set: (v) => {
-            senseLive.rundumCubeSize = v;
-            bus.emit("sense:param", { id: "rundum", key: "cubeSize", value: v });
-          },
-        };
-      case "rundum.captureInterval":
-        return {
-          get: () => senseLive.rundumCaptureInterval,
-          set: (v) => {
-            senseLive.rundumCaptureInterval = v;
-            bus.emit("sense:param", { id: "rundum", key: "captureInterval", value: v });
-          },
-        };
-      default: {
-        // Dotted flora/fauna keys → the coordinator's bus channel (it debounces
-        // the re-scatter/rebuild itself) with start values from the live config.
-        const [domain, field] = id.split(".");
-        const record: Record<string, unknown> =
-          domain === "flora"
-            ? (floraFauna.flora as unknown as Record<string, unknown>)
-            : (floraFauna.fauna as unknown as Record<string, unknown>);
-        return {
-          get: () => {
-            const v = field !== undefined ? record[field] : undefined;
-            return typeof v === "number" ? v : 0;
-          },
-          set: (v) => {
-            bus.emit("flora-fauna:param", { key: id, value: v });
-          },
-        };
-      }
-    }
-  };
+  const { router } = opts;
+  const { senseLive } = router;
 
   const root = document.createElement("section");
   root.className = "devc-section pc-root";
@@ -370,49 +135,46 @@ export function createPerformanceControls(opts: PerformanceControlsOptions): Per
   root.append(head);
 
   // --- Presets ---------------------------------------------------------------
+  // The buttons only *ask* the router; the visual sync happens in the
+  // `onPresetApplied` handler below, so a preset chosen in the audience
+  // Einstellungen screen moves these sliders exactly the same way.
   const presetRow = document.createElement("div");
   presetRow.className = "pc-presets";
   const presetButtons = new Map<string, HTMLButtonElement>();
   const markPreset = (id: string): void => {
-    perf.preset = id;
     for (const [pid, btn] of presetButtons) {
       btn.classList.toggle("pc-preset-active", pid === id);
     }
   };
 
-  // Track slider UI so presets can move the controls along with the values.
+  // Track slider UI so an applied preset can move the controls along with the values.
   const sliderUi = new Map<
     string,
-    { input: HTMLInputElement; valueEl: HTMLElement; step: number; set(v: number): void }
+    { input: HTMLInputElement; valueEl: HTMLElement; step: number }
   >();
 
-  // Duft cheap-turbulence checkbox (shared between its row + presets).
+  // Duft cheap-turbulence checkbox (shared between its row + the presets).
   const cheapInput = document.createElement("input");
   cheapInput.type = "checkbox";
-  const setCheapNoise = (on: boolean): void => {
-    senseLive.duftCheapNoise = on;
-    cheapInput.checked = on;
-    bus.emit("sense:param", { id: "duft", key: "cheapNoise", value: on });
-  };
 
-  const applyPreset = (preset: Preset): void => {
+  const syncFromPreset = (preset: Preset): void => {
     for (const [id, value] of Object.entries(preset.values)) {
       const ui = sliderUi.get(id);
       if (!ui) continue;
       ui.input.value = String(value);
       ui.valueEl.textContent = fmt(value, ui.step);
-      ui.set(value);
     }
-    setCheapNoise(preset.cheapNoise);
+    cheapInput.checked = preset.cheapNoise;
     markPreset(preset.id);
   };
+  const offPreset = router.onPresetApplied(syncFromPreset);
 
   for (const preset of PRESETS) {
     const btn = document.createElement("button");
     btn.className = "pc-preset";
     btn.textContent = preset.label;
     btn.title = `Alle Regler auf „${preset.label}" setzen`;
-    btn.addEventListener("click", () => applyPreset(preset));
+    btn.addEventListener("click", () => router.applyPreset(preset));
     presetButtons.set(preset.id, btn);
     presetRow.append(btn);
   }
@@ -428,7 +190,7 @@ export function createPerformanceControls(opts: PerformanceControlsOptions): Per
     details.append(summary);
 
     for (const spec of group.knobs) {
-      const knob = route(spec.id);
+      const knob = router.route(spec.id);
       const row = document.createElement("div");
       row.className = "pc-row";
 
@@ -452,12 +214,13 @@ export function createPerformanceControls(opts: PerformanceControlsOptions): Per
         const v = Number.parseFloat(input.value);
         valueEl.textContent = fmt(v, spec.step);
         knob.set(v);
-        markPreset("eigene");
+        router.markCustom();
+        markPreset(CUSTOM_PRESET_ID);
       });
 
       row.append(labelEl, valueEl, input);
       details.append(row);
-      sliderUi.set(spec.id, { input, valueEl, step: spec.step, set: knob.set });
+      sliderUi.set(spec.id, { input, valueEl, step: spec.step });
 
       // The duft cheap-noise toggle rides directly under the duft particle slider.
       if (spec.id === "duft.count") {
@@ -465,8 +228,9 @@ export function createPerformanceControls(opts: PerformanceControlsOptions): Per
         check.className = "pc-check";
         cheapInput.checked = senseLive.duftCheapNoise;
         cheapInput.addEventListener("change", () => {
-          setCheapNoise(cheapInput.checked);
-          markPreset("eigene");
+          router.setCheapNoise(cheapInput.checked);
+          router.markCustom();
+          markPreset(CUSTOM_PRESET_ID);
         });
         const span = document.createElement("span");
         span.textContent = "Duft: billige Turbulenz (~3× schneller)";
@@ -477,7 +241,7 @@ export function createPerformanceControls(opts: PerformanceControlsOptions): Per
     root.append(details);
   }
 
-  markPreset(perf.preset);
+  markPreset(router.activePreset);
 
   const hint = document.createElement("p");
   hint.className = "pc-hint";
@@ -488,6 +252,7 @@ export function createPerformanceControls(opts: PerformanceControlsOptions): Per
   return {
     element: root,
     dispose(): void {
+      offPreset();
       root.remove();
     },
   };

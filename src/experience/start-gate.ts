@@ -4,6 +4,9 @@
  * an XR controller. Until then the world sits frozen at t=0 (Theatre's playhead never
  * advances), so the piece begins on the audience's cue rather than the instant the menu closes.
  *
+ * On a phone there is no Enter key, so the mobile mode arms `tapToStart`: any tap on the
+ * page fires the gate instead, and the prompt says so.
+ *
  * Self-contained: it owns its keyboard listener and a small on-screen prompt, and it polls the
  * XR controller gamepads each frame (WebXR exposes no button event for the face buttons — only
  * the trigger fires `select`, so A is read by polling). Fires `onTrigger` exactly once, then
@@ -25,13 +28,16 @@ export interface StartGate {
 export interface StartGateOptions {
   /** The active XR session, or null when not presenting — read fresh each poll. */
   getSession(): XRSession | null;
-  /** Invoked once, on the first Enter/A press. */
+  /** Also fire on any tap/click — the mobile mode, where there is no Enter key. */
+  tapToStart?: boolean;
+  /** Invoked once, on the first Enter/A press (or tap, when `tapToStart`). */
   onTrigger(): void;
 }
 
 export function createStartGate(options: StartGateOptions): StartGate {
+  const tapToStart = options.tapToStart === true;
   let triggered = false;
-  const prompt = createPrompt();
+  const prompt = createPrompt(tapToStart);
   document.body.append(prompt);
 
   const isTyping = (): boolean => {
@@ -48,7 +54,7 @@ export function createStartGate(options: StartGateOptions): StartGate {
       return;
     }
     triggered = true;
-    window.removeEventListener("keydown", onKeyDown);
+    detach();
     prompt.remove();
     options.onTrigger();
   };
@@ -62,7 +68,21 @@ export function createStartGate(options: StartGateOptions): StartGate {
       fire();
     }
   };
+  const onPointerDown = (): void => {
+    fire();
+  };
+
+  const detach = (): void => {
+    window.removeEventListener("keydown", onKeyDown);
+    if (tapToStart) {
+      window.removeEventListener("pointerdown", onPointerDown);
+    }
+  };
+
   window.addEventListener("keydown", onKeyDown);
+  if (tapToStart) {
+    window.addEventListener("pointerdown", onPointerDown);
+  }
 
   return {
     poll(): void {
@@ -82,13 +102,13 @@ export function createStartGate(options: StartGateOptions): StartGate {
     },
     dispose(): void {
       triggered = true;
-      window.removeEventListener("keydown", onKeyDown);
+      detach();
       prompt.remove();
     },
   };
 }
 
-function createPrompt(): HTMLElement {
+function createPrompt(tapToStart: boolean): HTMLElement {
   if (!document.getElementById("start-gate-styles")) {
     const style = document.createElement("style");
     style.id = "start-gate-styles";
@@ -102,10 +122,13 @@ function createPrompt(): HTMLElement {
         padding: 12px 22px;
         border-radius: 999px;
         border: 1px solid rgba(255, 255, 255, 0.18);
-        background: rgba(12, 16, 22, 0.62);
-        color: #f4f6f8;
-        font: inherit;
-        letter-spacing: 0.02em;
+        background: rgba(240, 244, 255, 0.72);
+        border-color: rgba(5, 7, 12, 0.18);
+        color: #05070c;
+        font-family: "Heavitas", ui-sans-serif, system-ui, sans-serif;
+        font-size: 12px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
         pointer-events: none;
         animation: start-gate-pulse 2s ease-in-out infinite;
       }
@@ -118,6 +141,8 @@ function createPrompt(): HTMLElement {
   }
   const el = document.createElement("div");
   el.className = "start-gate";
-  el.textContent = "Enter drücken oder A am Controller, um zu beginnen";
+  el.textContent = tapToStart
+    ? "Tippen, um zu beginnen"
+    : "Enter drücken oder A am Controller, um zu beginnen";
   return el;
 }

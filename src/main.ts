@@ -18,7 +18,9 @@ import {
   saveExperienceConfig,
 } from "./experience/config.ts";
 import { createCredits } from "./experience/credits.ts";
+import { enterImmersiveViewport } from "./experience/immersive-viewport.ts";
 import { createInterfaceModeController } from "./experience/interface-mode.ts";
+import { type AppSettings, loadAppSettings, saveAppSettings } from "./experience/settings.ts";
 import { type StartGate, createStartGate } from "./experience/start-gate.ts";
 import { createStartMenu } from "./experience/start-menu.ts";
 import { createFloraFaunaController } from "./flora-fauna/index.ts";
@@ -31,7 +33,10 @@ import { type Grass, createGrass } from "./grass/index.ts";
 import { type ControlOrientation, connectHost } from "./icaros/index.ts";
 import { createLife } from "./life/index.ts";
 import { createMinimap } from "./minimap/index.ts";
+import { findPreset } from "./perf/presets.ts";
+import { createPerfRouter } from "./perf/router.ts";
 import { applyPerfState, perfStateFrom, savedPerfState, serializePerfState } from "./perf/state.ts";
+import { createGyroControls } from "./player/gyro-controls.ts";
 import { createPlayer } from "./player/index.ts";
 import { createKeyboardControls } from "./player/keyboard-controls.ts";
 import { syncCameraPos } from "./render/camera-pos.ts";
@@ -73,6 +78,10 @@ document.body.append(renderer.vrButton); // "Enter VR" overlay
 // emergent) advances through it, so pause/seek/timeScale govern the whole world. See docs §2.
 const clock = new Clock();
 let experienceConfig: ExperienceConfig = loadExperienceConfig();
+// The device-side half of the setup: quality preset + how the flight is steered.
+// Separate from the config above — that one is the dramaturgy, this one the device
+// (see src/experience/settings.ts). Both are written by the start menu.
+let appSettings: AppSettings = loadAppSettings();
 if (!useTheatreStudio) {
   clock.pause();
 }
@@ -468,55 +477,7 @@ window.addEventListener("pagehide", () => interfaceMode.dispose());
 // Armed in `onStart`, polled in the frame loop, disposed when it fires.
 let startGate: StartGate | undefined;
 window.addEventListener("pagehide", () => startGate?.dispose());
-if (!useTheatreStudio) {
-  const startMenu = createStartMenu({
-    config: experienceConfig,
-    onConfigure(next) {
-      experienceConfig = next;
-      saveExperienceConfig(next);
-      signals.senseAuthority.value = "theatre";
-      clock.pause();
-      clock.reset();
-      theatre.setPosition(0);
-      signals.time.value = 0;
-      interfaceMode.setMode("configure");
-    },
-    onConfigChange(next) {
-      experienceConfig = next;
-      saveExperienceConfig(next);
-    },
-    onTest(next) {
-      experienceConfig = next;
-      saveExperienceConfig(next);
-      signals.senseAuthority.value = "theatre";
-      clock.reset();
-      theatre.setPosition(0);
-      signals.time.value = 0;
-      clock.resume();
-      interfaceMode.setMode("configure");
-    },
-    onStart(next) {
-      experienceConfig = next;
-      saveExperienceConfig(next);
-      signals.senseAuthority.value = "theatre";
-      clock.reset();
-      clock.pause(); // stay frozen at t=0 until the gate fires
-      theatre.setPosition(0);
-      signals.time.value = 0;
-      interfaceMode.setMode("playback");
-      // Hold the timeline until Enter / controller-A; only then does the clock start.
-      startGate?.dispose();
-      startGate = createStartGate({
-        getSession: () => renderer.instance.xr.getSession(),
-        onTrigger() {
-          clock.resume();
-          startGate = undefined;
-        },
-      });
-    },
-  });
-  window.addEventListener("pagehide", () => startMenu.dispose());
-} else {
+if (useTheatreStudio) {
   signals.senseAuthority.value = "theatre";
   interfaceMode.setMode("configure");
 }
@@ -552,7 +513,10 @@ window.addEventListener("pagehide", () => eventControls.dispose());
 // Performance: presets (Niedrig/Mittel/Hoch/Ultra) + the highest-impact quality
 // knobs. Render/gras/terrain apply directly (uniform + scheduler writes); flora,
 // fauna and sense budgets ride the existing bus channels their owners debounce.
-const perfControls = createPerformanceControls({
+// One routing for every quality knob (src/perf/router.ts), shared by the C-console
+// Performance panel and the audience Einstellungen screen — so a preset chosen in
+// either one is seen by the other.
+const perfRouter = createPerfRouter({
   bus,
   perf: perfState,
   apply: {
@@ -571,6 +535,16 @@ const perfControls = createPerformanceControls({
     rundumCaptureInterval: LITTLE_PLANET_DEFAULTS.captureInterval,
   },
 });
+
+// A quality preset the visitor picked on this device outranks the committed tuning.
+// Absent one (the default), state.json stays exactly as authored — the installation
+// is never silently re-tuned by a menu nobody touched.
+const savedQualityPreset = findPreset(appSettings.quality);
+if (savedQualityPreset) {
+  perfRouter.applyPreset(savedQualityPreset);
+}
+
+const perfControls = createPerformanceControls({ router: perfRouter });
 devConsole.addSection(perfControls.element);
 window.addEventListener("pagehide", () => perfControls.dispose());
 
@@ -589,6 +563,119 @@ if (import.meta.env.DEV) {
 // Debug controls: WASD / arrows to steer, Shift for 2× speed, Space to hold position.
 const keyboard = createKeyboardControls();
 window.addEventListener("pagehide", () => keyboard.dispose());
+
+// Gyro controls: the phone's own tilt, reported as the same {pitch, roll} rate pair
+// the ICAROS stream sends, so the mobile mode needs no second flight model. Dormant
+// until `enable()` is awaited from a user gesture (iOS gates the sensor behind one).
+const gyro = createGyroControls({
+  rangeDegrees: appSettings.gyroRangeDegrees,
+  invertPitch: appSettings.gyroInvertPitch,
+});
+window.addEventListener("pagehide", () => gyro.dispose());
+
+// Start/config menu: normal runs play the Theatre timeline. The config UI is an editor
+// shell; the actual authored sense timeline remains Theatre's `arc.senses.*` tracks.
+// Theatre Studio remains available via ?studio=1 for advanced timeline editing.
+//
+// The start gate holds the clock paused after "start" until the audience gives the
+// cue — Enter, A on an XR controller, or (on a phone) a tap — so the piece begins on
+// their signal instead of the instant the menu closes.
+if (!useTheatreStudio) {
+  /** Rewind to t=0 and hand the senses back to the authored timeline. */
+  const rewindToStart = (next: ExperienceConfig): void => {
+    experienceConfig = next;
+    saveExperienceConfig(next);
+    signals.senseAuthority.value = "theatre";
+    clock.reset();
+    theatre.setPosition(0);
+    signals.time.value = 0;
+  };
+
+  /** Arm the gate and enter playback. `tapToStart` is the phone's missing Enter key. */
+  const armStartGate = (tapToStart: boolean): void => {
+    interfaceMode.setMode("playback");
+    startGate?.dispose();
+    startGate = createStartGate({
+      getSession: () => renderer.instance.xr.getSession(),
+      tapToStart,
+      onTrigger() {
+        clock.resume();
+        startGate = undefined;
+      },
+    });
+  };
+
+  const startMenu = createStartMenu({
+    config: experienceConfig,
+    settings: appSettings,
+    router: perfRouter,
+
+    // While the menu is up the world is not drawn — the surface is opaque, so every
+    // drawn frame would be invisible work (and on a phone, the costliest kind).
+    // Streaming keeps running underneath, so starting is instant.
+    onVisibleChange(visible) {
+      renderer.setRenderPaused(visible);
+    },
+
+    onSettingsChange(next) {
+      appSettings = next;
+      saveAppSettings(next);
+      gyro.setRange(next.gyroRangeDegrees);
+      gyro.setInvertPitch(next.gyroInvertPitch);
+      if (next.control !== "gyro") {
+        gyro.disable();
+      }
+    },
+
+    onCalibrate() {
+      gyro.calibrate();
+    },
+
+    async onMobileStart() {
+      // The permission prompt only resolves inside the gesture that opened it, so
+      // this runs straight off the menu button's click.
+      if (!(await gyro.enable())) {
+        return false;
+      }
+      appSettings = { ...appSettings, control: "gyro" };
+      saveAppSettings(appSettings);
+      await enterImmersiveViewport();
+      rewindToStart(experienceConfig);
+      clock.pause(); // frozen at t=0 until the tap
+      armStartGate(true);
+      return true;
+    },
+
+    onConfigure(next) {
+      experienceConfig = next;
+      saveExperienceConfig(next);
+      signals.senseAuthority.value = "theatre";
+      clock.pause();
+      clock.reset();
+      theatre.setPosition(0);
+      signals.time.value = 0;
+      interfaceMode.setMode("configure");
+    },
+
+    onConfigChange(next) {
+      experienceConfig = next;
+      saveExperienceConfig(next);
+    },
+
+    onTest(next) {
+      rewindToStart(next);
+      clock.resume();
+      interfaceMode.setMode("configure");
+    },
+
+    onStart(next) {
+      rewindToStart(next);
+      clock.pause(); // stay frozen at t=0 until the gate fires
+      armStartGate(appSettings.control === "gyro");
+    },
+  });
+  window.addEventListener("pagehide", () => startMenu.dispose());
+}
 
 // --- ICAROS host connection -------------------------------------------------
 const hostOrigin =
@@ -661,12 +748,33 @@ renderer.start((dtSeconds) => {
   score.update(); // authored movement envelopes → sound-bus transport (play / gain / stop)
 
   keyboard.update(dtSeconds); // 4. input → player → emergent signals
+  gyro.update(dtSeconds);
   const { locomotion } = keyboard;
+  // Three steering sources, in falling precedence: the debug keyboard always wins
+  // while a key is held, then the phone's tilt when the mobile mode is live, then
+  // the ICAROS stream. The pitch bias is the flight machine's ergonomic
+  // counterweight (see PITCH_BIAS) and belongs to that stream alone — applying it
+  // to a phone or a bare desktop would sink the rig with nobody touching anything.
+  const gyroSteering = gyro.active;
+  const icarosSteering =
+    !gyroSteering && (appSettings.control === "icaros" || orientation.quality > 0);
   player.setMaxAltitude(theatre.flight.value.maxHeight); // authored airspace ceiling → player rig
   player.look(locomotion.pitch);
   player.update(dtSeconds, {
-    pitch: keyboard.steering ? 0 : orientation.pitch - PITCH_BIAS,
-    roll: keyboard.steering ? locomotion.turn : orientation.roll,
+    pitch: keyboard.steering
+      ? 0
+      : gyroSteering
+        ? gyro.steering.pitch
+        : icarosSteering
+          ? orientation.pitch - PITCH_BIAS
+          : 0,
+    roll: keyboard.steering
+      ? locomotion.turn
+      : gyroSteering
+        ? gyro.steering.roll
+        : icarosSteering
+          ? orientation.roll
+          : 0,
     throttle: locomotion.throttle,
     paused: locomotion.paused,
   });

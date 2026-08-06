@@ -52,6 +52,14 @@ export interface Renderer {
   /** The current render-scale cap (not the effective device ratio). */
   readonly renderScale: number;
   /**
+   * Skip the draw pass while an opaque surface covers the canvas (the start menu /
+   * settings screen). The per-frame callback keeps running, so the world goes on
+   * streaming chunks in the background and is ready the moment the menu closes —
+   * only the drawing, by far the expensive half, is suspended. Ignored while an XR
+   * session presents: a headset must never be handed a frameless loop.
+   */
+  setRenderPaused(paused: boolean): void;
+  /**
    * Replace the default `render(scene, camera)` pass with a custom one (e.g. the
    * 360° little-planet projection). The override receives a `defaultRender` thunk so
    * it can fall back. Pass `null` to restore the default pass. Ignored while an XR
@@ -126,6 +134,7 @@ export async function createRenderer(): Promise<Renderer> {
   };
 
   let renderOverride: ((defaultRender: () => void) => void) | null = null;
+  let renderPaused = false;
 
   function start(onFrame?: (dtSeconds: number) => void): void {
     window.addEventListener("resize", onResize);
@@ -137,6 +146,9 @@ export async function createRenderer(): Promise<Renderer> {
       const dtSeconds = lastMs === 0 ? 0 : (nowMs - lastMs) / 1000;
       lastMs = nowMs;
       onFrame?.(dtSeconds);
+      if (renderPaused && !renderer.xr.isPresenting) {
+        return; // an opaque menu covers the canvas — stream the world, draw nothing
+      }
       if (renderOverride && !renderer.xr.isPresenting) {
         renderOverride(defaultRender);
       } else {
@@ -162,6 +174,9 @@ export async function createRenderer(): Promise<Renderer> {
     setRenderScale,
     get renderScale(): number {
       return renderScale;
+    },
+    setRenderPaused(paused: boolean): void {
+      renderPaused = paused;
     },
     setRenderOverride(override): void {
       renderOverride = override;
