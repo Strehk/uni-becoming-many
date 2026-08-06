@@ -622,27 +622,34 @@ if (!useTheatreStudio) {
       saveAppSettings(next);
       gyro.setRange(next.gyroRangeDegrees);
       gyro.setInvertPitch(next.gyroInvertPitch);
-      if (next.control !== "gyro") {
-        gyro.disable();
-      }
     },
 
     onCalibrate() {
       gyro.calibrate();
     },
 
-    async onMobileStart() {
-      // The permission prompt only resolves inside the gesture that opened it, so
-      // this runs straight off the menu button's click.
-      if (!(await gyro.enable())) {
-        return false;
+    /**
+     * Begin in one of the three modes. Everything a mode needs that a browser only
+     * grants inside a user gesture — the tilt sensor on iOS, fullscreen — has to
+     * happen here, in the click that led to it, before any await that isn't part of
+     * asking. Refusing the tilt sensor is the one failure that aborts the start:
+     * without it the mobile mode has no steering at all.
+     */
+    async onStart(next, mode) {
+      if (mode === "mobile") {
+        if (!(await gyro.enable())) {
+          return false;
+        }
+      } else {
+        gyro.disable();
       }
-      appSettings = { ...appSettings, control: "gyro" };
+      appSettings = { ...appSettings, mode };
       saveAppSettings(appSettings);
-      await enterImmersiveViewport();
-      rewindToStart(experienceConfig);
-      clock.pause(); // frozen at t=0 until the tap
-      armStartGate(true);
+      // Fullscreen in every mode; only the phone gets the landscape lock.
+      await enterImmersiveViewport({ lockLandscape: mode === "mobile" });
+      rewindToStart(next);
+      clock.pause(); // stay frozen at t=0 until the gate fires
+      armStartGate(mode === "mobile");
       return true;
     },
 
@@ -666,12 +673,6 @@ if (!useTheatreStudio) {
       rewindToStart(next);
       clock.resume();
       interfaceMode.setMode("configure");
-    },
-
-    onStart(next) {
-      rewindToStart(next);
-      clock.pause(); // stay frozen at t=0 until the gate fires
-      armStartGate(appSettings.control === "gyro");
     },
   });
   window.addEventListener("pagehide", () => startMenu.dispose());
@@ -757,7 +758,7 @@ renderer.start((dtSeconds) => {
   // to a phone or a bare desktop would sink the rig with nobody touching anything.
   const gyroSteering = gyro.active;
   const icarosSteering =
-    !gyroSteering && (appSettings.control === "icaros" || orientation.quality > 0);
+    !gyroSteering && (appSettings.mode === "icaros" || orientation.quality > 0);
   player.setMaxAltitude(theatre.flight.value.maxHeight); // authored airspace ceiling → player rig
   player.look(locomotion.pitch);
   player.update(dtSeconds, {

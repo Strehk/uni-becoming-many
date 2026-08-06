@@ -46,6 +46,13 @@ await shoot("01-home", 1280, 800, async (page) => {
   console.log("title font:", font);
   const loaded = await page.evaluate(() => document.fonts.check('16px "Heavitas"'));
   console.log("heavitas loaded:", loaded);
+  // The "VR NOT SUPPORTED" button must never be on screen where WebXR is absent.
+  const vr = await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>("#VRButton");
+    if (!el) return "absent";
+    return getComputedStyle(el).display === "none" || el.hidden ? "hidden" : el.textContent;
+  });
+  console.log("vr button:", vr);
 });
 
 // 2. The Einstellungen screen.
@@ -88,13 +95,11 @@ await shoot("04-control", 1280, 800, async (page) => {
     items.find((i) => i.textContent?.includes("Einstellungen"))?.click();
   });
   await page.waitForTimeout(300);
-  await page.evaluate(() => {
-    const c = Array.from(document.querySelectorAll<HTMLElement>(".bm-menu__choice"));
-    c.find((x) => x.textContent?.includes("Handy neigen"))?.click();
-  });
   await page.waitForTimeout(400);
-  const rowsVisible = await page.$eval(".bm-menu__rows", (el) => !el.hidden);
-  console.log("gyro rows visible:", rowsVisible);
+  const rows = await page.$$eval(".bm-menu__row span:first-child", (e) =>
+    e.map((x) => x.textContent),
+  );
+  console.log("control rows:", JSON.stringify(rows));
 });
 
 // 5. Phone viewport — the start screen as a visitor sees it.
@@ -128,11 +133,17 @@ await shoot("05-phone", 390, 844, async (page) => {
   // Now start and confirm it moves again.
   await page.evaluate(() => {
     const items = Array.from(document.querySelectorAll<HTMLElement>(".bm-menu__item"));
-    items.find((i) => i.textContent?.includes("Experience starten"))?.click();
+    items.find((i) => i.textContent?.includes("Desktop starten"))?.click();
   });
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(2000);
   await page.keyboard.press("Enter");
   await page.waitForTimeout(4000);
+  const vrAfterStart = await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>("#VRButton");
+    if (!el) return "absent";
+    return getComputedStyle(el).display === "none" || el.hidden ? "hidden" : el.textContent;
+  });
+  console.log("vr button in playback:", vrAfterStart);
   const c = await sample();
   await page.waitForTimeout(900);
   const d = await sample();

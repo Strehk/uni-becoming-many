@@ -31,9 +31,9 @@ import {
 import { injectMenuTheme } from "./menu-theme.ts";
 import {
   type AppSettings,
-  CONTROL_LABELS,
-  CONTROL_NOTES,
-  type ControlScheme,
+  type ExperienceMode,
+  MODE_LABELS,
+  MODE_NOTES,
   looksLikeMobile,
   supportsDeviceOrientation,
 } from "./settings.ts";
@@ -46,15 +46,15 @@ export interface StartMenuOptions {
   /** Persist and apply a settings change (control scheme, gyro tuning, quality). */
   onSettingsChange(settings: AppSettings): void;
   /**
-   * Enter the mobile mode: ask for tilt access, go fullscreen, start the piece.
-   * Resolves false when the device has no sensor or the visitor declined it.
+   * Begin the piece in one of the three modes. The host does whatever that mode
+   * needs first — tilt permission, fullscreen, the landscape lock — and resolves
+   * false if any of it was refused, in which case the menu stays up and says so.
    */
-  onMobileStart(): Promise<boolean>;
+  onStart(config: ExperienceConfig, mode: ExperienceMode): Promise<boolean>;
   /** Re-take the phone's current pose as "fly straight". */
   onCalibrate(): void;
   /** Menu shown / hidden — the host pauses drawing the world while it is up. */
   onVisibleChange(visible: boolean): void;
-  onStart(config: ExperienceConfig): void;
   onConfigure(config: ExperienceConfig): void;
   onConfigChange(config: ExperienceConfig): void;
   onTest(config: ExperienceConfig): void;
@@ -122,9 +122,22 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     }, 3200);
   };
 
-  const startExperience = (): void => {
+  /**
+   * Begin in `mode`. Everything that can be refused — the tilt sensor, fullscreen —
+   * lives on the host side of `onStart`, and this very click is the user gesture all
+   * of it needs, so nothing may be deferred past it.
+   */
+  const startExperience = async (
+    mode: ExperienceMode,
+    button: HTMLButtonElement,
+  ): Promise<void> => {
+    button.disabled = true;
+    const started = await options.onStart(cloneConfig(config), mode);
+    button.disabled = false;
+    if (!started) {
+      return; // the host explains why in the note line
+    }
     saveExperienceConfig(config);
-    options.onStart(cloneConfig(config));
     setVisible(false);
   };
 
@@ -172,25 +185,27 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
       return button;
     };
 
-    // On a touch device the phone flight is the obvious way in, so it leads;
-    // on a desktop the plain start does.
+    // On a touch device the phone flight is the obvious way in, so it leads.
     const onTouch = looksLikeMobile();
+    const order: ExperienceMode[] = onTouch
+      ? ["mobile", "desktop", "icaros"]
+      : ["desktop", "mobile", "icaros"];
 
-    const start = entry(
-      "Experience starten",
-      "Am Rechner fliegen — mit Tastatur oder ICAROS-Gerät.",
-      onTouch ? "normal" : "primary",
-      startExperience,
-    );
-
-    const mobile = entry(
-      "Mobile Version",
-      "Auf dem Handy fliegen — gesteuert durch Neigen des Geräts.",
-      onTouch ? "primary" : "normal",
-      () => {
-        void startMobile(mobile, note);
-      },
-    );
+    const starts = order.map((mode, index) => {
+      const button = entry(
+        `${MODE_LABELS[mode]} starten`,
+        MODE_NOTES[mode],
+        index === 0 ? "primary" : "normal",
+        () => {
+          void startExperience(mode, button);
+        },
+      );
+      if (mode === "mobile" && !supportsDeviceOrientation()) {
+        button.disabled = true;
+        button.title = "Dieses Gerät meldet keine Neigung.";
+      }
+      return button;
+    });
 
     const settingsEntry = entry(
       "Einstellungen",
@@ -215,27 +230,8 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
       },
     );
 
-    list.append(...(onTouch ? [mobile, start] : [start, mobile]), settingsEntry, configure);
+    list.append(...starts, settingsEntry, configure);
     screen.append(head, list, note);
-  }
-
-  /** The mobile entry: tilt access first (it needs this very click), then start. */
-  async function startMobile(button: HTMLButtonElement, note: HTMLElement): Promise<void> {
-    if (!supportsDeviceOrientation()) {
-      note.textContent = "Dieses Gerät meldet keine Neigung — die Tastatursteuerung bleibt aktiv.";
-      return;
-    }
-    button.disabled = true;
-    note.textContent = "Neigungssensor wird angefragt …";
-    const granted = await options.onMobileStart();
-    button.disabled = false;
-    if (!granted) {
-      note.textContent =
-        "Kein Zugriff auf den Neigungssensor. In den Einstellungen lässt er sich erneut anfragen.";
-      return;
-    }
-    saveExperienceConfig(config);
-    setVisible(false);
   }
 
   // ── Screen: settings ───────────────────────────────────────────
@@ -250,7 +246,8 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     title.textContent = "Einstellungen";
     const lede = document.createElement("p");
     lede.className = "bm-menu__lede";
-    lede.textContent = "Gelten sofort und bleiben auf diesem Gerät gespeichert.";
+    lede.textContent =
+      "Gelten sofort und bleiben auf diesem Gerät gespeichert. Der Modus wird auf dem Startbild gewählt.";
     head.append(title, lede);
 
     const sections = document.createElement("div");
@@ -311,43 +308,20 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     return section;
   }
 
+  /**
+   * Steering settings. Only the mobile mode has anything to tune — the keyboard and
+   * the ICAROS host bring their own feel — so this section is about the phone, and
+   * says so rather than offering a mode picker that the start screen already is.
+   */
   function controlSection(): HTMLElement {
     const section = document.createElement("div");
     const title = document.createElement("h2");
     title.className = "bm-menu__section-title";
-    title.textContent = "Steuerung";
-
-    const choices = document.createElement("div");
-    choices.className = "bm-menu__choices";
-    const buttons = new Map<ControlScheme, HTMLButtonElement>();
+    title.textContent = "Steuerung am Handy";
 
     const rows = document.createElement("div");
     rows.className = "bm-menu__rows";
 
-    const mark = (scheme: ControlScheme): void => {
-      for (const [id, btn] of buttons) {
-        btn.setAttribute("aria-pressed", String(id === scheme));
-      }
-      rows.hidden = scheme !== "gyro";
-    };
-
-    const schemes: ControlScheme[] = ["keyboard", "gyro", "icaros"];
-    for (const scheme of schemes) {
-      const button = choiceButton(CONTROL_LABELS[scheme], CONTROL_NOTES[scheme]);
-      if (scheme === "gyro" && !supportsDeviceOrientation()) {
-        button.disabled = true;
-        button.title = "Dieses Gerät meldet keine Neigung.";
-      }
-      button.addEventListener("click", () => {
-        setSettings({ ...settings, control: scheme });
-        mark(scheme);
-        showStatus(`Steuerung: ${CONTROL_LABELS[scheme]}`);
-      });
-      buttons.set(scheme, button);
-      choices.append(button);
-    }
-
-    // Gyro tuning — only meaningful while that scheme is chosen.
     const sensitivity = document.createElement("label");
     sensitivity.className = "bm-menu__row";
     const sensitivityText = document.createElement("span");
@@ -374,7 +348,7 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     const invert = document.createElement("label");
     invert.className = "bm-menu__row";
     const invertText = document.createElement("span");
-    invertText.textContent = "Neigen umkehren";
+    invertText.textContent = "Steigen und Sinken vertauschen";
     const invertInput = document.createElement("input");
     invertInput.type = "checkbox";
     invertInput.checked = settings.gyroInvertPitch;
@@ -398,8 +372,15 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     calibrate.append(calibrateText, calibrateButton);
 
     rows.append(sensitivity, invert, calibrate);
-    mark(settings.control);
-    section.append(title, choices, rows);
+    section.append(title, rows);
+
+    if (!supportsDeviceOrientation()) {
+      const hint = document.createElement("p");
+      hint.className = "bm-menu__status";
+      hint.textContent = "Dieses Gerät meldet keine Neigung — die Werte gelten auf dem Handy.";
+      section.append(hint);
+    }
+
     return section;
   }
 
@@ -455,7 +436,7 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
       const next = readConfig(form, duration);
       setConfig(next);
       saveExperienceConfig(next);
-      startExperience();
+      void startExperience(settings.mode, saveStartButton);
     });
 
     const theatreButton = smallButton("Theatre Timeline öffnen");

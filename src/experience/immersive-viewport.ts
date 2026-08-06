@@ -12,9 +12,18 @@
 //
 // Must be called from inside a user gesture, like the permission prompt it follows.
 
-export async function enterImmersiveViewport(): Promise<void> {
+export interface ImmersiveViewportOptions {
+  /** Also ask for landscape. Only the phone wants it — a desktop window is already wide. */
+  lockLandscape?: boolean;
+}
+
+export async function enterImmersiveViewport(
+  options: ImmersiveViewportOptions = {},
+): Promise<void> {
   await requestFullscreen();
-  await lockLandscape();
+  if (options.lockLandscape === true) {
+    await lockLandscape();
+  }
 }
 
 async function requestFullscreen(): Promise<void> {
