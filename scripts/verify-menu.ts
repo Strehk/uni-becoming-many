@@ -125,10 +125,29 @@ await shoot("05-phone", 390, 844, async (page) => {
       const canvas = document.querySelector("canvas");
       return canvas instanceof HTMLCanvasElement ? canvas.toDataURL().slice(0, 2000) : "no-canvas";
     });
+  // Start screen: the air layer must keep drifting behind the veil.
+  const h1 = await sample();
+  await page.waitForTimeout(1200);
+  const h2 = await sample();
+  console.log("canvas live behind start screen:", h1 !== h2);
+
+  // Settings screen: opaque, so drawing stops.
+  await page.evaluate(() => {
+    const items = Array.from(document.querySelectorAll<HTMLElement>(".bm-menu__item"));
+    items.find((i) => i.textContent?.includes("Einstellungen"))?.click();
+  });
+  await page.waitForTimeout(700);
   const a = await sample();
   await page.waitForTimeout(1200);
   const b = await sample();
-  console.log("canvas frozen while menu up:", a === b, `(len ${a.length})`);
+  console.log("canvas frozen behind settings:", a === b);
+  await page.screenshot({ path: `${OUT}/07-settings-opaque.png` });
+
+  await page.evaluate(() => {
+    const items = Array.from(document.querySelectorAll<HTMLElement>(".bm-menu__item"));
+    items.find((i) => i.textContent?.trim() === "Zurück")?.click();
+  });
+  await page.waitForTimeout(500);
 
   // Now start and confirm it moves again.
   await page.evaluate(() => {

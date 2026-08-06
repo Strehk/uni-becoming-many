@@ -610,11 +610,12 @@ if (!useTheatreStudio) {
     settings: appSettings,
     router: perfRouter,
 
-    // While the menu is up the world is not drawn — the surface is opaque, so every
-    // drawn frame would be invisible work (and on a phone, the costliest kind).
-    // Streaming keeps running underneath, so starting is instant.
-    onVisibleChange(visible) {
-      renderer.setRenderPaused(visible);
+    // The start screen is a veil, so the air layer keeps drifting behind the title;
+    // the opaque settings / Ablauf screens hide the world entirely, and drawing under
+    // them would be invisible work (on a phone, the costliest kind). Streaming runs
+    // either way, so starting is instant.
+    onWorldVisible(visible) {
+      renderer.setRenderPaused(!visible);
     },
 
     onSettingsChange(next) {

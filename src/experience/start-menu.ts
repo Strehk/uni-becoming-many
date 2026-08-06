@@ -53,8 +53,12 @@ export interface StartMenuOptions {
   onStart(config: ExperienceConfig, mode: ExperienceMode): Promise<boolean>;
   /** Re-take the phone's current pose as "fly straight". */
   onCalibrate(): void;
-  /** Menu shown / hidden — the host pauses drawing the world while it is up. */
-  onVisibleChange(visible: boolean): void;
+  /**
+   * Whether the world should keep being drawn. True on the start screen, where the
+   * air layer shows through the veil, and once the menu closes; false behind the
+   * opaque settings / Ablauf screens, which the host need not render under.
+   */
+  onWorldVisible(visible: boolean): void;
   onConfigure(config: ExperienceConfig): void;
   onConfigChange(config: ExperienceConfig): void;
   onTest(config: ExperienceConfig): void;
@@ -86,19 +90,21 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
   returnButton.hidden = true;
   returnButton.textContent = "Konfiguration";
   returnButton.addEventListener("click", () => {
-    setVisible(true);
     returnButton.hidden = true;
     renderConfig();
   });
 
   document.body.append(returnButton, root);
 
-  /** Show or hide the whole surface, telling the host so it can pause the world. */
-  function setVisible(visible: boolean): void {
-    root.hidden = !visible;
-    options.onVisibleChange(visible);
+  /**
+   * Move to a screen (or off the menu entirely). The start screen is a veil over the
+   * running world; the other two are opaque, so the host may stop drawing beneath them.
+   */
+  function setScreen(name: "home" | "settings" | "config" | "none"): void {
+    root.hidden = name === "none";
+    root.classList.toggle("bm-menu--veiled", name === "home");
+    options.onWorldVisible(name === "home" || name === "none");
   }
-  options.onVisibleChange(true);
 
   const setSettings = (next: AppSettings): void => {
     settings = { ...next };
@@ -138,11 +144,12 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
       return; // the host explains why in the note line
     }
     saveExperienceConfig(config);
-    setVisible(false);
+    setScreen("none");
   };
 
   // ── Screen: start ──────────────────────────────────────────────
   function renderHome(): void {
+    setScreen("home");
     screen.replaceChildren();
     screen.classList.remove("bm-menu__screen--wide");
 
@@ -153,7 +160,7 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     title.textContent = "Becoming Many";
     const lede = document.createElement("p");
     lede.className = "bm-menu__lede";
-    lede.textContent = "Ein Flug durch die Sinne anderer Lebewesen.";
+    lede.textContent = "An Immersive Journey Through Non-Human Perception";
     head.append(title, lede);
 
     const list = document.createElement("div");
@@ -236,6 +243,7 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
 
   // ── Screen: settings ───────────────────────────────────────────
   function renderSettings(): void {
+    setScreen("settings");
     screen.replaceChildren();
     screen.classList.remove("bm-menu__screen--wide");
 
@@ -386,6 +394,7 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
 
   // ── Screen: dramaturgy ─────────────────────────────────────────
   function renderConfig(): void {
+    setScreen("config");
     screen.replaceChildren();
     screen.classList.add("bm-menu__screen--wide");
 
@@ -452,7 +461,7 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
       setConfig(next);
       saveExperienceConfig(next);
       options.onTest(cloneConfig(next));
-      setVisible(false);
+      setScreen("none");
       returnButton.hidden = false;
     });
 

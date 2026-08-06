@@ -10,9 +10,13 @@
 //     when no sense is active (src/senses/index.ts), so the menu is not a panel
 //     floating over the world — it *is* the empty world, before anything is sensed.
 //
-// Opaque on purpose: the settings must be readable without the experience running
-// behind them, and on a phone a menu drawn over a live WebGPU frame is the single
-// most expensive thing on the screen.
+// Two grounds, not one. The **start screen** is a veil: the air layer is already
+// drifting out there — the white void with its dust — and hiding it behind a dead
+// surface wastes the one thing that is running before anything is sensed. A soft
+// white glow behind the type carries the credits' halo and keeps black text legible
+// over it. The **settings and Ablauf screens** stay fully opaque, and the host stops
+// drawing entirely while they are up: those are read, not watched, and on a phone a
+// form over a live WebGPU frame is the most expensive thing on the screen.
 
 import { asset } from "../asset-url.ts";
 
@@ -59,6 +63,22 @@ const CSS = `
 
   .bm-menu[hidden] {
     display: none !important;
+  }
+
+  /*
+   * The start screen: let the running air layer through. Only a soft glow sits
+   * behind the type — enough contrast for black glyphs, transparent at the edges
+   * where the dust drifts.
+   */
+  .bm-menu--veiled {
+    background:
+      radial-gradient(
+        68% 52% at 50% 42%,
+        rgba(255, 255, 255, 0.92) 0%,
+        rgba(248, 250, 255, 0.72) 45%,
+        rgba(240, 244, 255, 0.28) 75%,
+        rgba(240, 244, 255, 0) 100%
+      );
   }
 
   /* The credits' white halo behind black glyphs, as a CSS shadow. */
