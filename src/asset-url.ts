@@ -1,7 +1,7 @@
 // ── Becoming Many — URLs for the files under public/ ──
 //
 // The world is served from a base path that is not always "/": locally and on a
-// root deployment it is, on GitHub Pages it is "/becoming-many-prototyp-alpha/".
+// root deployment it is, on GitHub Pages it is "/becoming-many-beta/".
 // A literal "/creatures/deer_walk.glb" therefore 404s the moment the build is not
 // at the domain root. Vite substitutes `import.meta.env.BASE_URL` (always with a
 // trailing slash) at build time, so routing every public/ URL through `asset()`

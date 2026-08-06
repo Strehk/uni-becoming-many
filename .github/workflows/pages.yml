@@ -1,7 +1,7 @@
 # ── Becoming Many — GitHub Pages deployment ──
 #
 # Builds the Vite bundle and publishes it as the Pages site of this fork
-# (https://e-mus.github.io/becoming-many-prototyp-alpha/). BASE_PATH tells Vite —
+# (https://e-mus.github.io/becoming-many-beta/). BASE_PATH tells Vite —
 # and through it `asset()` in src/asset-url.ts — that the site lives in a project
 # sub-path rather than at the domain root.
 #

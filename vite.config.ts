@@ -7,7 +7,7 @@ declare const process: { env: Record<string, string | undefined> };
 
 export default defineConfig({
   // Deployment base. GitHub Pages serves the fork from a project sub-path, so the
-  // CI build passes BASE_PATH=/becoming-many-prototyp-alpha/; dev and any root
+  // CI build passes BASE_PATH=/becoming-many-beta/; dev and any root
   // deployment stay on "/". Everything under public/ goes through `asset()`
   // (src/asset-url.ts) so both resolve — never hard-code a leading "/" URL.
   base: process.env["BASE_PATH"] ?? "/",
