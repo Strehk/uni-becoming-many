@@ -57,3 +57,8 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          # GitHub's publishing side has taken >10 min for this ~12 MB artifact,
+          # and the action's default 10-minute wait then reports a red run for a
+          # deploy that actually lands. 30 minutes covers it.
+          timeout: 1800000
