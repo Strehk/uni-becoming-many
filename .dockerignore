@@ -1,0 +1,17 @@
+.git
+.claude
+node_modules
+dist
+.vite
+*.local
+.DS_Store
+
+# ~25 MB of source FBX for the nature kit. Only the offline scripts/convert-*.ts
+# passes read it; what the app loads is the converted .glb in public/.
+assets
+scripts
+docs
+*.md
+biome.json
+Dockerfile
+.dockerignore

@@ -1,0 +1,53 @@
+name: Build & publish image
+
+on:
+  push:
+    branches: [main]
+  # Lets you rebuild without an empty commit — useful after changing the
+  # VITE_ICAROS_HOST variable, which is baked in at build time (see .env.example).
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          # Provided by Actions; `packages: write` above is what makes it push-capable.
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # `latest` is the moving main tag; the sha tag pins an exact build so a
+          # deploy can be rolled back to a known commit.
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VITE_ICAROS_HOST=${{ vars.VITE_ICAROS_HOST }}
+          # Keeps bun install + the vite build out of the critical path on reruns.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
