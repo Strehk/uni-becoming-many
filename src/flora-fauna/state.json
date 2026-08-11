@@ -72,7 +72,7 @@
       "deerRoamRadius": 110,
       "deerTreeClearance": 3,
       "foxCount": 11,
-      "foxScale": 0.02,
+      "foxScale": 0.01,
       "foxSpeed": 1.9,
       "foxRoamRadius": 95,
       "foxTreeClearance": 2

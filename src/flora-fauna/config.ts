@@ -300,7 +300,7 @@ export const DEFAULT_CONFIG: FloraFaunaConfig = {
     deerRoamRadius: 110,
     deerTreeClearance: 3,
     foxCount: 4,
-    foxScale: 0.02,
+    foxScale: 0.01,
     foxSpeed: 1.9,
     foxRoamRadius: 95,
     foxTreeClearance: 2,
