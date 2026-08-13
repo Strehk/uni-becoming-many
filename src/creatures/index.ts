@@ -565,18 +565,25 @@ export async function createCreatures(
     readonly roamRadius: number;
     readonly clearance: number;
     readonly refSpeed: number;
+    /** Trim on the step tempo — corrects an off `refSpeed` so the feet stop sliding. */
+    readonly animScale: number;
   }
+  /** The world-wide pace multiplier, read live like every other speed. */
+  const paceScale = (): number => Math.max(0, fauna.animalSpeed);
+
   const deerTuning = (): WalkerTuning => ({
-    speed: Math.max(0, fauna.deerSpeed),
+    speed: Math.max(0, fauna.deerSpeed) * paceScale(),
     roamRadius: Math.max(18, fauna.deerRoamRadius),
     clearance: fauna.deerTreeClearance,
     refSpeed: DEER_WALK_REFERENCE_SPEED,
+    animScale: Math.max(0, fauna.deerAnimSpeed),
   });
   const foxTuning = (): WalkerTuning => ({
-    speed: Math.max(0, fauna.foxSpeed),
+    speed: Math.max(0, fauna.foxSpeed) * paceScale(),
     roamRadius: Math.max(14, fauna.foxRoamRadius),
     clearance: fauna.foxTreeClearance,
     refSpeed: FOX_WALK_REFERENCE_SPEED,
+    animScale: Math.max(0, fauna.foxAnimSpeed),
   });
 
   const buildDeer = (homeKey: string, home: THREE.Vector3): Deer => {
@@ -1388,7 +1395,9 @@ export async function createCreatures(
 
         w.object.position.set(nextX, nextY, nextZ);
         w.object.rotation.y = yaw;
-        w.action.timeScale = speed / tuning.refSpeed;
+        // Step tempo follows the travelled speed (that is what keeps the feet planted), with the
+        // per-species trim on top for when the clip's reference speed is off.
+        w.action.timeScale = (speed / tuning.refSpeed) * tuning.animScale;
         w.mixer.update(dt);
       };
 
@@ -1447,7 +1456,7 @@ export async function createCreatures(
         const flock = flocks[b.flock];
         if (!flock) continue;
         const profile = KIND_PROFILES[b.kind];
-        const speedScale = fauna[profile.flightSpeedKey];
+        const speedScale = fauna[profile.flightSpeedKey] * paceScale();
         const minSpeed = profile.minSpeed * speedScale;
         const maxSpeed = profile.maxSpeed * speedScale;
         steer.set(0, 0, 0);

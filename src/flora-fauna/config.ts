@@ -152,6 +152,12 @@ export interface FloraConfig {
 }
 
 export interface FaunaConfig {
+  /**
+   * One multiplier over the pace of EVERY animal — walkers and fliers alike (live). It rides on
+   * top of each species' own speed, so the tuned relationships between them stay intact and this
+   * only decides how briskly the whole world moves. 1 = as tuned, 0 = frozen.
+   */
+  readonly animalSpeed: number;
   /** Number of independent bird flocks (rebuild on change). */
   readonly flockCount: number;
   /** Inclusive random bird-count range rolled independently per flock. */
@@ -205,6 +211,13 @@ export interface FaunaConfig {
   readonly deerScale: number;
   /** Deer walking speed in metres per second. */
   readonly deerSpeed: number;
+  /**
+   * Step-tempo trim for the deer's walk clip (live). The animation is driven from the walking
+   * speed against a REFERENCE speed measured off the clip, which keeps the feet planted at any
+   * pace — but that reference is an estimate. This corrects it: >1 steps quicker at the same
+   * speed, <1 slower. Set it so the feet stop sliding; it then holds at every speed.
+   */
+  readonly deerAnimSpeed: number;
   /** Radius around the player in which deer choose new routes. */
   readonly deerRoamRadius: number;
   /** Extra clearance kept between a deer route and tree trunks, in metres. */
@@ -215,6 +228,8 @@ export interface FaunaConfig {
   readonly foxScale: number;
   /** Fox walking speed in metres per second. */
   readonly foxSpeed: number;
+  /** Step-tempo trim for the fox's walk clip — see {@link FaunaConfig.deerAnimSpeed}. */
+  readonly foxAnimSpeed: number;
   /** Radius around each fox's home in which it chooses new routes. */
   readonly foxRoamRadius: number;
   /** Extra clearance kept between a fox route and tree trunks, in metres. */
@@ -267,6 +282,7 @@ export const DEFAULT_CONFIG: FloraFaunaConfig = {
     speciesCap: { "bush-3": 0 },
   },
   fauna: {
+    animalSpeed: 1,
     flockCount: 4,
     birdMinPerFlock: 18,
     birdMaxPerFlock: 30,
@@ -297,11 +313,13 @@ export const DEFAULT_CONFIG: FloraFaunaConfig = {
     deerCount: 3,
     deerScale: 1,
     deerSpeed: 1.2,
+    deerAnimSpeed: 1,
     deerRoamRadius: 110,
     deerTreeClearance: 3,
     foxCount: 4,
     foxScale: 0.01,
-    foxSpeed: 1.9,
+    foxSpeed: 1.4,
+    foxAnimSpeed: 1,
     foxRoamRadius: 95,
     foxTreeClearance: 2,
   },
