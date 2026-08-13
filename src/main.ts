@@ -5,6 +5,7 @@ import { SoundBus, SoundDirector } from "./audio/index.ts";
 import { createMovementScore } from "./audio/movements.ts";
 import { type Creatures, createCreatures } from "./creatures/index.ts";
 import { createEventControls } from "./dev-console/event-controls.ts";
+import { type FlightMode, createFlightControls } from "./dev-console/flight-controls.ts";
 import { createFloraFaunaControls } from "./dev-console/flora-fauna-controls.ts";
 import { createDevConsole } from "./dev-console/index.ts";
 import { createPerformanceControls } from "./dev-console/performance-controls.ts";
@@ -19,7 +20,10 @@ import {
 } from "./experience/config.ts";
 import { createCredits } from "./experience/credits.ts";
 import { enterImmersiveViewport } from "./experience/immersive-viewport.ts";
-import { createInterfaceModeController } from "./experience/interface-mode.ts";
+import {
+  type ExperienceInterfaceMode,
+  createInterfaceModeController,
+} from "./experience/interface-mode.ts";
 import { type AppSettings, loadAppSettings, saveAppSettings } from "./experience/settings.ts";
 import { type StartGate, createStartGate } from "./experience/start-gate.ts";
 import { createStartMenu } from "./experience/start-menu.ts";
@@ -36,6 +40,7 @@ import { createMinimap } from "./minimap/index.ts";
 import { findPreset } from "./perf/presets.ts";
 import { createPerfRouter } from "./perf/router.ts";
 import { applyPerfState, perfStateFrom, savedPerfState, serializePerfState } from "./perf/state.ts";
+import { createFreeFlightControls } from "./player/free-flight.ts";
 import { createGyroControls } from "./player/gyro-controls.ts";
 import { createPlayer } from "./player/index.ts";
 import { createKeyboardControls } from "./player/keyboard-controls.ts";
@@ -564,6 +569,53 @@ if (import.meta.env.DEV) {
 const keyboard = createKeyboardControls();
 window.addEventListener("pagehide", () => keyboard.dispose());
 
+// Free flight: the configure screens (Ablauf / "Test ansehen") are for *inspecting* the world, and
+// the glider — always moving forward, bounded airspace — is the wrong tool for that. There the
+// player flies creative-style instead: look anywhere, move along the gaze, no ceiling. Playback
+// always gets the glider back; the dev panel below overrides either way.
+const freeFlight = createFreeFlightControls({ target: renderer.canvas });
+window.addEventListener("pagehide", () => freeFlight.dispose());
+
+/** Narrow a `{ mode }` bus payload down to its string, or undefined. */
+const readBusMode = (payload: unknown): string | undefined => {
+  if (typeof payload !== "object" || payload === null) return undefined;
+  const value = new Map<string, unknown>(Object.entries(payload)).get("mode");
+  return typeof value === "string" ? value : undefined;
+};
+
+let flightMode: FlightMode = "glide";
+const setFlightMode = (mode: FlightMode): void => {
+  if (flightMode === mode) return;
+  flightMode = mode;
+  freeFlight.setEnabled(mode === "free");
+  bus.emit("flight:mode", { mode }); // the panel mirrors it (no echo — it only marks buttons)
+};
+
+bus.on("flight:mode", (payload) => {
+  const mode = readBusMode(payload);
+  if (mode === "glide" || mode === "free") setFlightMode(mode);
+});
+bus.on("flight:look", (payload) => {
+  const mode = readBusMode(payload);
+  if (mode === "pointerlock" || mode === "drag" || mode === "keys") freeFlight.setLookMode(mode);
+});
+
+const flightControls = createFlightControls(bus, {
+  mode: flightMode,
+  look: freeFlight.lookMode,
+});
+devConsole.addSection(flightControls.element);
+window.addEventListener("pagehide", () => flightControls.dispose());
+
+/** The interface mode decides the flight model; the dev panel may then override it. */
+const setInterfaceMode = (mode: ExperienceInterfaceMode): void => {
+  interfaceMode.setMode(mode);
+  setFlightMode(mode === "configure" ? "free" : "glide");
+};
+if (useTheatreStudio) {
+  setFlightMode("free"); // the studio boots straight into configure (see above)
+}
+
 // Gyro controls: the phone's own tilt, reported as the same {pitch, roll} rate pair
 // the ICAROS stream sends, so the mobile mode needs no second flight model. Dormant
 // until `enable()` is awaited from a user gesture (iOS gates the sensor behind one).
@@ -593,7 +645,7 @@ if (!useTheatreStudio) {
 
   /** Arm the gate and enter playback. `tapToStart` is the phone's missing Enter key. */
   const armStartGate = (tapToStart: boolean): void => {
-    interfaceMode.setMode("playback");
+    setInterfaceMode("playback");
     startGate?.dispose();
     startGate = createStartGate({
       getSession: () => renderer.instance.xr.getSession(),
@@ -662,7 +714,7 @@ if (!useTheatreStudio) {
       clock.reset();
       theatre.setPosition(0);
       signals.time.value = 0;
-      interfaceMode.setMode("configure");
+      setInterfaceMode("configure");
     },
 
     onConfigChange(next) {
@@ -673,7 +725,7 @@ if (!useTheatreStudio) {
     onTest(next) {
       rewindToStart(next);
       clock.resume();
-      interfaceMode.setMode("configure");
+      setInterfaceMode("configure");
     },
   });
   window.addEventListener("pagehide", () => startMenu.dispose());
@@ -751,6 +803,7 @@ renderer.start((dtSeconds) => {
 
   keyboard.update(dtSeconds); // 4. input → player → emergent signals
   gyro.update(dtSeconds);
+  freeFlight.update(dtSeconds);
   const { locomotion } = keyboard;
   // Three steering sources, in falling precedence: the debug keyboard always wins
   // while a key is held, then the phone's tilt when the mobile mode is live, then
@@ -761,25 +814,31 @@ renderer.start((dtSeconds) => {
   const icarosSteering =
     !gyroSteering && (appSettings.mode === "icaros" || orientation.quality > 0);
   player.setMaxAltitude(theatre.flight.value.maxHeight); // authored airspace ceiling → player rig
-  player.look(locomotion.pitch);
-  player.update(dtSeconds, {
-    pitch: keyboard.steering
-      ? 0
-      : gyroSteering
-        ? gyro.steering.pitch
-        : icarosSteering
-          ? orientation.pitch - PITCH_BIAS
-          : 0,
-    roll: keyboard.steering
-      ? locomotion.turn
-      : gyroSteering
-        ? gyro.steering.roll
-        : icarosSteering
-          ? orientation.roll
-          : 0,
-    throttle: locomotion.throttle,
-    paused: locomotion.paused,
-  });
+  if (flightMode === "free") {
+    // Free flight owns the rig outright — the glider's steering sources and its look gimbal
+    // would fight it, so the whole block below is skipped rather than blended.
+    player.flyFree(dtSeconds, freeFlight.input);
+  } else {
+    player.look(locomotion.pitch);
+    player.update(dtSeconds, {
+      pitch: keyboard.steering
+        ? 0
+        : gyroSteering
+          ? gyro.steering.pitch
+          : icarosSteering
+            ? orientation.pitch - PITCH_BIAS
+            : 0,
+      roll: keyboard.steering
+        ? locomotion.turn
+        : gyroSteering
+          ? gyro.steering.roll
+          : icarosSteering
+            ? orientation.roll
+            : 0,
+      throttle: locomotion.throttle,
+      paused: locomotion.paused,
+    });
+  }
   // Publish the player's world position (mutated in place — hot-path peek elsewhere).
   pose.x = player.rig.position.x;
   pose.y = player.rig.position.y;
