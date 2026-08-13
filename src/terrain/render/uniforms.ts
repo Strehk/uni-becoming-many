@@ -26,6 +26,9 @@ export function createSenseUniforms() {
     rimColor: uniform(new THREE.Color(0x9fc0ff)),
     /** Master world visibility 0..1 (0 = pale void, no sense active). */
     worldReveal: uniform(0),
+    /** AR passthrough veil 0..1 — opacity of the world's surfaces. 1 = fully opaque
+     *  (VR / no passthrough); < 1 = translucent so the room shows through in AR. */
+    worldOpacity: uniform(1),
   };
 }
 

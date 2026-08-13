@@ -273,6 +273,11 @@ export function createSenseUniforms(start: AtmosphereId) {
     /** Master world visibility 0..1 — 0 while no sense is active (the pale void),
      *  eased to 1 as senses reveal the world. The terrain + water gate on this. */
     worldReveal: uniform(start === "none" ? 0 : 1),
+    /** AR passthrough veil 0..1 — opacity of the world's SURFACES (not the dust). 1 =
+     *  fully opaque (VR / no passthrough); < 1 = translucent so the real room shows
+     *  through in AR. Written directly each frame by the passthrough module (main.ts),
+     *  NOT lerped by the SenseManager. Default 1 keeps the world solid everywhere. */
+    worldOpacity: uniform(1),
   };
 }
 

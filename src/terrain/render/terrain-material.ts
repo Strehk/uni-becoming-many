@@ -94,6 +94,13 @@ export function createTerrainMaterial(
   // Chunk index winding follows PlaneGeometry; double-side avoids culling the
   // ground when its base winding faces away.
   material.side = THREE.DoubleSide;
+  // AR passthrough: the world's surfaces fade to translucent (u.worldOpacity < 1) so the
+  // real room shows through in AR, then back to solid for VR. This must ride the OPAQUE
+  // pass — the WebGPU-XR transparent pass does not present in the headset — so we express
+  // partial opacity as MSAA coverage (alphaToCoverage, MSAA is on via antialias:true),
+  // exactly like the dust field (see src/atmosphere/material.ts). No `transparent = true`.
+  material.opacityNode = u.worldOpacity;
+  material.alphaToCoverage = true;
 
   const rewire = (): void => {
     // ── Stage 1: sense layers over the per-vertex biome colour ──

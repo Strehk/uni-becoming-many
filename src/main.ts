@@ -17,6 +17,7 @@ import {
 } from "./experience/config.ts";
 import { createCredits } from "./experience/credits.ts";
 import { createInterfaceModeController } from "./experience/interface-mode.ts";
+import { createPassthrough } from "./experience/passthrough.ts";
 import { type StartGate, createStartGate } from "./experience/start-gate.ts";
 import { createStartMenu } from "./experience/start-menu.ts";
 import { createFloraFaunaController } from "./flora-fauna/index.ts";
@@ -380,6 +381,18 @@ const credits = createCredits({
 });
 window.addEventListener("pagehide", () => credits.dispose());
 
+// AR ⇆ VR passthrough veil: opens in AR (real room visible + dust motes), fades the world
+// opaque into de-facto VR once the piece begins, and back to AR at the end. Driven by the
+// authored `passthrough.vrBlend` envelope each frame (see below). Owns the backdrop veil
+// dome + the `scene.background`/clear-alpha swap; only takes visible effect in an AR session.
+const passthrough = createPassthrough({
+  scene: renderer.scene,
+  renderer: renderer.instance,
+  uniforms: senses.uniforms,
+  isPassthrough: () => renderer.isPassthrough(),
+});
+window.addEventListener("pagehide", () => passthrough.dispose());
+
 if (import.meta.env.DEV) {
   (window as Window & { __bmDebug?: unknown }).__bmDebug = {
     clock,
@@ -553,6 +566,11 @@ const hostOrigin =
 // so we counterweight it here). ~0.4 of the -1..1 range.
 const PITCH_BIAS = 0.4;
 
+// Opacity the world's surfaces fade to at full AR passthrough (arVeil = 0) — a translucent
+// ghost so the audience can still see the real room to get into position, while the dust
+// motes stay fully solid. 1 at full VR. Tune to taste (0 = surfaces vanish entirely in AR).
+const AR_WORLD_MIN_OPACITY = 0.15;
+
 // Latest validated controller orientation; steers the player each frame.
 const orientation: { pitch: number; roll: number; quality: number } = {
   pitch: 0,
@@ -633,6 +651,15 @@ renderer.start((dtSeconds) => {
   // Authored credits/thank-you screen: desktop billboard vs VR world-locked panel, faded by the
   // Theatre `credits.opacity` envelope. Positioned from the just-synced camera pose.
   credits.update(theatre.credits.value.opacity);
+
+  // AR ⇆ VR passthrough: the authored `vrBlend` envelope (0=AR, 1=VR) crossfades the view.
+  // Only while an AR passthrough session presents — otherwise (plain VR / desktop) it is
+  // pinned to 1 (fully opaque VR), so the world looks exactly as before. The world's surfaces
+  // fade to `AR_WORLD_MIN_OPACITY` at full AR (a translucent ghost) while the dust stays solid;
+  // the backdrop dome's coverage tracks `arVeil` so the passthrough feed re-emerges behind it.
+  const arVeil = renderer.isPassthrough() ? theatre.passthrough.value.vrBlend : 1;
+  senses.uniforms.worldOpacity.value = AR_WORLD_MIN_OPACITY + (1 - AR_WORLD_MIN_OPACITY) * arVeil;
+  passthrough.update(arVeil, pose.x, pose.y, pose.z);
 
   // Authored field-line-dome mix: keyframe the curved dipole field lines in/out on the timeline.
   // Only while the timeline owns the senses, so manual panel edits win during dev tuning.

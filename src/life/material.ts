@@ -125,10 +125,17 @@ export function createFloraMaterial(
   const material = new MeshBasicNodeMaterial();
   // Grass, flowers and foliage are single-sided planes in the source meshes.
   material.side = THREE.DoubleSide;
+  // AR passthrough: surfaces fade translucent (u.worldOpacity < 1) in the OPAQUE pass via
+  // MSAA coverage — the WebGPU-XR transparent pass does not present. See terrain-material.ts.
+  // At the default worldOpacity = 1 this reproduces the previous opaque look exactly.
+  material.alphaToCoverage = true;
 
   if (foliageAtlas) {
-    material.opacityNode = texture(foliageAtlas, uv()).a;
+    // Keep the leaf cutout mask; the AR veil rides on top of it.
+    material.opacityNode = texture(foliageAtlas, uv()).a.mul(u.worldOpacity);
     material.alphaTest = FOLIAGE_ALPHA_TEST;
+  } else {
+    material.opacityNode = u.worldOpacity;
   }
 
   const rewire = (): void => {
