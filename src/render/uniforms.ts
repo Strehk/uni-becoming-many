@@ -76,6 +76,9 @@ export function createSenseUniforms(seed: SenseUniformSeed = DEFAULT_SENSE_SEED)
     fogColor: uniform(new THREE.Color(seed.fogColor)),
     rimColor: uniform(new THREE.Color(seed.rimColor)),
     dustStrength: uniform(seed.dustStrength),
+    /** AR passthrough veil 0..1 — opacity of the world's surfaces. 1 = fully opaque
+     *  (VR / no passthrough); < 1 = translucent so the room shows through in AR. */
+    worldOpacity: uniform(1),
   };
 }
 

@@ -107,6 +107,22 @@ const CREDITS_PROPS = {
 export type CreditsObject = ISheetObject<typeof CREDITS_PROPS>;
 
 /**
+ * Authored AR ⇆ VR passthrough blend. `vrBlend` (0..1) crossfades the whole view between AR
+ * passthrough and de-facto VR: **0 = AR** (the world's surfaces go translucent and the real
+ * room shows through — the dust motes stay visible), **1 = VR** (opaque). Keyframe it `0` at
+ * t=0 (getting into position), up to `1` once the piece begins, and back to `0` at the end so
+ * people in the room can see again. Read each frame into the passthrough subsystem
+ * (`src/experience/passthrough.ts`) — like `credits`/`flight`, it drives its subsystem directly
+ * and never touches the signal substrate. Default `1` so an un-keyframed timeline is plain VR
+ * (identical to before). Only takes visible effect while an AR passthrough session presents.
+ */
+const PASSTHROUGH_PROPS = {
+  vrBlend: types.number(1, { range: [0, 1], label: "VR ⇆ AR (1=VR, 0=AR)" }),
+};
+
+export type PassthroughObject = ISheetObject<typeof PASSTHROUGH_PROPS>;
+
+/**
  * Authored magnetfeld mix. `linesMix` (0..1) is the field-line-dome mode's weight in the
  * magnetfeld sense's 9-mode blend — keyframe it to fade the curved dipole field lines in and out
  * over the piece. Read each frame into the magnetfeld sense (while the timeline owns the senses),
@@ -126,6 +142,8 @@ export interface Theatre {
   readonly flight: FlightObject;
   /** Authored credits screen fade (0..1); read each frame into the credits subsystem. */
   readonly credits: CreditsObject;
+  /** Authored AR ⇆ VR passthrough blend (0=AR, 1=VR); read each frame into the passthrough subsystem. */
+  readonly passthrough: PassthroughObject;
   /** Authored magnetfeld mix (field-line-dome weight); read each frame into the magnetfeld sense. */
   readonly magnetfeld: MagnetfeldObject;
   /** The timeline sheet whose sequence is slaved to the clock (~300 s dramaturgy). */
@@ -166,6 +184,7 @@ export async function initTheatre(): Promise<Theatre> {
   const arc = timeline.object("arc", ARC_PROPS);
   const flight = timeline.object("flight", FLIGHT_PROPS);
   const credits = timeline.object("credits", CREDITS_PROPS);
+  const passthrough = timeline.object("passthrough", PASSTHROUGH_PROPS);
   const magnetfeld = timeline.object("magnetfeld", MAGNETFELD_PROPS);
 
   if (import.meta.env.DEV && new URLSearchParams(window.location.search).get("studio") === "1") {
@@ -178,7 +197,7 @@ export async function initTheatre(): Promise<Theatre> {
     // open on the stale browser snapshot and prompt "Use browser's state / Use disk state" — pick
     // "Use disk state" to reload the committed file.
     studio.initialize({ usePersistentStorage: true });
-    studio.setSelection([timeline, arc, flight, credits, magnetfeld]);
+    studio.setSelection([timeline, arc, flight, credits, passthrough, magnetfeld]);
     // Tip: `studio.createContentOfSaveFile("Becoming Many")` returns the state object to write
     // into src/theatre/state.json — the production save file — without the Studio export button.
   }
@@ -189,6 +208,7 @@ export async function initTheatre(): Promise<Theatre> {
     arc,
     flight,
     credits,
+    passthrough,
     magnetfeld,
     timeline,
     setPosition(seconds: number): void {

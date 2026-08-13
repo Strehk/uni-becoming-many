@@ -76,6 +76,10 @@ export function createGrassMaterial(
 ): GrassMaterialHandle {
   const material = new MeshBasicNodeMaterial();
   material.side = THREE.DoubleSide;
+  // AR passthrough: fade blades to translucent (u.worldOpacity < 1) in the OPAQUE pass
+  // via MSAA coverage — the WebGPU-XR transparent pass does not present. See terrain-material.ts.
+  material.opacityNode = u.worldOpacity;
+  material.alphaToCoverage = true;
 
   // Vertex → fragment varyings.
   const vBladeNormalWorld = varying(vec3(0));

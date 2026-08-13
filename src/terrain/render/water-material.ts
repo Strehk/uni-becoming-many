@@ -84,7 +84,8 @@ export function createWaterMaterial(
     const fogged = distanceFog(col, u.fogColor, u.fogNear, u.fogFar);
     const reveal = viewReveal(u.viewRadius, u.revealSoftness).mul(u.worldReveal);
     mat.colorNode = mix(u.fogColor, fogged, reveal);
-    mat.opacityNode = clamp(float(0.82), 0, 0.96).mul(reveal);
+    // AR passthrough veil rides on top of the base water opacity (u.worldOpacity = 1 in VR).
+    mat.opacityNode = clamp(float(0.82), 0, 0.96).mul(reveal).mul(u.worldOpacity);
     mat.needsUpdate = true;
   };
 

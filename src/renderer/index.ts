@@ -11,16 +11,19 @@
 //      than passing CPU arrays around. None is allocated yet: the streamed terrain world
 //      owns its own GPU state, so this renderer just sets up the device, scene, and camera.
 //
-// VR: WebGPU drives WebXR through the same `renderer.xr` manager as the WebGL backend
+// XR: WebGPU drives WebXR through the same `renderer.xr` manager as the WebGL backend
 // (supported since r167; uses an internal `XRGPUBinding`). We flip `renderer.xr.enabled`
-// on and expose a `VRButton` overlay whose session requests the "webgpu" feature (required
-// by the WebGPU backend — see below). Entering VR needs HTTPS (we already serve it).
+// on and expose an XR button (see ./xr-button.ts) that prefers an immersive-ar passthrough
+// session — so the piece can open in AR — and falls back to immersive-vr. Both request the
+// "webgpu" session feature required by the WebGPU backend. Entering XR needs HTTPS (served).
+// `isPassthrough()` reports whether a passthrough session is presenting, so the AR⇆VR veil
+// (src/experience/passthrough.ts) knows when to take effect.
 
 // `three/addons/*` maps to `three/examples/jsm/*`; types ship with @types/three.
 import { Inspector } from "three/addons/inspector/Inspector.js";
-import { VRButton } from "three/addons/webxr/VRButton.js";
 import * as THREE from "three/webgpu";
 import { SHOW_GRID_FLOOR, createGridFloor } from "./grid-floor";
+import { createXrButton } from "./xr-button.ts";
 
 export interface Renderer {
   /**
@@ -32,8 +35,12 @@ export interface Renderer {
   readonly canvas: HTMLCanvasElement;
   /** Three's WebGPU Inspector overlay root; hidden in audience playback mode. */
   readonly inspectorElement: HTMLElement;
-  /** "Enter VR" overlay button; mount it anywhere in the DOM. */
+  /** "Enter AR/VR" overlay button (id `VRButton`); mount it anywhere in the DOM. Prefers an
+   *  immersive-ar passthrough session, falling back to immersive-vr. */
   readonly vrButton: HTMLElement;
+  /** True while an AR passthrough session presents (environment blend mode ≠ "opaque").
+   *  False for plain VR, no session, or desktop — the passthrough fade is a no-op then. */
+  isPassthrough(): boolean;
   /** The scene graph — add world objects (e.g. a player rig) to it. */
   readonly scene: THREE.Scene;
   /** The camera. Prefer moving a parent rig over mutating this directly (VR owns its pose). */
@@ -82,12 +89,12 @@ export async function createRenderer(): Promise<Renderer> {
 
   await renderer.init();
 
-  // "Enter VR" button; three handles the session + per-eye cameras once it's clicked.
-  // The WebGPU backend's XRManager rejects any immersive session that wasn't granted the
-  // "webgpu" session feature (it drives the headset through an XRGPUBinding projection
-  // layer, not a WebGL layer) — so we request it as a *required* feature. Without this the
-  // session throws on start: `WebGPU XR sessions require the "webgpu" session feature`.
-  const vrButton = VRButton.createButton(renderer, { requiredFeatures: ["webgpu"] });
+  // XR entry button — prefers an immersive-ar (passthrough) session so the piece can open
+  // in AR, falling back to immersive-vr when AR isn't granted. It requests the "webgpu"
+  // session feature required by the WebGPU backend's XRManager (an XRGPUBinding projection
+  // layer, not a WebGL layer); without it the session throws on start. See ./xr-button.ts.
+  const xrEntry = await createXrButton(renderer);
+  const vrButton = xrEntry.element;
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -139,6 +146,7 @@ export async function createRenderer(): Promise<Renderer> {
     canvas: renderer.domElement,
     inspectorElement: inspector.domElement,
     vrButton,
+    isPassthrough: () => xrEntry.isPassthrough(),
     scene,
     camera,
     start,
