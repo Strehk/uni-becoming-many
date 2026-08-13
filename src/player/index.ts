@@ -19,11 +19,23 @@
  *     accumulates, so releasing springs back to level. The debug keyboard drives this for
  *     climb/descend; the ICAROS stream leaves it identity and uses the Altitude rate above.
  *
+ * On top of those three there is a fourth, purely *visual* layer:
+ *
+ *   - **World tilt** (`setWorldTilt`): a constant pitch of an inner `tilt` node that sits between
+ *     the gimbal and the camera. It rotates only how the world is *seen* — the whole scene
+ *     (horizon included) appears pitched downward — and, crucially, is **excluded from the flight
+ *     forward vector** (which is taken from `rig × gimbal` only), so travel stays perfectly level
+ *     while the view is angled. Its purpose is neck comfort in prone (ICAROS) flight: pitching the
+ *     view reference *up* means a relaxed, downward-hanging head re-levels the horizon, so you can
+ *     see where you're going without craning your neck up. It is meant to be applied only while a
+ *     headset is presenting (the caller gates it on `xr.isPresenting`); on the flat page it stays 0.
+ *
  * The player owns a rig `Group` (heading + position) carrying a gimbal `Group` (pitch look)
- * carrying the camera; **move the rig, never the camera directly**. This is the WebXR pattern:
- * a presenting headset writes the camera's pose *within* the rig each frame, so flying the rig
- * composes cleanly with head tracking instead of fighting it. The gimbal is identity unless the
- * debug pitch is used, so VR is unaffected.
+ * carrying a `tilt` `Group` (world tilt) carrying the camera; **move the rig, never the camera
+ * directly**. This is the WebXR pattern: a presenting headset writes the camera's pose *within*
+ * the rig each frame, so flying the rig composes cleanly with head tracking instead of fighting
+ * it. The gimbal is identity unless the debug pitch is used, and the tilt is identity unless the
+ * world tilt is set, so plain VR is unaffected.
  *
  * Convention (three.js): the rig looks down its local -Z, so "forward" is negative Z. Positive
  * pitch climbs (raises altitude); positive roll turns right.
@@ -88,6 +100,14 @@ export interface Player {
    */
   look(pitch: number): void;
   /**
+   * Set the constant world tilt, in radians. A *visual-only* pitch of the view that leaves flight
+   * untouched: positive tilts the rendered world (horizon included) **downward**, by pitching the
+   * view reference up so a relaxed, downward-facing head sees a level horizon — easing neck strain
+   * in prone flight. Absolute (assigned, not accumulated); 0 restores an untilted view. Set it
+   * every frame from the gated source (e.g. `xr.isPresenting ? tilt : 0`) so it drops to 0 off-VR.
+   */
+  setWorldTilt(radians: number): void;
+  /**
    * Retune the altitude ceiling at runtime, in metres above the terrain floor (see
    * {@link PlayerOptions.maxAltitude}). Lets an authored source (the Theatre timeline) shape the
    * ceiling over the piece; applied on the next `update`'s bounds clamp. Values are used as-is.
@@ -119,7 +139,13 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
   const gimbal = new THREE.Group();
   gimbal.name = "player-gimbal";
   rig.add(gimbal);
-  gimbal.add(camera);
+  // World tilt node: a visual-only pitch that sits *below* the gimbal, so it is not part of the
+  // flight forward vector (`rig × gimbal`) and never steers travel. In VR the headset writes the
+  // camera pose within this node, so the whole view — head tracking and all — rides the tilt.
+  const tilt = new THREE.Group();
+  tilt.name = "player-tilt";
+  gimbal.add(tilt);
+  tilt.add(camera);
 
   // Scratch objects: forward = rig heading composed with the gimbal pitch look, per frame.
   const worldQuat = new THREE.Quaternion();
@@ -169,15 +195,23 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
     gimbal.rotation.x = pitch * lookAngle;
   }
 
+  function setWorldTilt(radians: number): void {
+    // Positive pitches the view reference *up* (three.js +X, same sense as the gimbal's look),
+    // which drops the rendered world — horizon and all — downward in the view. Excluded from the
+    // forward vector above, so flight stays level while only the picture tilts.
+    tilt.rotation.x = radians;
+  }
+
   function setMaxAltitude(metres: number): void {
     maxAltitude = metres; // takes effect on the next update()'s applyBounds() clamp
   }
 
   function dispose(): void {
-    gimbal.remove(camera);
+    tilt.remove(camera);
+    gimbal.remove(tilt);
     rig.remove(gimbal);
     rig.removeFromParent();
   }
 
-  return { rig, update, look, setMaxAltitude, dispose };
+  return { rig, update, look, setWorldTilt, setMaxAltitude, dispose };
 }

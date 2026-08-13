@@ -3,6 +3,7 @@ import { createAtmosphere } from "./atmosphere/index.ts";
 import { SoundBus, SoundDirector } from "./audio/index.ts";
 import { createMovementScore } from "./audio/movements.ts";
 import { type Creatures, createCreatures } from "./creatures/index.ts";
+import { createComfortControls } from "./dev-console/comfort-controls.ts";
 import { createEventControls } from "./dev-console/event-controls.ts";
 import { createFloraFaunaControls } from "./dev-console/flora-fauna-controls.ts";
 import { createDevConsole } from "./dev-console/index.ts";
@@ -10,6 +11,12 @@ import { createSaveTuningControls } from "./dev-console/save-tuning.ts";
 import { createSenseControls } from "./dev-console/sense-controls.ts";
 import { createWorldControls } from "./dev-console/world-controls.ts";
 import { createEvents } from "./events/index.ts";
+import {
+  type ComfortConfig,
+  loadComfort,
+  saveComfort,
+  worldTiltRadians,
+} from "./experience/comfort.ts";
 import {
   type ExperienceConfig,
   loadExperienceConfig,
@@ -336,6 +343,12 @@ const player = createPlayer(renderer.camera, {
 });
 renderer.scene.add(player.rig);
 
+// View comfort: a constant downward world tilt that eases neck strain in prone flight. Persisted
+// (localStorage) and tunable live from the C console's "Komfort" slider. Held as radians and
+// applied each frame *only while a headset is presenting* — the flat page stays untilted.
+const comfort: ComfortConfig = loadComfort();
+let worldTiltRad = worldTiltRadians(comfort);
+
 // Scripted timeline events: one-shot staged moments (first: the bird sweeping
 // close past the camera on an authored route). Triggered by Theatre pulses
 // (arc.events.*, rising edge) or the dev panel — both over the same
@@ -514,6 +527,19 @@ const worldControls = createWorldControls(world);
 devConsole.addSection(worldControls.element);
 window.addEventListener("pagehide", () => worldControls.dispose());
 
+// Comfort controls: the VR world-tilt slider. Edits persist and update the live radians the frame
+// loop feeds to `player.setWorldTilt` (gated on `xr.isPresenting`).
+const comfortControls = createComfortControls({
+  initialTiltDeg: comfort.worldTiltDeg,
+  onTiltChange: (deg) => {
+    comfort.worldTiltDeg = deg;
+    worldTiltRad = worldTiltRadians(comfort);
+    saveComfort(comfort);
+  },
+});
+devConsole.addSection(comfortControls.element);
+window.addEventListener("pagehide", () => comfortControls.dispose());
+
 // Flora & Fauna controls: density / forest shape / flock / mushroom tuning. Edits
 // emit `flora-fauna:param` — the coordinator applies them (re-scatter / rebuild).
 const floraFaunaControls = createFloraFaunaControls(bus, floraFauna.config);
@@ -614,6 +640,8 @@ renderer.start((dtSeconds) => {
   keyboard.update(dtSeconds); // 4. input → player → emergent signals
   const { locomotion } = keyboard;
   player.setMaxAltitude(theatre.flight.value.maxHeight); // authored airspace ceiling → player rig
+  // Comfort world tilt: only while a headset is presenting; the flat page renders untilted.
+  player.setWorldTilt(renderer.instance.xr.isPresenting ? worldTiltRad : 0);
   player.look(locomotion.pitch);
   player.update(dtSeconds, {
     pitch: keyboard.steering ? 0 : orientation.pitch - PITCH_BIAS,
