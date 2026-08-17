@@ -1,12 +1,15 @@
 import { time } from "three/tsl";
+import { asset } from "./asset-url.ts";
 import { createAtmosphere } from "./atmosphere/index.ts";
 import { SoundBus, SoundDirector } from "./audio/index.ts";
 import { createMovementScore } from "./audio/movements.ts";
 import { type Creatures, createCreatures } from "./creatures/index.ts";
 import { createEventControls } from "./dev-console/event-controls.ts";
+import { type FlightMode, createFlightControls } from "./dev-console/flight-controls.ts";
 import { createFloraFaunaControls } from "./dev-console/flora-fauna-controls.ts";
 import { createDevConsole } from "./dev-console/index.ts";
 import { createM5Controls } from "./dev-console/m5-controls.ts";
+import { createPerformanceControls } from "./dev-console/performance-controls.ts";
 import { createSaveTuningControls } from "./dev-console/save-tuning.ts";
 import { createSenseControls } from "./dev-console/sense-controls.ts";
 import { createWorldControls } from "./dev-console/world-controls.ts";
@@ -17,7 +20,12 @@ import {
   saveExperienceConfig,
 } from "./experience/config.ts";
 import { createCredits } from "./experience/credits.ts";
-import { createInterfaceModeController } from "./experience/interface-mode.ts";
+import { enterImmersiveViewport } from "./experience/immersive-viewport.ts";
+import {
+  type ExperienceInterfaceMode,
+  createInterfaceModeController,
+} from "./experience/interface-mode.ts";
+import { type AppSettings, loadAppSettings, saveAppSettings } from "./experience/settings.ts";
 import { type StartGate, createStartGate } from "./experience/start-gate.ts";
 import { createStartMenu } from "./experience/start-menu.ts";
 import { createFloraFaunaController } from "./flora-fauna/index.ts";
@@ -30,6 +38,11 @@ import { type Grass, createGrass } from "./grass/index.ts";
 import { createLife } from "./life/index.ts";
 import { createController } from "./m5/index.ts";
 import { createMinimap } from "./minimap/index.ts";
+import { findPreset } from "./perf/presets.ts";
+import { createPerfRouter } from "./perf/router.ts";
+import { applyPerfState, perfStateFrom, savedPerfState, serializePerfState } from "./perf/state.ts";
+import { createFreeFlightControls } from "./player/free-flight.ts";
+import { createGyroControls } from "./player/gyro-controls.ts";
 import { createPlayer } from "./player/index.ts";
 import { createKeyboardControls } from "./player/keyboard-controls.ts";
 import { syncCameraPos } from "./render/camera-pos.ts";
@@ -40,7 +53,7 @@ import { AIR_ONLY_SENSES, SENSE_ORDER, createSenses } from "./senses/index.ts";
 import { createMagnetfeldSense } from "./senses/magnetfeld/index.ts";
 import { createMotionSense } from "./senses/motion/index.ts";
 import { createNetzwerkSense } from "./senses/netzwerk/index.ts";
-import { createRundumSense } from "./senses/rundum/index.ts";
+import { LITTLE_PLANET_DEFAULTS, createRundumSense } from "./senses/rundum/index.ts";
 import { loadSenseState, savedSenseState, serializeSenseState } from "./senses/state.ts";
 import { bus, signals } from "./signals/index.ts";
 import { createSynthOverlay } from "./synth/index.ts";
@@ -71,6 +84,10 @@ document.body.append(renderer.vrButton); // "Enter VR" overlay
 // emergent) advances through it, so pause/seek/timeScale govern the whole world. See docs §2.
 const clock = new Clock();
 let experienceConfig: ExperienceConfig = loadExperienceConfig();
+// The device-side half of the setup: quality preset + how the flight is steered.
+// Separate from the config above — that one is the dramaturgy, this one the device
+// (see src/experience/settings.ts). Both are written by the start menu.
+let appSettings: AppSettings = loadAppSettings();
 if (!useTheatreStudio) {
   clock.pause();
 }
@@ -156,6 +173,17 @@ window.addEventListener("pagehide", () => grass.dispose());
 // chunks stream — the dev-console World panel then opens on these values.
 loadTerrainState(savedTerrainState, world);
 
+// Restore the committed performance tuning (render scale / grass window / stream
+// radius) before the first frames, so boot already streams with these values. The
+// dev-console Performance panel then opens on them.
+const perfState = perfStateFrom(savedPerfState);
+applyPerfState(perfState, {
+  setRenderScale: (scale) => renderer.setRenderScale(scale),
+  setGrassPerformance: (perf) => grass.setPerformance(perf),
+  setStreamingRadii: (buildRadius) => world.setStreamingRadii(buildRadius),
+  setFloraViewDistance: (metres) => life.setViewDistance(metres),
+});
+
 // Magnetfeld sense: the sky dome showing the geomagnetic field (9 blendable modes),
 // fading with `signals.sense.magnetfeld` and following the player.
 const magnetfeld = createMagnetfeldSense(renderer.scene, bus);
@@ -202,7 +230,16 @@ const scentAnchors = SCENT_TYPES.map((t) => ({
 }));
 signals.scentAnchors.value = scentAnchors;
 
+// Scent anchors drift with the flight — sampling them at ~15 Hz is plenty for the
+// spatial synth bindings and skips the per-frame scan/sort over every scent spot.
+const SCENT_ANCHOR_STRIDE = 4;
+let scentAnchorFrame = 0;
+
 function publishScentAnchors(): void {
+  scentAnchorFrame = (scentAnchorFrame + 1) % SCENT_ANCHOR_STRIDE;
+  if (scentAnchorFrame !== 0) {
+    return;
+  }
   const nearest = new Map<string, { x: number; y: number; z: number; d2: number }>();
   for (const spot of life.scentSpotsAround(pose.x, pose.z, 114)) {
     const id = scentAnchorIds.get(spot.type);
@@ -397,14 +434,14 @@ if (import.meta.env.DEV) {
 // placeholders until the sound pipeline lands — a missing file warns once and is otherwise inert.
 const soundBus = new SoundBus();
 const director = new SoundDirector(soundBus, clock, bus);
-director.cue({ id: "chirp", src: "/audio/chirp.ogg", gain: 0.7, trigger: { kind: "event" } });
+director.cue({ id: "chirp", src: asset("audio/chirp.ogg"), gain: 0.7, trigger: { kind: "event" } });
 // One unlock cue per sense: `bus.when` fires on the rising edge of each sense signal
 // (Theatre or manual alike) and emits `cue:sense:<id>` — the director plays the clip
 // once real audio assets land (missing files warn once and stay inert).
 for (const senseId of SENSE_ORDER) {
   director.cue({
     id: `sense:${senseId}`,
-    src: `/audio/sense-${senseId}.ogg`,
+    src: asset(`audio/sense-${senseId}.ogg`),
     gain: 0.8,
     trigger: { kind: "event" },
   });
@@ -441,61 +478,13 @@ window.addEventListener("pagehide", () => interfaceMode.dispose());
 // the actual authored sense timeline remains Theatre's `arc.senses.*` tracks.
 // Theatre Studio remains available via ?studio=1 for advanced timeline editing.
 //
-// The start gate holds the clock paused after "start" until the audience presses Enter (or A
-// on an XR controller), so the piece begins on their cue instead of the instant the menu closes.
+// The start gate holds the clock paused after "start" until the audience gives the cue (the
+// M5 button, Enter, A on an XR controller, or a tap on a phone), so the piece begins on their
+// signal instead of the instant the menu closes.
 // Armed in `onStart`, polled in the frame loop, disposed when it fires.
 let startGate: StartGate | undefined;
 window.addEventListener("pagehide", () => startGate?.dispose());
-if (!useTheatreStudio) {
-  const startMenu = createStartMenu({
-    config: experienceConfig,
-    onConfigure(next) {
-      experienceConfig = next;
-      saveExperienceConfig(next);
-      signals.senseAuthority.value = "theatre";
-      clock.pause();
-      clock.reset();
-      theatre.setPosition(0);
-      signals.time.value = 0;
-      interfaceMode.setMode("configure");
-    },
-    onConfigChange(next) {
-      experienceConfig = next;
-      saveExperienceConfig(next);
-    },
-    onTest(next) {
-      experienceConfig = next;
-      saveExperienceConfig(next);
-      signals.senseAuthority.value = "theatre";
-      clock.reset();
-      theatre.setPosition(0);
-      signals.time.value = 0;
-      clock.resume();
-      interfaceMode.setMode("configure");
-    },
-    onStart(next) {
-      experienceConfig = next;
-      saveExperienceConfig(next);
-      signals.senseAuthority.value = "theatre";
-      clock.reset();
-      clock.pause(); // stay frozen at t=0 until the gate fires
-      theatre.setPosition(0);
-      signals.time.value = 0;
-      interfaceMode.setMode("playback");
-      // Hold the timeline until Enter / controller-A; only then does the clock start.
-      startGate?.dispose();
-      startGate = createStartGate({
-        getSession: () => renderer.instance.xr.getSession(),
-        consumeControllerButton: () => controller.consumeButtonDown(),
-        onTrigger() {
-          clock.resume();
-          startGate = undefined;
-        },
-      });
-    },
-  });
-  window.addEventListener("pagehide", () => startMenu.dispose());
-} else {
+if (useTheatreStudio) {
   signals.senseAuthority.value = "theatre";
   interfaceMode.setMode("configure");
 }
@@ -528,12 +517,51 @@ const eventControls = createEventControls(bus, events.ids);
 devConsole.addSection(eventControls.element);
 window.addEventListener("pagehide", () => eventControls.dispose());
 
+// Performance: presets (Niedrig/Mittel/Hoch/Ultra) + the highest-impact quality
+// knobs. Render/gras/terrain apply directly (uniform + scheduler writes); flora,
+// fauna and sense budgets ride the existing bus channels their owners debounce.
+// One routing for every quality knob (src/perf/router.ts), shared by the C-console
+// Performance panel and the audience Einstellungen screen — so a preset chosen in
+// either one is seen by the other.
+const perfRouter = createPerfRouter({
+  bus,
+  perf: perfState,
+  apply: {
+    renderScale: (v) => renderer.setRenderScale(v),
+    grassRadius: (v) => grass.setPerformance({ renderRadius: v }),
+    grassKeepFraction: (v) => grass.setPerformance({ keepFraction: v }),
+    streamBuildRadius: (v) => world.setStreamingRadii(v),
+    floraViewDistance: (v) => life.setViewDistance(v),
+  },
+  floraFauna: floraFauna.config,
+  senseStart: {
+    duftCount: savedSenseState.modules.duft.count,
+    duftCheapNoise: savedSenseState.modules.duft.cheapNoise,
+    motionLifetimeFrames: savedSenseState.modules.motion.lifetimeFrames,
+    rundumCubeSize: LITTLE_PLANET_DEFAULTS.cubeSize,
+    rundumCaptureInterval: LITTLE_PLANET_DEFAULTS.captureInterval,
+  },
+});
+
+// A quality preset the visitor picked on this device outranks the committed tuning.
+// Absent one (the default), state.json stays exactly as authored — the installation
+// is never silently re-tuned by a menu nobody touched.
+const savedQualityPreset = findPreset(appSettings.quality);
+if (savedQualityPreset) {
+  perfRouter.applyPreset(savedQualityPreset);
+}
+
+const perfControls = createPerformanceControls({ router: perfRouter });
+devConsole.addSection(perfControls.element);
+window.addEventListener("pagehide", () => perfControls.dispose());
+
 // Dev-only: export the live sense + world + flora/fauna tuning as committed state.json files.
 if (import.meta.env.DEV) {
   const saveTuning = createSaveTuningControls({
     serializeSenses: () => serializeSenseState(senses.shader, senseModules),
     serializeWorld: () => serializeTerrainState(world),
     serializeFloraFauna: () => serializeFloraFaunaState(floraFauna),
+    serializePerf: () => serializePerfState(perfState),
   });
   devConsole.addSection(saveTuning.element);
   window.addEventListener("pagehide", () => saveTuning.dispose());
@@ -549,6 +577,169 @@ window.addEventListener("pagehide", () => keyboard.dispose());
 // operator calibrated on the rig, so there is no bias constant to tune here any more.
 const controller = createController();
 window.addEventListener("pagehide", () => controller.dispose());
+
+// Free flight: the configure screens (Ablauf / "Test ansehen") are for *inspecting* the world, and
+// the glider — always moving forward, bounded airspace — is the wrong tool for that. There the
+// player flies creative-style instead: look anywhere, move along the gaze, no ceiling. Playback
+// always gets the glider back; the dev panel below overrides either way.
+const freeFlight = createFreeFlightControls({ target: renderer.canvas });
+window.addEventListener("pagehide", () => freeFlight.dispose());
+
+/** Narrow a `{ mode }` bus payload down to its string, or undefined. */
+const readBusMode = (payload: unknown): string | undefined => {
+  if (typeof payload !== "object" || payload === null) return undefined;
+  const value = new Map<string, unknown>(Object.entries(payload)).get("mode");
+  return typeof value === "string" ? value : undefined;
+};
+
+let flightMode: FlightMode = "glide";
+const setFlightMode = (mode: FlightMode): void => {
+  if (flightMode === mode) return;
+  flightMode = mode;
+  freeFlight.setEnabled(mode === "free");
+  bus.emit("flight:mode", { mode }); // the panel mirrors it (no echo — it only marks buttons)
+};
+
+bus.on("flight:mode", (payload) => {
+  const mode = readBusMode(payload);
+  if (mode === "glide" || mode === "free") setFlightMode(mode);
+});
+bus.on("flight:look", (payload) => {
+  const mode = readBusMode(payload);
+  if (mode === "pointerlock" || mode === "drag" || mode === "keys") freeFlight.setLookMode(mode);
+});
+
+const flightControls = createFlightControls(bus, {
+  mode: flightMode,
+  look: freeFlight.lookMode,
+});
+devConsole.addSection(flightControls.element);
+window.addEventListener("pagehide", () => flightControls.dispose());
+
+/** The interface mode decides the flight model; the dev panel may then override it. */
+const setInterfaceMode = (mode: ExperienceInterfaceMode): void => {
+  interfaceMode.setMode(mode);
+  setFlightMode(mode === "configure" ? "free" : "glide");
+};
+if (useTheatreStudio) {
+  setFlightMode("free"); // the studio boots straight into configure (see above)
+}
+
+// Gyro controls: the phone's own tilt, reported as the same {pitch, roll} rate pair
+// the ICAROS stream sends, so the mobile mode needs no second flight model. Dormant
+// until `enable()` is awaited from a user gesture (iOS gates the sensor behind one).
+const gyro = createGyroControls({
+  rangeDegrees: appSettings.gyroRangeDegrees,
+  invertPitch: appSettings.gyroInvertPitch,
+});
+window.addEventListener("pagehide", () => gyro.dispose());
+
+// Start/config menu: normal runs play the Theatre timeline. The config UI is an editor
+// shell; the actual authored sense timeline remains Theatre's `arc.senses.*` tracks.
+// Theatre Studio remains available via ?studio=1 for advanced timeline editing.
+//
+// The start gate holds the clock paused after "start" until the audience gives the
+// cue — the button on the M5, Enter, A on an XR controller, or (on a phone) a tap —
+// so the piece begins on their signal instead of the instant the menu closes.
+if (!useTheatreStudio) {
+  /** Rewind to t=0 and hand the senses back to the authored timeline. */
+  const rewindToStart = (next: ExperienceConfig): void => {
+    experienceConfig = next;
+    saveExperienceConfig(next);
+    signals.senseAuthority.value = "theatre";
+    clock.reset();
+    theatre.setPosition(0);
+    signals.time.value = 0;
+  };
+
+  /** Arm the gate and enter playback. `tapToStart` is the phone's missing Enter key. */
+  const armStartGate = (tapToStart: boolean): void => {
+    setInterfaceMode("playback");
+    startGate?.dispose();
+    startGate = createStartGate({
+      getSession: () => renderer.instance.xr.getSession(),
+      consumeControllerButton: () => controller.consumeButtonDown(),
+      tapToStart,
+      onTrigger() {
+        clock.resume();
+        startGate = undefined;
+      },
+    });
+  };
+
+  const startMenu = createStartMenu({
+    config: experienceConfig,
+    settings: appSettings,
+    router: perfRouter,
+
+    // The start screen is a veil, so the air layer keeps drifting behind the title;
+    // the opaque settings / Ablauf screens hide the world entirely, and drawing under
+    // them would be invisible work (on a phone, the costliest kind). Streaming runs
+    // either way, so starting is instant.
+    onWorldVisible(visible) {
+      renderer.setRenderPaused(!visible);
+    },
+
+    onSettingsChange(next) {
+      appSettings = next;
+      saveAppSettings(next);
+      gyro.setRange(next.gyroRangeDegrees);
+      gyro.setInvertPitch(next.gyroInvertPitch);
+    },
+
+    onCalibrate() {
+      gyro.calibrate();
+    },
+
+    /**
+     * Begin in one of the three modes. Everything a mode needs that a browser only
+     * grants inside a user gesture — the tilt sensor on iOS, fullscreen — has to
+     * happen here, in the click that led to it, before any await that isn't part of
+     * asking. Refusing the tilt sensor is the one failure that aborts the start:
+     * without it the mobile mode has no steering at all.
+     */
+    async onStart(next, mode) {
+      if (mode === "mobile") {
+        if (!(await gyro.enable())) {
+          return false;
+        }
+      } else {
+        gyro.disable();
+      }
+      appSettings = { ...appSettings, mode };
+      saveAppSettings(appSettings);
+      // Fullscreen in every mode; only the phone gets the landscape lock.
+      await enterImmersiveViewport({ lockLandscape: mode === "mobile" });
+      rewindToStart(next);
+      clock.pause(); // stay frozen at t=0 until the gate fires
+      armStartGate(mode === "mobile");
+      return true;
+    },
+
+    onConfigure(next) {
+      experienceConfig = next;
+      saveExperienceConfig(next);
+      signals.senseAuthority.value = "theatre";
+      clock.pause();
+      clock.reset();
+      theatre.setPosition(0);
+      signals.time.value = 0;
+      setInterfaceMode("configure");
+    },
+
+    onConfigChange(next) {
+      experienceConfig = next;
+      saveExperienceConfig(next);
+    },
+
+    onTest(next) {
+      rewindToStart(next);
+      clock.resume();
+      setInterfaceMode("configure");
+    },
+  });
+  window.addEventListener("pagehide", () => startMenu.dispose());
+}
 
 // Operator surface for the rig, inside the C console: live readouts plus the two tuning actions
 // (calibrate the rest pose, correct the mount) that used to live in the ICAROS host's console.
@@ -575,7 +766,7 @@ window.addEventListener("pagehide", () => {
 let wasClockRunning = clock.running;
 renderer.start((dtSeconds) => {
   // ── PRODUCE ──
-  startGate?.poll(); // gate: an XR controller A-press resumes the clock (Enter is event-driven)
+  startGate?.poll(); // gate: an M5 or XR-A press resumes the clock (Enter/tap are event-driven)
   clock.advance(dtSeconds); // 1. spine advances; time-cues fire
   signals.time.value = clock.now; // publish time onto the substrate (the one clock→signals bridge)
   if (clock.running) {
@@ -588,15 +779,43 @@ renderer.start((dtSeconds) => {
   score.update(); // authored movement envelopes → sound-bus transport (play / gain / stop)
 
   keyboard.update(dtSeconds); // 4. input → player → emergent signals
+  gyro.update(dtSeconds);
+  freeFlight.update(dtSeconds);
   const { locomotion } = keyboard;
+  // Three steering sources, in falling precedence: the debug keyboard always wins
+  // while a key is held, then the phone's tilt when the mobile mode is live, then
+  // the M5 on the flight rig. The rig's values arrive already normalized and
+  // calibrated against the neutral point the operator set, so — unlike the old
+  // ICAROS host stream — there is no ergonomic bias left to subtract here.
+  const gyroSteering = gyro.active;
+  const icarosSteering =
+    !gyroSteering && (appSettings.mode === "icaros" || controller.input.quality > 0);
   player.setMaxAltitude(theatre.flight.value.maxHeight); // authored airspace ceiling → player rig
-  player.look(locomotion.pitch);
-  player.update(dtSeconds, {
-    pitch: keyboard.steering ? 0 : controller.input.pitch,
-    roll: keyboard.steering ? locomotion.turn : controller.input.roll,
-    throttle: locomotion.throttle,
-    paused: locomotion.paused,
-  });
+  if (flightMode === "free") {
+    // Free flight owns the rig outright — the glider's steering sources and its look gimbal
+    // would fight it, so the whole block below is skipped rather than blended.
+    player.flyFree(dtSeconds, freeFlight.input);
+  } else {
+    player.look(locomotion.pitch);
+    player.update(dtSeconds, {
+      pitch: keyboard.steering
+        ? 0
+        : gyroSteering
+          ? gyro.steering.pitch
+          : icarosSteering
+            ? controller.input.pitch
+            : 0,
+      roll: keyboard.steering
+        ? locomotion.turn
+        : gyroSteering
+          ? gyro.steering.roll
+          : icarosSteering
+            ? controller.input.roll
+            : 0,
+      throttle: locomotion.throttle,
+      paused: locomotion.paused,
+    });
+  }
   // Publish control quality onto the substrate so anything can react (e.g. a "signal lost" cue).
   signals.controlQuality.value = controller.input.quality;
   // Publish the player's world position (mutated in place — hot-path peek elsewhere).

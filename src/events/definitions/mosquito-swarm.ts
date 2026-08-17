@@ -3,6 +3,7 @@
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { instancedBufferAttribute, smoothstep, uniform, uv, vec3 } from "three/tsl";
 import * as THREE from "three/webgpu";
+import { asset } from "../../asset-url.ts";
 import {
   MOTION_POINT_SOURCE_REGISTER,
   MOTION_POINT_SOURCE_UNREGISTER,
@@ -10,7 +11,7 @@ import {
 } from "../../senses/motion/point-sources.ts";
 import type { EventContext, EventDefinition, EventInstance } from "../types.ts";
 
-const PATH_URL = "/events/mosquito_path_neu_neu_neu.glb";
+const PATH_URL = asset("events/mosquito_path_neu_neu_neu.glb");
 const VIEW_DIRECTION_STRETCH = 0.5;
 const LATERAL_VERTICAL_SCALE = 1.5;
 const PATH_SPEED = 0.5;

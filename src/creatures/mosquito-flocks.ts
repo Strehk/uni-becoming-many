@@ -181,6 +181,11 @@ export function createMosquitoFlocks(
         worldPositions[index + 2] = swarm.anchor.z + (localPositions[index + 2] ?? 0);
       }
     }
+    // Upload only the live slots — the buffer is preallocated for MAX_SWARMS ×
+    // MAX_PER_SWARM (230 KB), but only `particles.count` instances are alive; the
+    // WebGPU backend honours `updateRanges` with a partial `writeBuffer`.
+    positionAttribute.clearUpdateRanges();
+    positionAttribute.addUpdateRange(0, Math.max(1, particles.count) * 3);
     positionAttribute.needsUpdate = true;
   };
 
@@ -231,7 +236,9 @@ export function createMosquitoFlocks(
         localPositions[index + 2] = Math.sin(angle) * radius;
         const velocityAngle = Math.random() * Math.PI * 2;
         const speed =
-          (MIN_SPEED + Math.random() * (MAX_SPEED - MIN_SPEED)) * config.mosquitoFlightSpeed;
+          (MIN_SPEED + Math.random() * (MAX_SPEED - MIN_SPEED)) *
+          config.mosquitoFlightSpeed *
+          config.animalSpeed;
         velocities[index] = Math.cos(velocityAngle) * speed;
         velocities[index + 1] = (Math.random() - 0.5) * speed;
         velocities[index + 2] = Math.sin(velocityAngle) * speed;
@@ -291,7 +298,8 @@ export function createMosquitoFlocks(
       const spread = Math.max(0.1, config.mosquitoSpread);
       const radiusLimit = BASE_RADIUS * spread;
       const heightLimit = BASE_HEIGHT * spread;
-      const speedScale = Math.max(0.05, config.mosquitoFlightSpeed);
+      // The world-wide pace multiplier rides on the swarm's own buzzing speed.
+      const speedScale = Math.max(0, config.mosquitoFlightSpeed * config.animalSpeed);
       const minSpeed = MIN_SPEED * speedScale;
       const maxSpeed = MAX_SPEED * speedScale;
       const step = Math.min(dt, 0.05);

@@ -18,15 +18,16 @@ import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js";
 import { float, mix, modelPosition, modelRadius, normalWorld, positionView, vec3 } from "three/tsl";
 import * as THREE from "three/webgpu";
 import type { Node } from "three/webgpu";
+import { asset } from "../../asset-url.ts";
 import { distanceFog, viewReveal } from "../../render/tsl-kit.ts";
 import type { KitUniforms } from "../../render/uniforms.ts";
 import { BirdFlight, type LoadedBirdModel } from "../bird-flight.ts";
 import type { EventContext, EventDefinition, EventInstance } from "../types.ts";
 
 /** Same rigged asset as the swarm (head faces −Z in the file, flap clip = [0]). */
-const BIRD_MODEL_URL = "/creatures/bird_erasmus.glb";
+const BIRD_MODEL_URL = asset("creatures/bird_erasmus.glb");
 /** The authored route (Blender Empty with a position track, see bird_intro). */
-const ROUTE_URL = "/events/bird-circle.fbx";
+const ROUTE_URL = asset("events/bird-circle.fbx");
 /** Target wingspan in metres — a close fly-by reads well slightly bird-sized. */
 const BIRD_WINGSPAN = 1.65;
 

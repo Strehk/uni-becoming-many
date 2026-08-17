@@ -263,6 +263,15 @@ const GROUPS: Group[] = [
     ],
   },
   {
+    // One knob over every animal at once. Each species keeps its own tuned speed —
+    // this only decides how briskly the whole living world moves.
+    title: "Fauna · Tempo (alle Tiere)",
+    open: true,
+    specs: [
+      { kind: "slider", key: "fauna.animalSpeed", label: "Tempo ×", min: 0, max: 3, step: 0.05 },
+    ],
+  },
+  {
     title: "Fauna · Vögel",
     open: true,
     specs: [
@@ -509,6 +518,14 @@ const GROUPS: Group[] = [
       { kind: "slider", key: "fauna.deerSpeed", label: "Tempo (m/s)", min: 0.3, max: 3, step: 0.1 },
       {
         kind: "slider",
+        key: "fauna.deerAnimSpeed",
+        label: "Schritt-Tempo ×",
+        min: 0.1,
+        max: 3,
+        step: 0.05,
+      },
+      {
+        kind: "slider",
         key: "fauna.deerRoamRadius",
         label: "Streifradius (m)",
         min: 30,
@@ -532,6 +549,14 @@ const GROUPS: Group[] = [
       { kind: "count", key: "fauna.foxCount", label: "Anzahl", min: 0, max: 96, step: 1 },
       { kind: "slider", key: "fauna.foxScale", label: "Größe ×", min: 0.01, max: 2, step: 0.01 },
       { kind: "slider", key: "fauna.foxSpeed", label: "Tempo (m/s)", min: 0.3, max: 4, step: 0.1 },
+      {
+        kind: "slider",
+        key: "fauna.foxAnimSpeed",
+        label: "Schritt-Tempo ×",
+        min: 0.1,
+        max: 3,
+        step: 0.05,
+      },
       {
         kind: "slider",
         key: "fauna.foxRoamRadius",

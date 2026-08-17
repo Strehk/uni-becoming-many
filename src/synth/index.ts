@@ -19,6 +19,7 @@
 //
 // Audio unlock stays the synth's own veil (a tap inside the iframe) — iOS-safe.
 
+import { asset } from "../asset-url.ts";
 import { SENSE_ORDER, SENSE_SYNTH_MAP } from "../senses/ids.ts";
 import { signals } from "../signals/index.ts";
 
@@ -118,7 +119,7 @@ export function createSynthOverlay(options: SynthOverlayOptions): SynthOverlay {
   const ensureIframe = (): void => {
     if (!iframe) {
       iframe = document.createElement("iframe");
-      iframe.src = "/synth.html";
+      iframe.src = asset("synth.html");
       iframe.allow = "autoplay";
       frameWrap.append(iframe);
     }

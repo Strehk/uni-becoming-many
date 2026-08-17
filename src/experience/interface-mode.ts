@@ -118,7 +118,17 @@ export function createInterfaceModeController(
     }
   };
 
-  const setVrButtonVisible = (visible: boolean): void => {
+  // Three's VRButton labels itself "VR NOT SUPPORTED" wherever WebXR is missing —
+  // which is every phone and most desktops, and it is the last thing the audience
+  // should read as the piece begins. So we ask once whether an immersive session is
+  // possible at all and, until the answer is yes, the button never appears. The
+  // probe is async, so the last requested visibility is remembered and re-applied
+  // when it resolves.
+  let xrSupported = false;
+  let vrButtonRequested = false;
+
+  const applyVrButtonVisibility = (): void => {
+    const visible = vrButtonRequested && xrSupported;
     options.vrButton.style.display = visible ? "" : "none";
     for (const el of document.querySelectorAll<HTMLElement>("#VRButton")) {
       el.hidden = !visible;
@@ -126,6 +136,21 @@ export function createInterfaceModeController(
       el.setAttribute("aria-hidden", String(!visible));
     }
   };
+
+  const setVrButtonVisible = (visible: boolean): void => {
+    vrButtonRequested = visible;
+    applyVrButtonVisibility();
+  };
+
+  void navigator.xr
+    ?.isSessionSupported("immersive-vr")
+    .then((supported) => {
+      xrSupported = supported;
+      applyVrButtonVisibility();
+    })
+    .catch(() => {
+      // A browser that throws on the query has no session to offer either.
+    });
 
   const setAppToolsVisible = (visible: boolean): void => {
     setVrButtonVisible(visible);

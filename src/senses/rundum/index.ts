@@ -62,6 +62,8 @@ export function createRundumSense(renderer: Renderer, bus: Bus): RundumSense {
     else if (key === "centerLift") planet.setOptions({ centerLift: value });
     else if (key === "yawOffsetDeg") planet.setOptions({ yawOffset: (value * Math.PI) / 180 });
     else if (key === "far") planet.setOptions({ far: value });
+    else if (key === "cubeSize") planet.setCubeSize(value);
+    else if (key === "captureInterval") planet.setOptions({ captureInterval: value });
   });
 
   const o = (): Readonly<LittlePlanetOptions> => planet.currentOptions;
@@ -136,6 +138,26 @@ export function createRundumSense(renderer: Renderer, bus: Bus): RundumSense {
           step: 10,
           digits: 0,
           get: () => o().far,
+        },
+        {
+          type: "range",
+          key: "cubeSize",
+          label: "Cubemap-Auflösung (px)",
+          min: 256,
+          max: 2048,
+          step: 256,
+          digits: 0,
+          get: () => o().cubeSize,
+        },
+        {
+          type: "range",
+          key: "captureInterval",
+          label: "Aufnahme jede N. Frame",
+          min: 1,
+          max: 4,
+          step: 1,
+          digits: 0,
+          get: () => o().captureInterval,
         },
       ],
     },

@@ -135,6 +135,20 @@ export class ParticleTrailBuffer {
     this.resize(this.totalVertexCount);
   }
 
+  /** Flag both attributes for upload — but only the live ring (`capacity` slots),
+   *  not the full max-capacity arrays. The WebGPU backend honours `updateRanges`
+   *  with a partial `writeBuffer`, so this caps the per-frame upload at the real
+   *  ring size (e.g. ~230 KB at trail length 2 instead of a fixed 2×2.3 MB). */
+  private markDirty(): void {
+    const count = Math.max(1, this.capacity) * 3;
+    this.positionAttribute.clearUpdateRanges();
+    this.positionAttribute.addUpdateRange(0, count);
+    this.positionAttribute.needsUpdate = true;
+    this.colorAttribute.clearUpdateRanges();
+    this.colorAttribute.addUpdateRange(0, count);
+    this.colorAttribute.needsUpdate = true;
+  }
+
   /** Deterministic per-vertex thinning: the same subset spawns every frame, so
    *  trails stay continuous instead of flickering. */
   private spawns(localIndex: number): boolean {
@@ -155,8 +169,7 @@ export class ParticleTrailBuffer {
     this.colors.fill(0);
     this.spawnIntensities.fill(0);
     this.points.count = Math.max(1, this.capacity);
-    this.positionAttribute.needsUpdate = true;
-    this.colorAttribute.needsUpdate = true;
+    this.markDirty();
   }
 
   spawnFromSamples(
@@ -234,8 +247,7 @@ export class ParticleTrailBuffer {
     }
 
     this.updateTrailSlots(slot);
-    this.positionAttribute.needsUpdate = true;
-    this.colorAttribute.needsUpdate = true;
+    this.markDirty();
     this.frame++;
   }
 
@@ -304,8 +316,7 @@ export class ParticleTrailBuffer {
     }
 
     this.updateTrailSlots(slot);
-    this.positionAttribute.needsUpdate = true;
-    this.colorAttribute.needsUpdate = true;
+    this.markDirty();
     this.frame++;
   }
 
@@ -340,8 +351,7 @@ export class ParticleTrailBuffer {
       return;
     }
     this.updateTrailSlots((this.frame - 1 + this.lifetimeFrames) % this.lifetimeFrames);
-    this.positionAttribute.needsUpdate = true;
-    this.colorAttribute.needsUpdate = true;
+    this.markDirty();
     this.frame++;
   }
 

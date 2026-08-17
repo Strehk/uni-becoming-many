@@ -33,6 +33,9 @@ import * as THREE from "three/webgpu";
 /** Normalized steering, each component in [-1, 1]. Zero input flies straight and level. */
 export type Steering = Readonly<{ pitch: number; roll: number }>;
 
+/** Ground clearance kept in free flight — just enough to stay out of the terrain. */
+const FREE_CLEARANCE = 0.6;
+
 /**
  * Steering plus optional flight modifiers. The extra fields are absent on the controller
  * orientation stream (which is pure `Steering`), so they default to "fly normally":
@@ -46,9 +49,31 @@ export type Locomotion = Steering &
     paused?: boolean;
   }>;
 
+/**
+ * Free ("creative") flight intent — the configure mode's way of moving, produced by
+ * `free-flight.ts`. Unlike {@link Locomotion} nothing here accumulates: the rig moves only while
+ * an axis is held, and the view is aimed absolutely rather than integrated.
+ */
+export type FreeFlight = Readonly<{
+  /** Along the view, -1..1 (forward positive). */
+  forward: number;
+  /** Level, across the view, -1..1 (right positive). */
+  strafe: number;
+  /** Straight up/down in world space, -1..1 (up positive). */
+  lift: number;
+  /** Yaw to apply this frame, radians (positive turns right). */
+  yawDelta: number;
+  /** Absolute view pitch, radians (positive looks up). */
+  pitch: number;
+  /** Speed multiplier on {@link PlayerOptions.freeSpeed}. */
+  boost: number;
+}>;
+
 export type PlayerOptions = Readonly<{
   /** Constant forward speed, world units per second. */
   speed?: number;
+  /** Base speed of free flight, world units per second. Defaults to 18. */
+  freeSpeed?: number;
   /** Vertical climb/descend speed at full pitch deflection, world units per second. */
   climbRate?: number;
   /** Turn rate at full roll deflection, radians per second. */
@@ -82,6 +107,13 @@ export interface Player {
    */
   update(dtSeconds: number, input: Locomotion): void;
   /**
+   * Advance one frame of FREE flight (the configure mode's creative-style movement): aim the view
+   * absolutely, then translate along it. Nothing carries between frames, and the airspace bounds
+   * do not apply — only a hand's clearance keeps the camera out of the ground. Use this *instead*
+   * of `update`/`look` for the frame; the two models must not both run.
+   */
+  flyFree(dtSeconds: number, input: FreeFlight): void;
+  /**
    * Tilt the look gimbal to an absolute, non-accumulating pitch. `pitch` is normalized to
    * [-1, 1] (positive looks up); zero re-centers. Set every frame — the caller (e.g. the
    * spring-centered keyboard) owns the return-to-level.
@@ -105,6 +137,7 @@ export interface Player {
  */
 export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}): Player {
   const speed = options.speed ?? 4;
+  const freeSpeed = options.freeSpeed ?? 18;
   const climbRate = options.climbRate ?? 4;
   const yawRate = options.yawRate ?? 0.8;
   const lookAngle = options.lookAngle ?? 0.7; // ~40° at full deflection
@@ -124,6 +157,7 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
   // Scratch objects: forward = rig heading composed with the gimbal pitch look, per frame.
   const worldQuat = new THREE.Quaternion();
   const forward = new THREE.Vector3();
+  const right = new THREE.Vector3(); // free flight only: level strafe axis
   // Yaw is always taken about world-up so the heading can never tip into a bank or roll, no
   // matter how the rig accumulates. (Constant, so declared once outside the hot path.)
   const worldUp = new THREE.Vector3(0, 1, 0);
@@ -154,6 +188,35 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
     applyBounds();
   }
 
+  function flyFree(dtSeconds: number, input: FreeFlight): void {
+    if (dtSeconds <= 0) {
+      return;
+    }
+    // Aiming: yaw still rides world-up (the horizon stays level here too), pitch is the gimbal set
+    // absolutely — the input owns the angle, so there is nothing to spring back from.
+    rig.rotateOnWorldAxis(worldUp, -input.yawDelta); // yawDelta > 0 turns right
+    gimbal.rotation.x = input.pitch;
+
+    // Travel: forward follows the gaze, strafe stays level (rig only, no pitch), lift is world-up.
+    const step = freeSpeed * input.boost * dtSeconds;
+    worldQuat.copy(rig.quaternion).multiply(gimbal.quaternion);
+    forward.set(0, 0, -1).applyQuaternion(worldQuat);
+    right.set(1, 0, 0).applyQuaternion(rig.quaternion);
+    rig.position.addScaledVector(forward, input.forward * step);
+    rig.position.addScaledVector(right, input.strafe * step);
+    rig.position.y += input.lift * step;
+
+    // Creative bounds: no ceiling at all, and only enough floor clearance that the camera never
+    // ends up inside the terrain. Deliberately not `applyBounds` — being able to leave the
+    // authored airspace is the point of this mode.
+    if (floor) {
+      const ground = floor(rig.position.x, rig.position.z);
+      if (ground !== null && rig.position.y < ground + FREE_CLEARANCE) {
+        rig.position.y = ground + FREE_CLEARANCE;
+      }
+    }
+  }
+
   function applyBounds(): void {
     if (!floor) return;
     const ground = floor(rig.position.x, rig.position.z);
@@ -179,5 +242,5 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
     rig.removeFromParent();
   }
 
-  return { rig, update, look, setMaxAltitude, dispose };
+  return { rig, update, flyFree, look, setMaxAltitude, dispose };
 }

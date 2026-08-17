@@ -1,3 +1,23 @@
+// ── Becoming Many — Start menu ───────────────────────────────────
+//
+// The frame around the piece: the first thing shown and the last thing touched
+// before the flight begins. Three screens behind one opaque surface —
+//
+//   • **Start** — the title and a game-menu list: begin, begin on a phone, settings,
+//     and (quietly, for the operator) controller pairing and the dramaturgy editor.
+//   • **Einstellungen** — quality and steering. The audience-facing half of what the
+//     C-console Performance panel offers, reduced to the four presets, plus the
+//     control scheme and the gyro tuning the mobile mode needs.
+//   • **Ablauf** — the sense schedule; unchanged in substance, restyled to match.
+//
+// The surface is opaque (see menu-theme.ts): the world is neither visible nor drawn
+// behind it — `onVisibleChange` lets the host pause the render pass — so the
+// settings can be read calmly and a phone is not rendering a WebGPU frame under a
+// menu it cannot see.
+
+import { asset } from "../asset-url.ts";
+import { PRESETS } from "../perf/presets.ts";
+import { CUSTOM_PRESET_ID, type PerfRouter } from "../perf/router.ts";
 import { isSenseId } from "../senses/ids.ts";
 import {
   DEFAULT_EXPERIENCE_CONFIG,
@@ -9,10 +29,37 @@ import {
   resetExperienceConfig,
   saveExperienceConfig,
 } from "./config.ts";
+import { injectMenuTheme } from "./menu-theme.ts";
+import {
+  type AppSettings,
+  type ExperienceMode,
+  MODE_LABELS,
+  MODE_NOTES,
+  looksLikeMobile,
+  supportsDeviceOrientation,
+} from "./settings.ts";
 
 export interface StartMenuOptions {
   config: ExperienceConfig;
-  onStart(config: ExperienceConfig): void;
+  settings: AppSettings;
+  /** Quality routing — the Einstellungen screen applies presets through it. */
+  router: PerfRouter;
+  /** Persist and apply a settings change (control scheme, gyro tuning, quality). */
+  onSettingsChange(settings: AppSettings): void;
+  /**
+   * Begin the piece in one of the three modes. The host does whatever that mode
+   * needs first — tilt permission, fullscreen, the landscape lock — and resolves
+   * false if any of it was refused, in which case the menu stays up and says so.
+   */
+  onStart(config: ExperienceConfig, mode: ExperienceMode): Promise<boolean>;
+  /** Re-take the phone's current pose as "fly straight". */
+  onCalibrate(): void;
+  /**
+   * Whether the world should keep being drawn. True on the start screen, where the
+   * air layer shows through the veil, and once the menu closes; false behind the
+   * opaque settings / Ablauf screens, which the host need not render under.
+   */
+  onWorldVisible(visible: boolean): void;
   onConfigure(config: ExperienceConfig): void;
   onConfigChange(config: ExperienceConfig): void;
   onTest(config: ExperienceConfig): void;
@@ -23,31 +70,47 @@ export interface StartMenu {
 }
 
 export function createStartMenu(options: StartMenuOptions): StartMenu {
-  injectStyles();
+  injectMenuTheme();
 
   let config = cloneConfig(options.config);
+  let settings: AppSettings = { ...options.settings };
   let statusTimer = 0;
 
   const root = document.createElement("div");
-  root.className = "exp-menu";
+  root.className = "bm-menu";
   root.setAttribute("role", "dialog");
   root.setAttribute("aria-modal", "true");
 
-  const panel = document.createElement("section");
-  panel.className = "exp-menu__panel";
-  root.append(panel);
+  const screen = document.createElement("section");
+  screen.className = "bm-menu__screen";
+  root.append(screen);
 
   const returnButton = document.createElement("button");
-  returnButton.className = "exp-menu__return exp-menu__return--hidden";
+  returnButton.className = "bm-menu-return";
   returnButton.type = "button";
+  returnButton.hidden = true;
   returnButton.textContent = "Konfiguration";
   returnButton.addEventListener("click", () => {
-    root.classList.remove("exp-menu--hidden");
-    returnButton.classList.add("exp-menu__return--hidden");
+    returnButton.hidden = true;
     renderConfig();
   });
-  document.body.append(returnButton);
-  document.body.append(root);
+
+  document.body.append(returnButton, root);
+
+  /**
+   * Move to a screen (or off the menu entirely). The start screen is a veil over the
+   * running world; the other two are opaque, so the host may stop drawing beneath them.
+   */
+  function setScreen(name: "home" | "settings" | "config" | "none"): void {
+    root.hidden = name === "none";
+    root.classList.toggle("bm-menu--veiled", name === "home");
+    options.onWorldVisible(name === "home" || name === "none");
+  }
+
+  const setSettings = (next: AppSettings): void => {
+    settings = { ...next };
+    options.onSettingsChange(settings);
+  };
 
   const setConfig = (next: ExperienceConfig): void => {
     config = cloneConfig(next);
@@ -55,7 +118,7 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
   };
 
   const showStatus = (text: string): void => {
-    const status = panel.querySelector<HTMLElement>("[data-exp-status]");
+    const status = screen.querySelector<HTMLElement>("[data-bm-status]");
     if (!status) {
       return;
     }
@@ -63,80 +126,307 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     status.textContent = text;
     statusTimer = window.setTimeout(() => {
       status.textContent = "";
-    }, 2200);
+    }, 3200);
   };
 
-  const startExperience = (): void => {
+  /**
+   * Begin in `mode`. Everything that can be refused — the tilt sensor, fullscreen —
+   * lives on the host side of `onStart`, and this very click is the user gesture all
+   * of it needs, so nothing may be deferred past it.
+   */
+  const startExperience = async (
+    mode: ExperienceMode,
+    button: HTMLButtonElement,
+  ): Promise<void> => {
+    button.disabled = true;
+    const started = await options.onStart(cloneConfig(config), mode);
+    button.disabled = false;
+    if (!started) {
+      return; // the host explains why in the note line
+    }
     saveExperienceConfig(config);
-    options.onStart(cloneConfig(config));
-    root.classList.add("exp-menu--hidden");
+    setScreen("none");
   };
 
-  const renderHome = (): void => {
-    panel.replaceChildren();
+  // ── Screen: start ──────────────────────────────────────────────
+  function renderHome(): void {
+    setScreen("home");
+    screen.replaceChildren();
+    screen.classList.remove("bm-menu__screen--wide");
 
+    const head = document.createElement("div");
+    head.className = "bm-menu__head";
     const title = document.createElement("h1");
+    title.className = "bm-menu__title";
     title.textContent = "Becoming Many";
+    const lede = document.createElement("p");
+    lede.className = "bm-menu__lede";
+    lede.textContent = "An Immersive Journey Through Non-Human Perception";
+    head.append(title, lede);
 
-    const subtitle = document.createElement("p");
-    subtitle.className = "exp-menu__lede";
-    subtitle.textContent =
-      "Starten oder Ablauf, Sinn-Freischaltungen und Intensitäten konfigurieren.";
+    const list = document.createElement("div");
+    list.className = "bm-menu__list";
 
-    const actions = document.createElement("div");
-    actions.className = "exp-menu__actions";
+    const note = document.createElement("p");
+    note.className = "bm-menu__note";
+    note.dataset["bmStatus"] = "";
 
-    const startButton = button("Experience starten", "primary");
-    startButton.addEventListener("click", startExperience);
+    /** The hovered entry explains itself in the shared note line below the list. */
+    const entry = (
+      label: string,
+      hint: string,
+      variant: "primary" | "normal" | "quiet",
+      onClick: () => void,
+    ): HTMLButtonElement => {
+      const button = menuItem(label, variant);
+      button.addEventListener("click", onClick);
+      const show = (): void => {
+        note.textContent = hint;
+      };
+      const clear = (): void => {
+        note.textContent = "";
+      };
+      button.addEventListener("pointerenter", show);
+      button.addEventListener("focus", show);
+      button.addEventListener("pointerleave", clear);
+      button.addEventListener("blur", clear);
+      return button;
+    };
 
-    const configButton = button("Experience konfigurieren", "secondary");
-    configButton.addEventListener("click", () => {
-      const url = new URL(window.location.href);
-      if (url.searchParams.get("studio") !== "1") {
-        url.searchParams.set("studio", "1");
-        window.location.href = url.toString();
-        return;
+    // On a touch device the phone flight is the obvious way in, so it leads.
+    const onTouch = looksLikeMobile();
+    const order: ExperienceMode[] = onTouch
+      ? ["mobile", "desktop", "icaros"]
+      : ["desktop", "mobile", "icaros"];
+
+    const starts = order.map((mode, index) => {
+      const button = entry(
+        `${MODE_LABELS[mode]} starten`,
+        MODE_NOTES[mode],
+        index === 0 ? "primary" : "normal",
+        () => {
+          void startExperience(mode, button);
+        },
+      );
+      if (mode === "mobile" && !supportsDeviceOrientation()) {
+        button.disabled = true;
+        button.title = "Dieses Gerät meldet keine Neigung.";
       }
-      options.onConfigure(cloneConfig(config));
-      renderConfig();
+      return button;
     });
 
-    // Own page rather than an overlay: pairing needs Web Serial and a USB cable, so it belongs
-    // at the desk before the flight — never mid-experience or in the headset.
-    const pairButton = button("Controller einrichten", "ghost");
-    pairButton.addEventListener("click", () => {
-      window.location.href = "/pair.html";
-    });
+    const settingsEntry = entry(
+      "Einstellungen",
+      "Qualität und Steuerung — ohne dass die Welt im Hintergrund läuft.",
+      "normal",
+      renderSettings,
+    );
 
-    actions.append(startButton, configButton, pairButton);
-    panel.append(title, subtitle, actions);
-  };
+    // Own page rather than a screen in here: pairing needs Web Serial and a USB cable, so it
+    // belongs at the desk before the flight — never mid-experience or in the headset.
+    const pair = entry(
+      "Controller einrichten",
+      "Für die Betreuung: den M5 am ICAROS über USB mit dieser Station verbinden.",
+      "quiet",
+      () => {
+        window.location.href = asset("pair.html");
+      },
+    );
 
-  const renderConfig = (): void => {
-    panel.replaceChildren();
+    const configure = entry(
+      "Ablauf konfigurieren",
+      "Für die Betreuung: wann welcher Sinn erwacht.",
+      "quiet",
+      () => {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get("studio") !== "1") {
+          url.searchParams.set("studio", "1");
+          window.location.href = url.toString();
+          return;
+        }
+        options.onConfigure(cloneConfig(config));
+        renderConfig();
+      },
+    );
 
-    const header = document.createElement("div");
-    header.className = "exp-menu__config-head";
+    list.append(...starts, settingsEntry, pair, configure);
+    screen.append(head, list, note);
+  }
 
-    const titleWrap = document.createElement("div");
+  // ── Screen: settings ───────────────────────────────────────────
+  function renderSettings(): void {
+    setScreen("settings");
+    screen.replaceChildren();
+    screen.classList.remove("bm-menu__screen--wide");
+
+    const head = document.createElement("div");
+    head.className = "bm-menu__head";
     const title = document.createElement("h1");
-    title.textContent = "Experience konfigurieren";
-    const subtitle = document.createElement("p");
-    subtitle.className = "exp-menu__lede";
-    subtitle.textContent =
-      "Die Sinn-Timeline wird in Theatre.js bearbeitet. Diese Ansicht speichert nur Ablauf-Vorlagen.";
-    titleWrap.append(title, subtitle);
+    title.className = "bm-menu__title bm-menu__title--small";
+    title.textContent = "Einstellungen";
+    const lede = document.createElement("p");
+    lede.className = "bm-menu__lede";
+    lede.textContent =
+      "Gelten sofort und bleiben auf diesem Gerät gespeichert. Der Modus wird auf dem Startbild gewählt.";
+    head.append(title, lede);
 
-    const backButton = button("Zurueck", "ghost");
-    backButton.addEventListener("click", renderHome);
-    header.append(titleWrap, backButton);
+    const sections = document.createElement("div");
+    sections.className = "bm-menu__sections";
+    sections.append(qualitySection(), controlSection());
+
+    const status = document.createElement("p");
+    status.className = "bm-menu__status";
+    status.dataset["bmStatus"] = "";
+
+    const back = menuItem("Zurück", "normal");
+    back.addEventListener("click", renderHome);
+
+    screen.append(head, sections, status, back);
+  }
+
+  function qualitySection(): HTMLElement {
+    const section = document.createElement("div");
+    const title = document.createElement("h2");
+    title.className = "bm-menu__section-title";
+    title.textContent = "Qualität";
+
+    const choices = document.createElement("div");
+    choices.className = "bm-menu__choices";
+    const buttons = new Map<string, HTMLButtonElement>();
+
+    const mark = (id: string): void => {
+      for (const [pid, btn] of buttons) {
+        btn.setAttribute("aria-pressed", String(pid === id));
+      }
+    };
+
+    for (const preset of PRESETS) {
+      const button = choiceButton(preset.label, preset.note);
+      button.addEventListener("click", () => {
+        options.router.applyPreset(preset);
+        setSettings({ ...settings, quality: preset.id });
+        mark(preset.id);
+        showStatus(`Qualität: ${preset.label}`);
+      });
+      buttons.set(preset.id, button);
+      choices.append(button);
+    }
+
+    mark(settings.quality);
+    section.append(title, choices);
+
+    // The C console can leave the tuning between two presets; say so rather than
+    // lighting up a preset that no longer describes what is running.
+    if (settings.quality === CUSTOM_PRESET_ID) {
+      const custom = document.createElement("p");
+      custom.className = "bm-menu__status";
+      custom.textContent =
+        "Zurzeit gilt die eingebaute Feinabstimmung — eine Stufe wählen ersetzt sie.";
+      section.append(custom);
+    }
+
+    return section;
+  }
+
+  /**
+   * Steering settings. Only the mobile mode has anything to tune — the keyboard and
+   * the ICAROS host bring their own feel — so this section is about the phone, and
+   * says so rather than offering a mode picker that the start screen already is.
+   */
+  function controlSection(): HTMLElement {
+    const section = document.createElement("div");
+    const title = document.createElement("h2");
+    title.className = "bm-menu__section-title";
+    title.textContent = "Steuerung am Handy";
+
+    const rows = document.createElement("div");
+    rows.className = "bm-menu__rows";
+
+    const sensitivity = document.createElement("label");
+    sensitivity.className = "bm-menu__row";
+    const sensitivityText = document.createElement("span");
+    sensitivityText.textContent = "Empfindlichkeit";
+    const sensitivityValue = document.createElement("span");
+    sensitivityValue.className = "bm-menu__value";
+    const sensitivityInput = document.createElement("input");
+    sensitivityInput.type = "range";
+    // Stored is the tilt angle that counts as full deflection, so a *smaller* angle is
+    // the sharper setting — the reverse of how a sensitivity slider should read. The
+    // control is therefore mirrored: dragging right always means "reacts sooner".
+    sensitivityInput.min = String(GYRO_RANGE_MIN);
+    sensitivityInput.max = String(GYRO_RANGE_MAX);
+    sensitivityInput.step = "2";
+    sensitivityInput.value = String(mirrorRange(settings.gyroRangeDegrees));
+    sensitivityValue.textContent = `${settings.gyroRangeDegrees}°`;
+    sensitivityInput.addEventListener("input", () => {
+      const degrees = mirrorRange(Number.parseFloat(sensitivityInput.value));
+      sensitivityValue.textContent = `${degrees}°`;
+      setSettings({ ...settings, gyroRangeDegrees: degrees });
+    });
+    sensitivity.append(sensitivityText, sensitivityInput, sensitivityValue);
+
+    const invert = document.createElement("label");
+    invert.className = "bm-menu__row";
+    const invertText = document.createElement("span");
+    invertText.textContent = "Steigen und Sinken vertauschen";
+    const invertInput = document.createElement("input");
+    invertInput.type = "checkbox";
+    invertInput.checked = settings.gyroInvertPitch;
+    invertInput.addEventListener("change", () => {
+      setSettings({ ...settings, gyroInvertPitch: invertInput.checked });
+    });
+    invert.append(invertText, invertInput);
+
+    const calibrate = document.createElement("div");
+    calibrate.className = "bm-menu__row";
+    const calibrateText = document.createElement("span");
+    calibrateText.textContent = "Neutrale Haltung";
+    const calibrateButton = document.createElement("button");
+    calibrateButton.type = "button";
+    calibrateButton.className = "bm-menu__small";
+    calibrateButton.textContent = "Jetzt festlegen";
+    calibrateButton.addEventListener("click", () => {
+      options.onCalibrate();
+      showStatus("Die aktuelle Haltung gilt jetzt als Geradeausflug.");
+    });
+    calibrate.append(calibrateText, calibrateButton);
+
+    rows.append(sensitivity, invert, calibrate);
+    section.append(title, rows);
+
+    if (!supportsDeviceOrientation()) {
+      const hint = document.createElement("p");
+      hint.className = "bm-menu__status";
+      hint.textContent = "Dieses Gerät meldet keine Neigung — die Werte gelten auf dem Handy.";
+      section.append(hint);
+    }
+
+    return section;
+  }
+
+  // ── Screen: dramaturgy ─────────────────────────────────────────
+  function renderConfig(): void {
+    setScreen("config");
+    screen.replaceChildren();
+    screen.classList.add("bm-menu__screen--wide");
+
+    const head = document.createElement("div");
+    head.className = "bm-menu__head";
+    const title = document.createElement("h1");
+    title.className = "bm-menu__title bm-menu__title--small";
+    title.textContent = "Ablauf";
+    const lede = document.createElement("p");
+    lede.className = "bm-menu__lede";
+    lede.textContent =
+      "Die Sinn-Timeline wird in Theatre.js bearbeitet. Diese Ansicht speichert nur Ablauf-Vorlagen.";
+    head.append(title, lede);
 
     const form = document.createElement("form");
-    form.className = "exp-menu__form";
+    form.className = "bm-menu__form";
 
     const durationLabel = document.createElement("label");
-    durationLabel.className = "exp-menu__duration";
-    durationLabel.textContent = "Dauer in Sekunden";
+    durationLabel.className = "bm-menu__duration";
+    durationLabel.append(document.createTextNode("Dauer in Sekunden"));
     const duration = document.createElement("input");
     duration.type = "number";
     duration.min = "60";
@@ -146,65 +436,59 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     durationLabel.append(duration);
 
     const table = document.createElement("div");
-    table.className = "exp-menu__schedule";
-    table.append(scheduleHeader());
-    table.append(luftRow());
+    table.className = "bm-menu__schedule";
+    table.append(scheduleHeader(), luftRow());
     for (const cue of orderedCues(config)) {
       table.append(cueRow(cue));
     }
 
     const status = document.createElement("p");
-    status.className = "exp-menu__status";
-    status.dataset["expStatus"] = "";
+    status.className = "bm-menu__status";
+    status.dataset["bmStatus"] = "";
 
     const actions = document.createElement("div");
-    actions.className = "exp-menu__actions exp-menu__actions--wide";
+    actions.className = "bm-menu__actions";
 
-    const saveButton = button("Speichern", "primary");
+    const saveButton = smallButton("Speichern");
     saveButton.type = "submit";
 
-    const saveStartButton = button("Speichern und starten", "secondary");
-    saveStartButton.type = "button";
+    const saveStartButton = smallButton("Speichern und starten");
     saveStartButton.addEventListener("click", () => {
       const next = readConfig(form, duration);
       setConfig(next);
       saveExperienceConfig(next);
-      startExperience();
+      void startExperience(settings.mode, saveStartButton);
     });
 
-    const theatreButton = button("Theatre Timeline öffnen", "secondary");
-    theatreButton.type = "button";
+    const theatreButton = smallButton("Theatre Timeline öffnen");
     theatreButton.addEventListener("click", () => {
       const url = new URL(window.location.href);
       url.searchParams.set("studio", "1");
       window.location.href = url.toString();
     });
 
-    const testButton = button("Test ansehen", "secondary");
-    testButton.type = "button";
+    const testButton = smallButton("Test ansehen");
     testButton.addEventListener("click", () => {
       const next = readConfig(form, duration);
       setConfig(next);
       saveExperienceConfig(next);
       options.onTest(cloneConfig(next));
-      root.classList.add("exp-menu--hidden");
-      returnButton.classList.remove("exp-menu__return--hidden");
+      setScreen("none");
+      returnButton.hidden = false;
     });
 
-    const resetButton = button("Standard", "ghost");
-    resetButton.type = "button";
+    const resetButton = smallButton("Standard");
     resetButton.addEventListener("click", () => {
       const next = resetExperienceConfig();
       setConfig(next);
       renderConfig();
     });
 
-    const exportButton = button("Export JSON", "ghost");
-    exportButton.type = "button";
+    const exportButton = smallButton("Export JSON");
     exportButton.addEventListener("click", () => exportConfig(config));
 
     const importLabel = document.createElement("label");
-    importLabel.className = "exp-menu__file";
+    importLabel.className = "bm-menu__small bm-menu__file";
     importLabel.textContent = "Import JSON";
     const importInput = document.createElement("input");
     importInput.type = "file";
@@ -247,8 +531,11 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
       showStatus("Gespeichert");
     });
 
-    panel.append(header, form);
-  };
+    const back = menuItem("Zurück", "quiet");
+    back.addEventListener("click", renderHome);
+
+    screen.append(head, form, back);
+  }
 
   renderHome();
 
@@ -261,23 +548,68 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
   };
 }
 
+// ── Helpers ──────────────────────────────────────────────────────
+
+/** Bounds of the gyro range slider, in degrees of tilt. */
+const GYRO_RANGE_MIN = 10;
+const GYRO_RANGE_MAX = 50;
+
+/** Mirror a value inside the slider's range — its own inverse, both ways. */
+function mirrorRange(value: number): number {
+  return GYRO_RANGE_MIN + GYRO_RANGE_MAX - value;
+}
+
+function menuItem(label: string, variant: "primary" | "normal" | "quiet"): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "bm-menu__item";
+  if (variant !== "normal") {
+    button.classList.add(`bm-menu__item--${variant}`);
+  }
+  button.textContent = label;
+  return button;
+}
+
+function choiceButton(label: string, note: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "bm-menu__choice";
+  button.setAttribute("aria-pressed", "false");
+  const labelEl = document.createElement("span");
+  labelEl.className = "bm-menu__choice-label";
+  labelEl.textContent = label;
+  const noteEl = document.createElement("span");
+  noteEl.className = "bm-menu__choice-note";
+  noteEl.textContent = note;
+  button.append(labelEl, noteEl);
+  return button;
+}
+
+function smallButton(label: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "bm-menu__small";
+  button.textContent = label;
+  return button;
+}
+
 function scheduleHeader(): HTMLElement {
   const row = document.createElement("div");
-  row.className = "exp-menu__row exp-menu__row--head";
-  row.append(span("Sinn"), span("Aktiv"), span("Start"), span("Intensitaet"));
+  row.className = "bm-menu__srow bm-menu__srow--head";
+  row.append(span("Sinn"), span("Aktiv"), span("Start"), span("Intensität"));
   return row;
 }
 
 function luftRow(): HTMLElement {
   const row = document.createElement("div");
-  row.className = "exp-menu__row exp-menu__row--locked";
+  row.className = "bm-menu__srow bm-menu__srow--locked";
   row.append(span("Luft / weiss"), span("immer"), span("0 s"), span("Basis"));
   return row;
 }
 
 function cueRow(cue: SenseCueConfig): HTMLElement {
   const row = document.createElement("div");
-  row.className = "exp-menu__row";
+  row.className = "bm-menu__srow";
   row.dataset["senseId"] = cue.id;
 
   const name = span(formatSenseCueLabel(cue));
@@ -304,7 +636,7 @@ function cueRow(cue: SenseCueConfig): HTMLElement {
   intensity.max = "1";
   intensity.step = "0.01";
   intensity.value = trimNumber(cue.intensity);
-  intensity.setAttribute("aria-label", `${formatSenseCueLabel(cue)} Intensitaet`);
+  intensity.setAttribute("aria-label", `${formatSenseCueLabel(cue)} Intensität`);
 
   row.append(name, wrap(enabled), wrap(start), wrap(intensity));
   return row;
@@ -343,14 +675,6 @@ function exportConfig(config: ExperienceConfig): void {
   URL.revokeObjectURL(url);
 }
 
-function button(label: string, variant: "primary" | "secondary" | "ghost"): HTMLButtonElement {
-  const el = document.createElement("button");
-  el.type = "button";
-  el.className = `exp-menu__button exp-menu__button--${variant}`;
-  el.textContent = label;
-  return el;
-}
-
 function span(text: string): HTMLSpanElement {
   const el = document.createElement("span");
   el.textContent = text;
@@ -382,219 +706,4 @@ function clampNumber(value: number, min: number, max: number, fallback: number):
     return fallback;
   }
   return Math.min(max, Math.max(min, value));
-}
-
-function injectStyles(): void {
-  if (document.getElementById("experience-menu-styles")) {
-    return;
-  }
-  const style = document.createElement("style");
-  style.id = "experience-menu-styles";
-  style.textContent = `
-    .exp-menu {
-      position: fixed;
-      inset: 0;
-      z-index: 60;
-      display: grid;
-      place-items: center;
-      padding: 24px;
-      background: rgba(5, 8, 12, 0.82);
-      color: #f4f6f8;
-    }
-
-    .exp-menu--hidden {
-      display: none;
-    }
-
-    .exp-menu__return {
-      position: fixed;
-      top: 16px;
-      left: 16px;
-      z-index: 59;
-      min-height: 36px;
-      border-radius: 6px;
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      padding: 0 12px;
-      background: rgba(18, 22, 28, 0.92);
-      color: #f4f6f8;
-      font: inherit;
-      cursor: pointer;
-    }
-
-    .exp-menu__return--hidden {
-      display: none;
-    }
-
-    .exp-menu__panel {
-      width: min(920px, 100%);
-      max-height: min(760px, calc(100vh - 48px));
-      overflow: auto;
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      border-radius: 8px;
-      background: rgba(18, 22, 28, 0.96);
-      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
-      padding: 28px;
-    }
-
-    .exp-menu h1 {
-      font-size: 28px;
-      line-height: 1.1;
-      font-weight: 650;
-      margin: 0;
-    }
-
-    .exp-menu__lede {
-      margin-top: 10px;
-      color: #cbd5df;
-      line-height: 1.45;
-      max-width: 680px;
-    }
-
-    .exp-menu__actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 24px;
-    }
-
-    .exp-menu__actions--wide {
-      margin-top: 18px;
-    }
-
-    .exp-menu__button,
-    .exp-menu__file {
-      min-height: 40px;
-      border-radius: 6px;
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      padding: 0 14px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      background: rgba(255, 255, 255, 0.08);
-      color: #f4f6f8;
-      font: inherit;
-      cursor: pointer;
-    }
-
-    .exp-menu__button--primary {
-      border-color: #d9f99d;
-      background: #d9f99d;
-      color: #111827;
-      font-weight: 650;
-    }
-
-    .exp-menu__button--secondary {
-      border-color: rgba(125, 211, 252, 0.7);
-      background: rgba(125, 211, 252, 0.16);
-    }
-
-    .exp-menu__button--ghost,
-    .exp-menu__file {
-      background: rgba(255, 255, 255, 0.04);
-    }
-
-    .exp-menu__file input {
-      display: none;
-    }
-
-    .exp-menu__config-head {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 16px;
-    }
-
-    .exp-menu__form {
-      margin-top: 20px;
-    }
-
-    .exp-menu__duration {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      color: #d8dee8;
-    }
-
-    .exp-menu input[type="number"] {
-      width: 96px;
-      min-height: 34px;
-      border-radius: 6px;
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      background: rgba(0, 0, 0, 0.24);
-      color: #f4f6f8;
-      padding: 0 10px;
-      font: inherit;
-    }
-
-    .exp-menu input[type="checkbox"] {
-      width: 20px;
-      height: 20px;
-      accent-color: #d9f99d;
-    }
-
-    .exp-menu__schedule {
-      display: grid;
-      gap: 1px;
-      margin-top: 18px;
-      overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 8px;
-    }
-
-    .exp-menu__row {
-      display: grid;
-      grid-template-columns: minmax(180px, 1fr) 86px 116px 116px;
-      gap: 12px;
-      align-items: center;
-      min-height: 48px;
-      padding: 8px 12px;
-      background: rgba(255, 255, 255, 0.055);
-    }
-
-    .exp-menu__row--head {
-      min-height: 36px;
-      background: rgba(255, 255, 255, 0.12);
-      color: #e5e7eb;
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0;
-    }
-
-    .exp-menu__row--locked {
-      color: #cbd5df;
-      background: rgba(255, 255, 255, 0.035);
-    }
-
-    .exp-menu__status {
-      min-height: 22px;
-      margin-top: 12px;
-      color: #d9f99d;
-    }
-
-    @media (max-width: 680px) {
-      .exp-menu {
-        padding: 12px;
-      }
-
-      .exp-menu__panel {
-        padding: 18px;
-        max-height: calc(100vh - 24px);
-      }
-
-      .exp-menu__config-head {
-        flex-direction: column;
-      }
-
-      .exp-menu__row {
-        grid-template-columns: minmax(120px, 1fr) 62px 88px 88px;
-        gap: 8px;
-        padding: 8px;
-      }
-
-      .exp-menu input[type="number"] {
-        width: 78px;
-      }
-    }
-  `;
-  document.head.append(style);
 }

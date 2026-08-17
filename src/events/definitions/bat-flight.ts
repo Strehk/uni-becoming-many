@@ -5,13 +5,14 @@ import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js";
 import { mix, texture, uv, vec3 } from "three/tsl";
 import * as THREE from "three/webgpu";
 import type { Node } from "three/webgpu";
+import { asset } from "../../asset-url.ts";
 import { distanceFog, viewReveal } from "../../render/tsl-kit.ts";
 import type { KitUniforms } from "../../render/uniforms.ts";
 import { BirdFlight, type LoadedBirdModel } from "../bird-flight.ts";
 import type { EventContext, EventDefinition, EventInstance } from "../types.ts";
 
-const BAT_MODEL_URL = "/creatures/bat_BS_rig.glb";
-const BAT_PATH_URL = "/events/bat_path.glb";
+const BAT_MODEL_URL = asset("creatures/bat_BS_rig.glb");
+const BAT_PATH_URL = asset("events/bat_path.glb");
 const BAT_WINGSPAN = 0.7;
 const BAT_PATH_DURATION = 10.416667;
 const BAT_GROUND_CLEARANCE = 0.45;
