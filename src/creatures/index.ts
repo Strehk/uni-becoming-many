@@ -920,12 +920,7 @@ export async function createCreatures(
   const isWaterAt = senseOpts.waterAt;
   const pointIsDry = (x: number, z: number): boolean => !isWaterAt || !isWaterAt(x, z);
   /** True if the straight segment from→to stays out of water (sampled every ~4 m). */
-  const routeAvoidsWater = (
-    fromX: number,
-    fromZ: number,
-    toX: number,
-    toZ: number,
-  ): boolean => {
+  const routeAvoidsWater = (fromX: number, fromZ: number, toX: number, toZ: number): boolean => {
     if (!isWaterAt) return true;
     const length = Math.hypot(toX - fromX, toZ - fromZ);
     const steps = Math.max(1, Math.ceil(length / 4));

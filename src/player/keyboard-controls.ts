@@ -1,5 +1,5 @@
 /**
- * Keyboard debug controls — a self-contained override for the ICAROS orientation stream.
+ * Keyboard debug controls — a self-contained override for the M5 controller stream.
  *
  * Reads the keyboard and reports two spring-centered axes plus the flight modifiers:
  *   - `turn` — A/D: which way to curve the heading. Feed into `Player.update`'s `roll`; the
@@ -9,9 +9,9 @@
  *     it as an absolute offset, so on release the spring back to 0 re-levels (altitude kept).
  *
  * Both axes spring back to 0 when the keys release. Nothing here touches the player, renderer,
- * or ICAROS: it only listens for keys and reports intent, so it drops in anywhere and lifts out
- * again with a single `dispose()`. Tick `update(dtSeconds)` once per frame to advance the
- * spring before reading `locomotion`.
+ * or the controller: it only listens for keys and reports intent, so it drops in anywhere and
+ * lifts out again with a single `dispose()`. Tick `update(dtSeconds)` once per frame to advance
+ * the spring before reading `locomotion`.
  *
  * Bindings:
  *   - W / ArrowUp, S / ArrowDown → pitch up / down
@@ -40,7 +40,7 @@ export type KeyboardControlsOptions = Readonly<{
  */
 type DebugInput = { pitch: number; turn: number; throttle: number; paused: boolean };
 
-/** Below this magnitude, an un-pressed spring snaps to exactly 0 so ICAROS can retake control. */
+/** Below this, an un-pressed spring snaps to exactly 0 so the controller can retake control. */
 const SETTLE_EPSILON = 1e-3;
 
 // Each steering key contributes a signed unit to one axis. Opposing keys held together cancel,
@@ -66,7 +66,7 @@ export interface KeyboardControls {
   readonly locomotion: DebugInput;
   /**
    * True while a key is held or a spring has not yet settled back to center — lets callers
-   * detect a takeover and hand steering back to ICAROS once it releases and settles.
+   * detect a takeover and hand steering back to the controller once it releases and settles.
    */
   readonly steering: boolean;
   /** Advance the spring toward the current key targets. Call once per frame before reading. */

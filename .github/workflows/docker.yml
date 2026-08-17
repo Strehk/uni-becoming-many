@@ -3,8 +3,7 @@ name: Build & publish image
 on:
   push:
     branches: [main]
-  # Lets you rebuild without an empty commit — useful after changing the
-  # VITE_ICAROS_HOST variable, which is baked in at build time (see .env.example).
+  # Lets you rebuild without an empty commit.
   workflow_dispatch:
 
 env:
@@ -46,8 +45,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            VITE_ICAROS_HOST=${{ vars.VITE_ICAROS_HOST }}
           # Keeps bun install + the vite build out of the critical path on reruns.
           cache-from: type=gha
           cache-to: type=gha,mode=max

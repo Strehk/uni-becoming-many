@@ -81,7 +81,7 @@ export const signals = {
   activeSense: signal<SenseId | "none">("none"),
   /** Atmosphere-transition progress 0..1 (1 = settled). WRITER: SenseManager. */
   senseProgress: signal(1),
-  /** ICAROS control signal strength 0..1. WRITER: icaros onOrientation. */
+  /** M5 controller signal strength 0..1 (0 = nothing steering). WRITER: main.ts frame loop. */
   controlQuality: signal(0),
 
   // ── authored (Theatre is the sole writer, via src/theatre/bridge.ts) ──

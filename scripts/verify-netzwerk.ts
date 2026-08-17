@@ -114,7 +114,7 @@ console.log(
 );
 
 console.log("\n── errors ──");
-const noise = /icaros|audio|AudioContext|Tone\.js|404|WFC/;
+const noise = /m5|audio|AudioContext|Tone\.js|404|WFC/;
 for (const line of logs) {
   if ((line.startsWith("[error]") || line.startsWith("[pageerror]")) && !noise.test(line)) {
     console.log(line);

@@ -4,3 +4,6 @@ dist
 .env
 .DS_Store
 .vite
+
+# Bridge runtime state: M5 calibration, axis map, pairing token.
+.m5

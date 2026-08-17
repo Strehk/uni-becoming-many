@@ -66,7 +66,7 @@ for (let i = 0; i < 5; i++) {
 console.log("shot 02 sweep");
 
 console.log("\n── errors ──");
-const noise = /icaros|audio|AudioContext|Tone\.js|404|WFC|websocket|ERR_CONNECTION/;
+const noise = /m5|audio|AudioContext|Tone\.js|404|WFC|websocket|ERR_CONNECTION/;
 for (const line of logs) {
   if ((line.startsWith("[error]") || line.startsWith("[pageerror]")) && !noise.test(line)) {
     console.log(line);

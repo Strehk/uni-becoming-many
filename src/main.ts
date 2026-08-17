@@ -6,6 +6,7 @@ import { type Creatures, createCreatures } from "./creatures/index.ts";
 import { createEventControls } from "./dev-console/event-controls.ts";
 import { createFloraFaunaControls } from "./dev-console/flora-fauna-controls.ts";
 import { createDevConsole } from "./dev-console/index.ts";
+import { createM5Controls } from "./dev-console/m5-controls.ts";
 import { createSaveTuningControls } from "./dev-console/save-tuning.ts";
 import { createSenseControls } from "./dev-console/sense-controls.ts";
 import { createWorldControls } from "./dev-console/world-controls.ts";
@@ -26,8 +27,8 @@ import {
   serializeFloraFaunaState,
 } from "./flora-fauna/state.ts";
 import { type Grass, createGrass } from "./grass/index.ts";
-import { type ControlOrientation, connectHost } from "./icaros/index.ts";
 import { createLife } from "./life/index.ts";
+import { createController } from "./m5/index.ts";
 import { createMinimap } from "./minimap/index.ts";
 import { createPlayer } from "./player/index.ts";
 import { createKeyboardControls } from "./player/keyboard-controls.ts";
@@ -485,6 +486,7 @@ if (!useTheatreStudio) {
       startGate?.dispose();
       startGate = createStartGate({
         getSession: () => renderer.instance.xr.getSession(),
+        consumeControllerButton: () => controller.consumeButtonDown(),
         onTrigger() {
           clock.resume();
           startGate = undefined;
@@ -541,44 +543,18 @@ if (import.meta.env.DEV) {
 const keyboard = createKeyboardControls();
 window.addEventListener("pagehide", () => keyboard.dispose());
 
-// --- ICAROS host connection -------------------------------------------------
-const hostOrigin =
-  new URLSearchParams(window.location.search).get("host") ??
-  import.meta.env.VITE_ICAROS_HOST ??
-  "https://localhost:5183";
+// --- M5 controller ----------------------------------------------------------
+// Connects to this repo's own bridge over this page's origin (see src/m5/index.ts). Values
+// arrive fully normalized, calibrated and safety-clamped; the neutral point is whatever the
+// operator calibrated on the rig, so there is no bias constant to tune here any more.
+const controller = createController();
+window.addEventListener("pagehide", () => controller.dispose());
 
-// Bias subtracted from the controller's pitch before it drives altitude. Positive pitch climbs,
-// so a positive bias shifts the neutral point downward: the rig gently sinks at rest, making
-// pitch-down easy and pitch-up harder (the controller ergonomics make climbing the easy default,
-// so we counterweight it here). ~0.4 of the -1..1 range.
-const PITCH_BIAS = 0.4;
-
-// Latest validated controller orientation; steers the player each frame.
-const orientation: { pitch: number; roll: number; quality: number } = {
-  pitch: 0,
-  roll: 0,
-  quality: 0,
-};
-
-const applyOrientation = (next: ControlOrientation): void => {
-  orientation.pitch = next.pitch;
-  orientation.roll = next.roll;
-  orientation.quality = next.quality;
-  // Publish control quality onto the substrate so anything can react (e.g. a "signal lost" cue).
-  signals.controlQuality.value = next.quality;
-};
-
-const disconnectHost = connectHost({
-  hostOrigin,
-  clientId: `becoming-many-${crypto.randomUUID()}`,
-  experienceId: "becoming-many",
-  title: "becoming-many",
-  clientUrl: window.location.href,
-  onOrientation: applyOrientation,
-  onRegistered: () => console.info(`[icaros] registered with host ${hostOrigin}`),
-  onRejected: (reason) => console.warn(`[icaros] host rejected client: ${reason}`),
-});
-window.addEventListener("pagehide", disconnectHost);
+// Operator surface for the rig, inside the C console: live readouts plus the two tuning actions
+// (calibrate the rest pose, correct the mount) that used to live in the ICAROS host's console.
+const m5Panel = createM5Controls(controller);
+devConsole.addSection(m5Panel.element);
+window.addEventListener("pagehide", () => m5Panel.dispose());
 
 // Biome minimap: a top-down chunk/biome debug overlay hosted inside the C console.
 // Heading = camera forward on XZ, read from the camera's world matrix (forward = −Z
@@ -616,11 +592,13 @@ renderer.start((dtSeconds) => {
   player.setMaxAltitude(theatre.flight.value.maxHeight); // authored airspace ceiling → player rig
   player.look(locomotion.pitch);
   player.update(dtSeconds, {
-    pitch: keyboard.steering ? 0 : orientation.pitch - PITCH_BIAS,
-    roll: keyboard.steering ? locomotion.turn : orientation.roll,
+    pitch: keyboard.steering ? 0 : controller.input.pitch,
+    roll: keyboard.steering ? locomotion.turn : controller.input.roll,
     throttle: locomotion.throttle,
     paused: locomotion.paused,
   });
+  // Publish control quality onto the substrate so anything can react (e.g. a "signal lost" cue).
+  signals.controlQuality.value = controller.input.quality;
   // Publish the player's world position (mutated in place — hot-path peek elsewhere).
   pose.x = player.rig.position.x;
   pose.y = player.rig.position.y;
@@ -679,6 +657,7 @@ renderer.start((dtSeconds) => {
   life.update(dtSeconds); // 7. pump time / unrest / intensity / sense into the flora uniforms
   grass.update(dtSeconds); // GPU grass: snap, repaint field texture, dispatch compute (void-gated)
   atmosphere.update(dtSeconds); // 8. pump player pose + virtual clock into the dust uniforms
+  m5Panel.update(); // dev console readout (self-throttled to ~8/s)
 });
 
 // Release worker + GPU resources when the page goes away.

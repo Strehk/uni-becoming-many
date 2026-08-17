@@ -10,30 +10,39 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
-# Vite inlines `import.meta.env.*` at build time, so the ICAROS host has to be
-# baked in here — the nginx stage serves finished files and can't inject it.
-# Same mechanism scripts/start.ts uses in dev: a VITE_-prefixed process env.
-# See .env.example; leaving it unset keeps main.ts' https://localhost:5183 default,
-# and `?host=…` overrides it per-visit in the browser either way.
-ARG VITE_ICAROS_HOST
-
 # public/ ships ~13 MB of .glb/.mp3 that vite copies into dist/ verbatim.
 COPY . .
-
-# The `unset` matters: an empty build arg makes vite inline `""`, and main.ts'
-# `?? "https://localhost:5183"` does not treat "" as absent — the host would end up
-# blank. Unsetting restores `void 0` so the fallback fires. CI passes the arg
-# unconditionally from a repo variable that is usually undefined, so this is the
-# normal path, not an edge case.
-RUN if [ -z "$VITE_ICAROS_HOST" ]; then unset VITE_ICAROS_HOST; fi; \
-    bun run build
+RUN bun run build
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
-FROM nginx:1.27-alpine AS runtime
+# Bun rather than nginx: this image now also runs the M5 bridge (bridge/serve.ts),
+# which serves the built files *and* owns the two WebSocket endpoints. Bun runs the
+# TypeScript sources directly, so there is no second build step for the server half.
+FROM oven/bun:1-alpine AS runtime
+WORKDIR /app
 
-COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/dist /usr/share/nginx/html
+# `ws` is the only runtime dependency the bridge needs; everything else in the
+# graph is build-time only.
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile --production
 
-EXPOSE 80
+COPY --from=build /app/dist ./dist
+COPY bridge ./bridge
+COPY src/m5 ./src/m5
+
+# Calibration, axis map and the pairing token live here. Mount a volume on it, or a
+# redeploy loses the rig's calibration and the controller's configured token.
+ENV M5_STATE_DIR=/data
+ENV PORT=8080
+ENV M5_DEVICE_PORT=5184
+VOLUME /data
+
+# 8080: the experience + the browser control stream (TLS terminated by the proxy in
+# front). 5184: the plain-ws endpoint the M5 dials — its firmware cannot do wss://,
+# so this port must be reachable from the controller's LAN.
+EXPOSE 8080 5184
+
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
-  CMD wget -qO- http://127.0.0.1/healthz || exit 1
+  CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
+
+CMD ["bun", "bridge/serve.ts"]

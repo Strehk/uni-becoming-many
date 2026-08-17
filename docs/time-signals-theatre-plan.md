@@ -135,7 +135,7 @@ export const signals = {
   playerPose:    signal({ pos: Vec3, quat }),  // WRITER: player/update
   activeSense:   signal<SenseId>('normal'),    // WRITER: sense state machine
   senseProgress: signal(1),                    // WRITER: sense state machine (0..1 transition)
-  controlQuality:signal(0),                    // WRITER: icaros host
+  controlQuality:signal(0),                    // WRITER: main.ts frame loop (M5 bridge)
 
   // ── authored (Theatre writes these) ──
   unrest:        signal(0),                    // WRITER: Theatre 'Timeline' sheet
@@ -306,7 +306,7 @@ renderer.start((dt) => {
 | `renderer/index.ts` | owns `renderer.start((dt)=>…)` loop | unchanged — it already hands us `dt`; the whole spine lives in the `onFrame` callback |
 | `senses/index.ts` | **pointer stub only** | grows into the real sense state machine (port reference `senses.ts` `SenseManager`): reads `signals.activeSense`, writes `senseProgress`, lerps TSL uniforms; its `SENSE_PROFILES` become the Theatre 'Senses' sheet (Level 1 live-tuning) |
 | `player/index.ts` | flies forward, carries camera | writes `signals.playerPose` each frame; optionally a Theatre 'Camera' sheet drives scripted macro moves (Level 2) via `bindTransform` |
-| `icaros/index.ts` | `onOrientation` callback | writes `signals.controlQuality` + feeds player steering; a `when(controlQuality, q=>q<threshold, …)` can drive a "signal lost" cue |
+| `m5/index.ts` | `controller.input` | writes `signals.controlQuality` + feeds player steering; a `when(controlQuality, q=>q<threshold, …)` can drive a "signal lost" cue |
 | `terrain/index.ts` | `world.update(x,z)` from rig XZ | unchanged; reads `signals.playerPose.peek()` instead of the raw rig if convenient |
 | `dev-console/index.ts` | FPS/GPU overlay | add a transport strip (play/pause/seek/timeScale on the clock) + a live signal inspector — invaluable while authoring |
 | audio (new) | — | port reference `audio.ts` `SoundBus`+`SoundDirector`; subscribes to `bus.on('cue:*')`; time cues via `clock.schedule`, reactive cues via `bus.when` |

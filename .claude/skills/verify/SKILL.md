@@ -20,7 +20,8 @@ Playwright browsers are cached at `~/Library/Caches/ms-playwright/chromium-*/chr
 - Click **"Experience starten"** on the start menu, wait ~2 s, then press **Enter** (start gate: "Enter drücken … um zu beginnen"), then wait ~6 s for renderer init + chunk streaming + flora GLBs.
 - **Senses** (world is a white void until one is active): there are NO digit-key shortcuts — senses are Theatre-timeline-driven. Drive the dev-console Sinne panel instead; its DOM exists even with the drawer closed, so use `page.evaluate` with plain `.click()`: click the "Manuell" button (flips `senseAuthority` so the timeline stops overwriting), then the sense card's "Solo" button (`details.sc-card` containing e.g. "Infrarot"). Param sliders (`.sc-row` with `.sc-label` text like "Sichtweite") apply on an `input` event — useful to widen a sense's perception bubble beyond its authored range.
 - **Flight** is auto-forward (glider): W/S pitch up/down, A/D turn. To inspect ground cover, dive with S ~1 s and shoot fast; the glider recovers altitude.
-- Capture `page.on("console")` — regressions show as `[life]`/shader errors. Pre-existing noise to ignore: ICAROS websocket refusals, `[audio] failed to load` placeholders, `[WFC] contradiction` warnings, Tone.js suspended-AudioContext spam.
+- Capture `page.on("console")` — regressions show as `[life]`/shader errors. Pre-existing noise to ignore: `[audio] failed to load` placeholders, `[WFC] contradiction` warnings, Tone.js suspended-AudioContext spam. `[m5] bridge connected` is the healthy line, not noise.
+- **Controller**: `bun run dev` also starts the M5 bridge, so nothing needs configuring. To verify flight without a keyboard, run `bun scripts/m5-sim.ts` alongside and read the dev-console panel out of the DOM — `[data-m5="status"]` goes `wartet auf Controller` → `live`, and `[data-m5="pitch"]`/`[data-m5="roll"]` move. The nodes exist with the drawer closed.
 
 ## Gotchas
 

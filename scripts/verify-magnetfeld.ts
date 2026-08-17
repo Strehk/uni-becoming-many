@@ -76,7 +76,7 @@ await page.screenshot({ path: `${OUT}/02-lines-higher.png` });
 console.log("shot 02");
 
 console.log("\n── errors ──");
-const noise = /icaros|audio|AudioContext|Tone\.js|404|WFC|websocket|ERR_CONNECTION/;
+const noise = /m5|audio|AudioContext|Tone\.js|404|WFC|websocket|ERR_CONNECTION/;
 for (const line of logs) {
   if ((line.startsWith("[error]") || line.startsWith("[pageerror]")) && !noise.test(line)) {
     console.log(line);

@@ -17,7 +17,7 @@
  *   - **Pitch look** (`look`): an *absolute*, non-accumulating pitch of an inner gimbal.
  *     Deflection tilts the view — and therefore travel — up or down; zero re-centers. Nothing
  *     accumulates, so releasing springs back to level. The debug keyboard drives this for
- *     climb/descend; the ICAROS stream leaves it identity and uses the Altitude rate above.
+ *     climb/descend; the controller stream leaves it identity and uses the Altitude rate above.
  *
  * The player owns a rig `Group` (heading + position) carrying a gimbal `Group` (pitch look)
  * carrying the camera; **move the rig, never the camera directly**. This is the WebXR pattern:
@@ -34,7 +34,7 @@ import * as THREE from "three/webgpu";
 export type Steering = Readonly<{ pitch: number; roll: number }>;
 
 /**
- * Steering plus optional flight modifiers. The extra fields are absent on the ICAROS
+ * Steering plus optional flight modifiers. The extra fields are absent on the controller
  * orientation stream (which is pure `Steering`), so they default to "fly normally":
  * full throttle, not paused. The debug keyboard controls populate them.
  */

@@ -6,7 +6,7 @@
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
-    "types": ["vite/client"],
+    "types": ["vite/client", "bun"],
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -22,5 +22,7 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "vite.config.ts"]
+  // `scripts/` stays out: the one-off FBX/PNG conversion helpers there predate the strict flags
+  // above and do not compile under them. New scripts are opted in one by one.
+  "include": ["src", "bridge", "vite.config.ts", "scripts/m5-sim.ts"]
 }

@@ -11,18 +11,19 @@ Vite 6 + vanilla TypeScript (no framework, no router — single page). Rendering
 ```
 bun install
 bun run dev        # https://localhost:5173/  (mkcert HTTPS, LAN-exposed via --host)
-bun start <ip>     # dev server pointed at an ICAROS host, e.g. `bun start 192.168.1.50`
-                   #   (scripts/start.ts: normalizes to https://<ip>:5183, sets
-                   #    VITE_ICAROS_HOST, runs `bun run dev`)
+                   #   also starts the M5 bridge in-process: browser stream on the same
+                   #   origin at /ws/m5, device listener on plain :5184 (bridge/vite-plugin.ts)
 bun run build      # tsc (typecheck) then vite build -> dist/
-bun run preview    # serve the production build
+bun run preview    # serve the production build (static only, no bridge)
+bun run serve      # production entry: dist/ + both bridge sockets (bridge/serve.ts)
+bun test           # bun's own runner; covers src/m5/pipeline/
 bun run typecheck  # tsc --noEmit
 bun run check      # biome check --write .  (format + lint + autofix)
 bun run lint       # biome lint .   (lint only, no writes)
 bun run format     # biome format --write .
 ```
 
-There is no test runner yet. `bun run build` is the gate — it typechecks before bundling, so a build failure usually means a type error, not a bundling error.
+`bun run build` is the gate — it typechecks before bundling, so a build failure usually means a type error, not a bundling error. `bun test` covers `src/m5/pipeline/` only: those are pure functions whose constants are tuned to the physical flight rig, ported from the ICAROS host together with its tests. The rest of the codebase has no tests.
 
 ## Architecture
 
@@ -32,9 +33,16 @@ There is no test runner yet. `bun run build` is the gate — it typechecks befor
 - `src/renderer/` — `createRenderer()` returns a `Promise<Renderer>` owning a WebGPU `<canvas>`. Exposes `scene` and `camera` (add world objects / rigs to `scene`), a TSL grid floor as a spatial reference, and `start(onFrame?)` — the loop calls `onFrame(dtSeconds)` before each compute+render. Status/debug HUD is the three.js WebGPU `Inspector` (`three/addons/inspector/Inspector.js`) — Performance (GPU frame timing via the renderer's `trackTimestamp`), Console, Parameters, Viewer tabs. It's assigned to `renderer.inspector` **before** `renderer.init()` and self-mounts next to the canvas with its own toggle button. See **WebGPU rendering** below.
 - `src/senses/` — `createSenses(target)` is the input/perception layer; currently tracks normalized pointer position over a target element.
 - `src/player/` — `createPlayer(camera, options)` is locomotion: it reparents the camera into a rig `Group` and flies forward at a constant `speed`, steered by a normalized `{ pitch, roll }` input via `update(dtSeconds, input)`. Move the **rig**, not the camera — in VR the headset writes the camera's pose within the rig, so flying the rig composes with head tracking. Add `player.rig` to `renderer.scene`.
-- `src/icaros/` — `connectHost(options)` connects this client to an ICAROS Host over the "neural-flight.v1" WebSocket contract: registers on `/ws/runtime` (`client.hello` → `client.registered`/`rejected`), heartbeats every 4s, and receives validated `control.orientation` frames from `/ws/control/main`. Returns a teardown that stops the heartbeat and closes both sockets. Host frames are treated as `unknown` and narrowed through typed guards before reaching the caller. Deliberately out of scope (per the contract): direct M5 access, `/ws/device`, `/api/m5-pairing`, and reconnection.
+- `src/m5/` — the controller. `createController()` returns a `Controller` whose `input` (pitch/roll/quality/button) is mutated in place for the frame loop to read, plus `calibrate()` / `setAxisField()` and a `dispose()`. It connects to `/ws/m5` on **this page's own origin** and reconnects with backoff. `src/m5/protocol.ts` holds both wire formats and their guards (external data stays `unknown` until checked); `src/m5/pipeline/` is the pure control pipeline shared with the bridge.
+- `bridge/` — the server half, and the reason this repo no longer needs an external ICAROS host. The M5 firmware is a WebSocket *client* that speaks plain `ws://` only, so a browser can neither listen for it nor reach it from an HTTPS page. `createBridge()` owns a device socket (`ws://:5184/ws/device`, pairing-token authenticated) and a browser socket (`/ws/m5`, read-only for control, tuning commands back). Both `attach*` functions take a `node:http.Server`, so `bridge/vite-plugin.ts` (dev) and `bridge/serve.ts` (production) share one implementation. Pipeline order is load-bearing: **normalize → axis-map → calibrate → safety → auto-neutralize → smooth**. See `docs/m5-bridge.md`.
 
-Data flow: `main.ts` `await`s the renderer → mounts its canvas into `#app` → creates the player and adds `player.rig` to `renderer.scene` → attaches senses to the canvas → `connectHost(...)` to the ICAROS host, feeding validated orientation into a live `orientation` holder → `renderer.start(onFrame)` where each frame steers the player by that orientation and advances it (`player.update(dt, orientation)`). This closes the loop: ICAROS controller → `orientation` → player rig → camera. The teardown runs on `pagehide`. The host origin resolves most-specific-first: `?host=https://<host>:5183` query param → the `VITE_ICAROS_HOST` env baked in by `bun start <ip>` (see scripts/start.ts + src/vite-env.d.ts) → `https://localhost:5183`. The `clientUrl` the host launches is this page's own HTTPS origin, so run `bun start <ip>` / `bun run dev` (both `vite --host`) to expose a headset-reachable LAN address. Each module is a factory/entry function returning an interface or teardown; they depend on each other only through exported types. Keep that boundary: modules talk via typed data structures, not shared globals.
+Data flow: `main.ts` `await`s the renderer → mounts its canvas into `#app` → creates the player and adds `player.rig` to `renderer.scene` → attaches senses to the canvas → `createController()` → `renderer.start(onFrame)` where each frame reads `controller.input` to steer the player (`player.update(dt, …)`) and publishes `controller.input.quality` onto `signals.controlQuality`. That closes the loop: M5 → bridge → `controller.input` → player rig → camera. Teardowns run on `pagehide`.
+
+There is **nothing to configure** for that connection: the stream rides this page's own origin, so a headset trusts one certificate instead of two, and `?host=` / `VITE_ICAROS_HOST` / `scripts/start.ts` are gone. Run `bun run dev` (`vite --host`) to expose a headset-reachable LAN address. Each module is a factory/entry function returning an interface or teardown; they depend on each other only through exported types. Keep that boundary: modules talk via typed data structures, not shared globals.
+
+There are three page entry points, all listed in `vite.config.ts`: `index.html` (the experience), `synth.html` (the vendored Tone.js synth), and `pair.html` (`src/pair/`, the Web Serial page that writes WiFi + bridge URL onto the M5 over USB).
+
+**`bun run dev` runs Vite under Node, not Bun.** `bun run` honours the `#!/usr/bin/env node` shebang on `node_modules/.bin/vite`, so `Bun.*` APIs are unavailable inside a Vite plugin — that is why `bridge/` is written against `node:http` + the `ws` package rather than `Bun.serve`, and why `ws` is a runtime dependency. Code under `bridge/` must run on both runtimes: Node in dev, Bun in the production container.
 
 Intra-`src` imports use explicit `.ts` extensions (e.g. `import ... from "./renderer/index.ts"`), enabled by `allowImportingTsExtensions`. Follow that convention in new files.
 

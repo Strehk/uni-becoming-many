@@ -101,7 +101,14 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
       renderConfig();
     });
 
-    actions.append(startButton, configButton);
+    // Own page rather than an overlay: pairing needs Web Serial and a USB cable, so it belongs
+    // at the desk before the flight — never mid-experience or in the headset.
+    const pairButton = button("Controller einrichten", "ghost");
+    pairButton.addEventListener("click", () => {
+      window.location.href = "/pair.html";
+    });
+
+    actions.append(startButton, configButton, pairButton);
     panel.append(title, subtitle, actions);
   };
 

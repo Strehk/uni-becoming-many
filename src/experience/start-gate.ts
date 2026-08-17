@@ -1,8 +1,12 @@
 /**
  * Start gate — holds the Theatre timeline (the clock) paused after the experience starts,
- * until the audience gives the go-ahead: **Enter** on the keyboard, or the **A button** on
- * an XR controller. Until then the world sits frozen at t=0 (Theatre's playhead never
- * advances), so the piece begins on the audience's cue rather than the instant the menu closes.
+ * until the audience gives the go-ahead: **Enter** on the keyboard, the **A button** on an XR
+ * controller, or the **button on the M5** strapped to the flight rig. Until then the world sits
+ * frozen at t=0 (Theatre's playhead never advances), so the piece begins on the audience's cue
+ * rather than the instant the menu closes.
+ *
+ * The M5 button matters most in practice: the rider is already lying on the machine, where
+ * neither a keyboard nor an XR controller is within reach.
  *
  * Self-contained: it owns its keyboard listener and a small on-screen prompt, and it polls the
  * XR controller gamepads each frame (WebXR exposes no button event for the face buttons — only
@@ -25,7 +29,12 @@ export interface StartGate {
 export interface StartGateOptions {
   /** The active XR session, or null when not presenting — read fresh each poll. */
   getSession(): XRSession | null;
-  /** Invoked once, on the first Enter/A press. */
+  /**
+   * Read-and-clear the M5 button-down edge, if a controller is wired up. Read-and-clear rather
+   * than a level check, because the controller stream runs at 20 Hz while this polls per frame.
+   */
+  consumeControllerButton?: () => boolean;
+  /** Invoked once, on the first Enter / A / controller-button press. */
   onTrigger(): void;
 }
 
@@ -67,6 +76,10 @@ export function createStartGate(options: StartGateOptions): StartGate {
   return {
     poll(): void {
       if (triggered) {
+        return;
+      }
+      if (options.consumeControllerButton?.() === true) {
+        fire();
         return;
       }
       const session = options.getSession();
@@ -118,6 +131,6 @@ function createPrompt(): HTMLElement {
   }
   const el = document.createElement("div");
   el.className = "start-gate";
-  el.textContent = "Enter drücken oder A am Controller, um zu beginnen";
+  el.textContent = "Knopf am Controller drücken, um zu beginnen (oder Enter / A am Headset)";
   return el;
 }

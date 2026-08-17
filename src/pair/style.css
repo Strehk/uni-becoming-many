@@ -1,0 +1,232 @@
+/* Controller setup page. Standalone entry (pair.html), so it carries its own base styles —
+   it deliberately does not pull in src/style.css, which hides overflow for the WebGPU canvas. */
+
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #0b0e14;
+  color: #e6e6e6;
+  line-height: 1.5;
+}
+
+#pair {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 40px 24px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.pair__head h1 {
+  font-size: 28px;
+  font-weight: 650;
+}
+
+.pair__lede {
+  margin-top: 8px;
+  color: #cbd5df;
+  max-width: 620px;
+}
+
+.pair__back {
+  display: inline-block;
+  margin-top: 12px;
+  color: #7dd3fc;
+  text-decoration: none;
+}
+
+.pair__back:hover {
+  text-decoration: underline;
+}
+
+.pair__card {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pair__card h2 {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.pair__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.pair__meta {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.pair__hint {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+/* Inline im Fließtext des Hinweises — kein Button-Kasten, nur ein anklickbares Wort. */
+.pair__link {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: #7dd3fc;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.pair__button {
+  min-height: 40px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  padding: 0 14px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f4f6f8;
+  font: inherit;
+  cursor: pointer;
+}
+
+.pair__button:hover:not(:disabled) {
+  background: rgba(125, 211, 252, 0.16);
+  border-color: rgba(125, 211, 252, 0.7);
+}
+
+.pair__button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pair__button--primary {
+  border-color: #d9f99d;
+  background: #d9f99d;
+  color: #111827;
+  font-weight: 650;
+}
+
+.pair__button--primary:hover:not(:disabled) {
+  background: #e6fcb2;
+  border-color: #e6fcb2;
+}
+
+.pair__status {
+  font-size: 14px;
+  min-height: 1.5em;
+}
+
+.pair__status[data-kind="idle"] {
+  color: #94a3b8;
+}
+.pair__status[data-kind="ok"] {
+  color: #86efac;
+}
+.pair__status[data-kind="error"] {
+  color: #fca5a5;
+}
+
+.pair__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pair__field span {
+  font-size: 13px;
+  color: #cbd5df;
+}
+
+.pair__field i {
+  color: #94a3b8;
+  font-style: normal;
+  font-size: 12px;
+}
+
+.pair__field input {
+  min-height: 38px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.3);
+  color: #f4f6f8;
+  font: inherit;
+  padding: 0 10px;
+}
+
+.pair__field input:focus {
+  outline: none;
+  border-color: rgba(125, 211, 252, 0.7);
+}
+
+/* Two-axis level pad: centre is flat, the crosshair makes a tilted mount obvious. */
+.pair__level {
+  position: relative;
+  width: 160px;
+  height: 160px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.pair__level::before,
+.pair__level::after {
+  content: "";
+  position: absolute;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.pair__level::before {
+  left: 50%;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+}
+
+.pair__level::after {
+  top: 50%;
+  left: 8px;
+  right: 8px;
+  height: 1px;
+}
+
+/* Positioned with left/top in percent of the pad; `translate` only does the centering, because a
+   percentage translate would resolve against the dot's own 14px, not the pad. */
+.pair__level i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #7dd3fc;
+  transform: translate(-50%, -50%);
+  transition: left 0.12s linear, top 0.12s linear;
+}
+
+.pair__log {
+  max-height: 260px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #a1a1aa;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

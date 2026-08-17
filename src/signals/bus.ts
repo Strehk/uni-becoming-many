@@ -7,7 +7,7 @@
  * Payloads are `unknown` by design: the bus is an open channel (`cue:chirp`, `moth:caught`, a
  * `signal-lost` — coined by whoever emits), so a closed typed event-map would fight the modular
  * "objects coin their own events" goal. Handlers narrow the `unknown` at the edge, the same way
- * the ICAROS layer narrows socket frames.
+ * the M5 layer narrows socket frames.
  */
 import type { Signal } from "./signal.ts";
 

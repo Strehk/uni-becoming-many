@@ -27,7 +27,7 @@ Theatre.js als Timeline, Tone.js-Synth als eigene Seite/Overlay.
 | **GPU** | Alles läuft als GPU-Compute (Gras, Duftfeld, Partikel, Terrain-Streaming). Integrierte Chips funktionieren, Apple Silicon / dedizierte GPU wird empfohlen. |
 | **Git** | Repo enthält die Assets direkt (kein Git LFS): ca. 25 MB `assets/` (FBX-Quellen) + 10 MB `public/` (GLB, Audio). |
 | *optional* **VR-Headset** | Meta Quest o. ä. mit WebXR-fähigem Browser, im selben LAN wie der Dev-Rechner. |
-| *optional* **ICAROS-Host** | Der Flugsimulator-Host, der die M5-Controller-Orientierung streamt (Protokoll `neural-flight.v1`). Ohne Host läuft alles auf Tastatursteuerung. |
+| *optional* **M5-Controller** | M5StickC Plus2 am Flugrig. Die Bridge in `bridge/` spricht ihn direkt an — kein externer Host mehr. Ohne Controller läuft alles auf Tastatursteuerung. |
 
 Node.js wird nicht gebraucht — die Scripts in `scripts/` laufen unter Bun.
 
@@ -56,12 +56,14 @@ nicht bekannt — dort muss die Browserwarnung einmal manuell akzeptiert werden.
 
 ### Qualitäts-Gates
 
-Es gibt (noch) keinen Test-Runner. Beide Gates müssen sauber durchlaufen, bevor Code als fertig
-gilt:
+Alle Gates müssen sauber durchlaufen, bevor Code als fertig gilt. `bun test` ist der
+bun-eigene Runner (kein Setup nötig) und deckt gezielt die M5-Control-Pipeline ab — dort steckt
+Domänenwissen über das physische Rig, das man nicht still kaputtrefactoren will:
 
 ```bash
 bun run typecheck   # tsc --noEmit (sehr strikter Modus, siehe AGENT.md)
 bun run check       # biome check --write .  (Format + Lint + Autofix)
+bun test            # bun-eigener Runner; deckt die M5-Control-Pipeline ab
 bun run build       # tsc && vite build -> dist/   ← das eigentliche Gate
 bun run preview     # den Production-Build ausliefern
 ```
@@ -73,25 +75,23 @@ Ein Build-Fehler ist fast immer ein Typfehler, kein Bundling-Fehler.
 ## Start-Varianten
 
 ```bash
-bun run dev                # HTTPS-Dev-Server, im LAN erreichbar (--host)
-bun start 192.168.1.50     # dito, aber auf einen ICAROS-Host gezeigt
-bun start 192.168.1.50:6000
-bun start https://host.local
+bun run dev                # HTTPS-Dev-Server + M5-Bridge, im LAN erreichbar (--host)
+bun scripts/m5-sim.ts      # simulierter Controller — Fliegen ohne Hardware
+bun run serve              # Produktions-Server (liefert dist/ + Bridge), siehe Deployment
 ```
 
-`bun start <ip>` (siehe `scripts/start.ts`) normalisiert das Argument zu einer HTTPS-Origin,
-setzt `VITE_ICAROS_HOST` und ruft dann `bun run dev` auf. Ohne Port wird **5183** angenommen.
+`bun run dev` startet den Dev-Server **und** die Controller-Bridge im selben Prozess. Es gibt
+keine Host-Adresse mehr zu konfigurieren: der Controller-Stream läuft über die eigene Origin
+(`wss://<dev-url>/ws/m5`). Details in [`docs/m5-bridge.md`](docs/m5-bridge.md).
 
 **Query-Parameter** der Hauptseite:
 
 | Parameter | Wirkung |
 |---|---|
-| `?host=https://<ip>:5183` | ICAROS-Host für diesen Aufruf. Höchste Priorität. |
 | `?studio=1` | Theatre.js **Studio** laden (Timeline-Authoring). Überspringt das Start-Menü, die Uhr läuft. |
 | `?debug=1` | Dev-Overlays bleiben nach dem Start sichtbar. |
 
-Auflösung der Host-Origin, spezifisch vor allgemein:
-`?host=` → `VITE_ICAROS_HOST` (von `bun start`) → `https://localhost:5183`.
+**Seiten:** `/` (Experience) · `/pair.html` (Controller einrichten) · `/synth.html` (Synth).
 
 ---
 
@@ -105,7 +105,8 @@ Auflösung der Host-Origin, spezifisch vor allgemein:
      dazu *Test ansehen*, *Export/Import JSON*, *Theatre Timeline öffnen*. Die Konfiguration
      liegt im `localStorage`.
 2. Nach *starten* steht die Zeitachse bei t=0 still (**Start-Gate**) — das Publikum löst selbst
-   aus: **Enter** auf der Tastatur oder **A** am XR-Controller.
+   aus: **Knopf am M5**, **Enter** auf der Tastatur oder **A** am XR-Controller. Auf der Maschine
+   liegend ist der M5-Knopf der einzige erreichbare davon.
 3. Danach läuft die authored Theatre-Timeline (~300 s) und schaltet die Sinne nach Plan frei.
 
 ### Tasten
@@ -140,7 +141,7 @@ Weltobjekte hinzufügt, muss sie an ein Sinnessignal koppeln, sonst bricht die G
 ## VR im LAN
 
 1. Dev-Rechner und Headset ins selbe Netz.
-2. `bun run dev` (bzw. `bun start <ip>`) — dank `--host` liefert Vite auch eine LAN-URL
+2. `bun run dev` — dank `--host` liefert Vite auch eine LAN-URL
    (`https://192.168.x.x:5173/`) im Banner.
 3. Diese URL im Headset-Browser öffnen, Zertifikatswarnung akzeptieren.
 4. *Enter VR* drücken. Die Session fordert das `webgpu`-Feature an, der Browser im Headset muss
@@ -149,17 +150,27 @@ Weltobjekte hinzufügt, muss sie an ein Sinnessignal koppeln, sonst bricht die G
 In VR schreibt das Headset die Kamerapose innerhalb des Rigs — geflogen wird immer das **Rig**,
 nie die Kamera direkt, damit Flug und Kopftracking sich sauber überlagern.
 
-## ICAROS-Anbindung
+## M5-Controller
 
-`src/icaros/` implementiert die Client-Seite des `neural-flight.v1`-Vertrags: Registrierung über
-`/ws/runtime` (`client.hello` → `client.registered`/`rejected`), Heartbeat alle 4 s, Empfang
-validierter `control.orientation`-Frames über `/ws/control/main`. Daraus werden Pitch und Roll des
-Gleiters. Bewusst außerhalb des Scopes: direkter M5-Zugriff, `/ws/device`, `/api/m5-pairing`,
-Reconnect.
+Dieses Repo spricht selbst mit dem Controller — es gibt keinen separaten Host mehr. `bridge/`
+nimmt die Frames des M5 auf `ws://<rechner>:5184/ws/device` entgegen, normalisiert sie
+(`src/m5/pipeline/`) und publiziert fertige Werte über die **eigene Origin** an die Seite.
+`src/m5/index.ts` ist die Client-Seite davon. Volle Beschreibung: [`docs/m5-bridge.md`](docs/m5-bridge.md).
 
-Ist kein Host erreichbar, meldet die Konsole abgelehnte WebSocket-Verbindungen — das ist im
-Tastaturbetrieb **erwartetes Rauschen**, kein Fehler. Tastatureingaben übersteuern den
-Controller-Stream ohnehin, solange eine Steuertaste gehalten wird.
+Praktisch heißt das:
+
+- **Kein `?host=`, kein Zertifikat zum Nachtragen.** Der Stream läuft über dieselbe TLS-Verbindung
+  wie die Seite; im Headset ist genau ein Zertifikat zu akzeptieren.
+- **Controller einrichten** über `/pair.html` (Button im Start-Menü): M5 per USB anschließen,
+  WLAN und Bridge-Adresse schreiben, Kabel ab. Braucht Chrome/Edge am Rechner (Web Serial).
+- **Kalibrierung** in der C-Dev-Console: Rig in Ruhelage bringen, „Neutral kalibrieren". Der Wert
+  liegt auf der Bridge, gilt also stationsweit und übersteht einen Reload.
+- **Ohne Controller** bleibt `quality` auf 0 — das ist der normale Tastaturbetrieb, kein Fehler.
+  Tastatureingaben übersteuern den Controller-Stream, solange eine Steuertaste gehalten wird.
+- **Ohne Hardware testen:** `bun scripts/m5-sim.ts` (`--rest`, `--glitch`, `--button`).
+
+Die Bridge muss im selben LAN wie der M5 laufen — der Controller kann kein `wss://` und dialt eine
+IP im lokalen Netz.
 
 ## Synth auf dem Handy
 
@@ -192,7 +203,9 @@ src/
   audio/             Sound-Bus, Cues, die acht Movements
   experience/        Start-Menü, Start-Gate, Interface-Modi, Credits
   dev-console/       das `C`-Overlay mit allen Tuning-Panels
-  icaros/ player/ events/ minimap/ synth/ render/
+  m5/                Controller: Client, Wire-Protokoll, Control-Pipeline
+  pair/              USB-Einrichtungsseite (pair.html, Web Serial)
+  player/ events/ minimap/ synth/ render/
 public/              ausgelieferte Assets (GLB, Audio, FBX-Events)
 assets/              Rohassets (nature-kit FBX/Texturen) für die Konvertierung
 scripts/             Bun-Scripts: Asset-Konvertierung + Verify-Treiber
@@ -228,10 +241,36 @@ bun run scripts/verify-nature.ts     # headless Chromium (Playwright) fährt die
 | Nur ein weißes Bild | Kein Sinn aktiv — das ist der Sollzustand. Über `C` → Sinne einen Layer zuschalten. |
 | Zertifikatswarnung auf Headset/Handy | mkcert-Root ist dort unbekannt; Warnung einmal akzeptieren. |
 | Dev-Server nicht unter 5173 | Port belegt, Vite weicht aus — URL aus dem Banner nehmen. |
-| `[icaros]`-WebSocket-Fehler in der Konsole | Kein Host verbunden; im Tastaturbetrieb erwartet. |
+| M5-Panel zeigt „keine Bridge" | Dev-Server neu starten; die Bridge lebt in dessen Prozess. |
+| M5-Panel zeigt „wartet auf Controller" | Bridge läuft, aber kein Gerät verbunden. `bun scripts/m5-sim.ts` oder Controller über `/pair.html` einrichten. |
 | `[audio] failed to load …` | Platzhalter-Cues ohne Datei (`/audio/sense-*.ogg`); warnt einmal und bleibt still. |
 | Tone.js meckert über den AudioContext | Browser-Autoplay-Sperre; ein Klick/Tastendruck entsperrt sie. |
 | Build schlägt fehl | Typfehler. `bun run typecheck` gibt die eigentliche Meldung aus. |
+
+---
+
+## Deployment
+
+`bun run serve` (bzw. das Image) startet **einen** Prozess, der `dist/` ausliefert und beide
+Controller-Sockets bedient — kein nginx mehr, weil die Bridge ohnehin einen JS-Prozess braucht.
+
+```bash
+bun run build && bun run serve       # lokal
+docker build -t becoming-many . && \
+  docker run -p 8080:8080 -p 5184:5184 -v bm-state:/data becoming-many
+```
+
+| Port | Wofür |
+|---|---|
+| `8080` | Experience + Browser-Control-Stream (`/ws/m5`). TLS terminiert der Reverse-Proxy davor. |
+| `5184` | Der M5. Plain `ws://`, weil die Firmware kein `wss://` kann. |
+
+`/data` (Volume) hält Kalibrierung, Achsen-Map und Pairing-Token — ohne Volume verliert ein
+Redeploy die Kalibrierung des Rigs. Die restlichen Variablen stehen in `.env.example`.
+
+**Wichtig:** Das Image muss im LAN des Controllers laufen. Ein Remote-Deploy bekommt nie
+Device-Frames — die Experience läuft dann sauber weiter, aber nur auf Tastatur.
+Der GitHub-Workflow baut bei jedem Push auf `main` nach `ghcr.io`.
 
 ---
 

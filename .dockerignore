@@ -6,6 +6,9 @@ dist
 *.local
 .DS_Store
 
+# Local bridge state — a dev pairing token must never be baked into an image.
+.m5
+
 # ~25 MB of source FBX for the nature kit. Only the offline scripts/convert-*.ts
 # passes read it; what the app loads is the converted .glb in public/.
 assets
