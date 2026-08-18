@@ -247,41 +247,7 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
       renderSettings,
     );
 
-    // Own page rather than a screen in here: pairing needs Web Serial and a USB cable, so it
-    // belongs at the desk before the flight — never mid-experience or in the headset.
-    const pair = entry(
-      "Controller einrichten",
-      "Für die Betreuung: den M5 am ICAROS über USB mit dieser Station verbinden.",
-      "quiet",
-      () => {
-        window.location.href = asset("pair.html");
-      },
-    );
-
-    const configure = entry(
-      "Ablauf konfigurieren",
-      "Für die Betreuung: wann welcher Sinn erwacht.",
-      "quiet",
-      () => {
-        const url = new URL(window.location.href);
-        if (url.searchParams.get("studio") !== "1") {
-          url.searchParams.set("studio", "1");
-          window.location.href = url.toString();
-          return;
-        }
-        options.onConfigure(cloneConfig(config));
-        renderConfig();
-      },
-    );
-
-    const onboarding = entry(
-      "Anleitung (Experiment)",
-      "Eine wortlose Flugschule aus Luftpartikeln. Das Stück beginnt erst danach.",
-      "quiet",
-      renderOnboarding,
-    );
-
-    list.append(...starts, settingsEntry, pair, onboarding, configure);
+    list.append(...starts, settingsEntry);
     screen.append(head, list, note);
   }
 
@@ -350,12 +316,13 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     const lede = document.createElement("p");
     lede.className = "bm-menu__lede";
     lede.textContent =
-      "Gelten sofort und bleiben auf diesem Gerät gespeichert. Der Modus wird auf dem Startbild gewählt.";
+      "Gelten sofort und bleiben auf diesem Gerät gespeichert. Der Modus wird auf dem Startbild gewählt. " +
+      "Unten liegt, was vor der Vorstellung eingerichtet wird.";
     head.append(title, lede);
 
     const sections = document.createElement("div");
     sections.className = "bm-menu__sections";
-    sections.append(qualitySection(), controlSection());
+    sections.append(qualitySection(), controlSection(), operatorSection());
 
     const status = document.createElement("p");
     status.className = "bm-menu__status";
@@ -488,6 +455,54 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
   }
 
   // ── Screen: dramaturgy ─────────────────────────────────────────
+  /**
+   * The three things that are set up BEFORE an audience arrives, gathered in one place: the
+   * controller at the desk, the wordless flight lesson, the sense schedule. None of them
+   * belongs on the start screen, which the audience sees — it should offer the flight and
+   * nothing else.
+   */
+  function operatorSection(): HTMLElement {
+    const section = document.createElement("div");
+    const title = document.createElement("h2");
+    title.className = "bm-menu__section-title";
+    title.textContent = "Für die Betreuung";
+
+    const choices = document.createElement("div");
+    choices.className = "bm-menu__choices";
+
+    // Own page rather than a screen in here: pairing needs Web Serial and a USB cable, so it
+    // belongs at the desk before the flight — never mid-experience or in the headset.
+    const pair = actionButton(
+      "Controller einrichten",
+      "Den M5 am ICAROS über USB mit dieser Station verbinden.",
+    );
+    pair.addEventListener("click", () => {
+      window.location.href = asset("pair.html");
+    });
+
+    const onboarding = actionButton(
+      "Anleitung (Experiment)",
+      "Eine wortlose Flugschule aus Luftpartikeln. Das Stück beginnt erst danach.",
+    );
+    onboarding.addEventListener("click", renderOnboarding);
+
+    const configure = actionButton("Ablauf", "Wann welcher Sinn erwacht.");
+    configure.addEventListener("click", () => {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("studio") !== "1") {
+        url.searchParams.set("studio", "1");
+        window.location.href = url.toString();
+        return;
+      }
+      options.onConfigure(cloneConfig(config));
+      renderConfig();
+    });
+
+    choices.append(pair, onboarding, configure);
+    section.append(title, choices);
+    return section;
+  }
+
   function renderConfig(): void {
     setScreen("config");
     screen.replaceChildren();
@@ -665,6 +680,13 @@ function choiceButton(label: string, note: string): HTMLButtonElement {
   noteEl.className = "bm-menu__choice-note";
   noteEl.textContent = note;
   button.append(labelEl, noteEl);
+  return button;
+}
+
+/** A settings entry that performs an action — a choice's look without its pressed state. */
+function actionButton(label: string, note: string): HTMLButtonElement {
+  const button = choiceButton(label, note);
+  button.removeAttribute("aria-pressed");
   return button;
 }
 
