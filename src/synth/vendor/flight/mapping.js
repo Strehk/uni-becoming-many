@@ -32,7 +32,6 @@ export const SENSE_QUELLEN = [
   ["sinn_infrarot", "sinn infrarot"], ["sinn_uv", "sinn uv"],
   ["sinn_duft", "sinn duft"], ["sinn_netzwerk", "sinn netzwerk"],
   ["sinn_motion", "sinn motion"], ["sinn_magnetfeld", "sinn magnetfeld"],
-  ["sinn_rundum", "sinn rundum"],
   ["unrest", "unruhe (theatre)"], ["intensity", "intensität (theatre)"],
   ["quality", "steuer-qualität"],
 ];

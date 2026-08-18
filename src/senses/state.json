@@ -270,15 +270,6 @@
       "density": 1,
       "lifetimeFrames": 14,
       "opacity": 1
-    },
-    "rundum": {
-      "zoom": 1.04,
-      "exposure": 1.05,
-      "contrast": 1.08,
-      "vignette": 0.32,
-      "centerLift": 0.05,
-      "yawOffsetDeg": 0,
-      "far": 620
     }
   }
 }

@@ -23,7 +23,6 @@
               "[\"senses\",\"netzwerk\"]": "track:senses.netzwerk",
               "[\"senses\",\"motion\"]": "track:senses.motion",
               "[\"senses\",\"magnetfeld\"]": "track:senses.magnetfeld",
-              "[\"senses\",\"rundum\"]": "track:senses.rundum",
               "[\"tracks\",\"intro\"]": "odWXD6qIQQ",
               "[\"tracks\",\"scent\"]": "-EuG9Tj4eM",
               "[\"tracks\",\"depth\"]": "Q4fv9kdxuX",
@@ -285,20 +284,6 @@
                     "connectedRight": false,
                     "handles": [0.5, 1, 0.5, 0],
                     "type": "bezier",
-                    "value": 0
-                  }
-                ]
-              },
-              "track:senses.rundum": {
-                "type": "BasicKeyframedTrack",
-                "__debugName": "senses.rundum",
-                "keyframes": [
-                  {
-                    "id": "kf-rundum-20",
-                    "position": 0,
-                    "connectedRight": false,
-                    "handles": [0.5, 0, 0.5, 1],
-                    "type": "hold",
                     "value": 0
                   }
                 ]

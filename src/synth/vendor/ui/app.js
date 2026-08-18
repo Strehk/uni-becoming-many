@@ -49,7 +49,6 @@ const GATE_OPTIONS = [
   { value: "sinn_netzwerk",   label: "netzwerk" },
   { value: "sinn_motion",     label: "motion" },
   { value: "sinn_magnetfeld", label: "magnetfeld" },
-  { value: "sinn_rundum",     label: "rundum" },
   { value: "unrest",          label: "unrest" },
   { value: "intensity",       label: "intensity" },
   { value: "quality",         label: "quality" },

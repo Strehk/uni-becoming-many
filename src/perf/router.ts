@@ -31,8 +31,6 @@ export interface SenseStartValues {
   duftCount: number;
   duftCheapNoise: boolean;
   motionLifetimeFrames: number;
-  rundumCubeSize: number;
-  rundumCaptureInterval: number;
 }
 
 export interface PerfRouterOptions {
@@ -157,22 +155,6 @@ export function createPerfRouter(options: PerfRouterOptions): PerfRouter {
           () => senseLive.motionLifetimeFrames,
           (v) => {
             senseLive.motionLifetimeFrames = v;
-          },
-        );
-      case "rundum.cubeSize":
-        return senseKnob(
-          id,
-          () => senseLive.rundumCubeSize,
-          (v) => {
-            senseLive.rundumCubeSize = v;
-          },
-        );
-      case "rundum.captureInterval":
-        return senseKnob(
-          id,
-          () => senseLive.rundumCaptureInterval,
-          (v) => {
-            senseLive.rundumCaptureInterval = v;
           },
         );
       default: {

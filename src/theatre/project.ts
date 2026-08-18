@@ -48,7 +48,6 @@ const SENSE_ENVELOPES = {
   netzwerk: types.number(0, { range: [0, 1] }),
   motion: types.number(0, { range: [0, 1] }),
   magnetfeld: types.number(0, { range: [0, 1] }),
-  rundum: types.number(0, { range: [0, 1] }),
 };
 
 /**

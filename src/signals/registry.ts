@@ -55,7 +55,6 @@ function createSenseCells(): Record<SenseId, Signal<number>> {
     netzwerk: signal(0),
     motion: signal(0),
     magnetfeld: signal(0),
-    rundum: signal(0),
   };
 }
 

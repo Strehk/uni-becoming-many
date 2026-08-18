@@ -100,14 +100,6 @@ const GROUPS: GroupSpec[] = [
     knobs: [
       { id: "duft.count", label: "Duft-Partikel", min: 20000, max: 400000, step: 20000 },
       { id: "motion.lifetimeFrames", label: "Motion-Trail (Frames)", min: 2, max: 40, step: 1 },
-      { id: "rundum.cubeSize", label: "Rundum-Auflösung (px)", min: 256, max: 2048, step: 256 },
-      {
-        id: "rundum.captureInterval",
-        label: "Rundum-Aufnahme (jede N. Frame)",
-        min: 1,
-        max: 4,
-        step: 1,
-      },
     ],
   },
 ];

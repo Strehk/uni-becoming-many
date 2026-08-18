@@ -7,7 +7,7 @@
 //   • The four SHADER senses (farben/echo/infrarot/uv) round-trip through the
 //     SenseSystem's own `serialize()` / `apply()` (params + blend + layer order +
 //     base colour, format "becoming-many-senses"). We reuse it wholesale.
-//   • The five STANDALONE senses (magnetfeld/duft/netzwerk/motion/rundum) expose
+//   • The four STANDALONE senses (magnetfeld/duft/netzwerk/motion) expose
 //     their params as UI descriptors with live `get()` bindings; we snapshot those
 //     and replay them on load over the `sense:param` bus — the exact channel the
 //     dev UI writes, so every module's existing handler applies them.

@@ -32,7 +32,7 @@ export function createLifeUniforms() {
 export type LifeUniforms = ReturnType<typeof createLifeUniforms>;
 
 /** How strongly each sense makes living things glow. Keys mirror `SenseId`. */
-// Keyed by the nine layerable SenseId's (see src/senses/ids.ts); "none" (the white
+// Keyed by the eight layerable SenseId's (see src/senses/ids.ts); "none" (the white
 // void) and any unmapped sense fall through to 0 at the call site. How brightly the
 // flora self-illuminates under each perception.
 export const BIOLUMINESCENCE_BY_SENSE: Readonly<Record<string, number>> = {
@@ -44,5 +44,4 @@ export const BIOLUMINESCENCE_BY_SENSE: Readonly<Record<string, number>> = {
   netzwerk: 0.7, // the collective lights up
   motion: 0, // only movement is visible — static flora stays dark
   magnetfeld: 0, // a sky sense — the ground reads neutral
-  rundum: 0.15, // projection change only — keep the faint daylight sheen
 };

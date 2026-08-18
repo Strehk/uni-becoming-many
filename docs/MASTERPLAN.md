@@ -19,7 +19,6 @@ werden.
 | C | `MagnetfeldwahnehmungExperiment1` | Magnetfeld-Sinn: Himmel-Shader mit 9 mischbaren Modi (Aurora, Feldlinien, Vogel-Noise, Spektrum, Eisenspäne, Moiré, Plasma, Polar, …), Feldachse (Deklination/Elevation), alles Uniforms | TSL/WebGPU, JS | `src/senses/magnetfeld/` |
 | D | `swarm_network` | Netzwerk-Sinn: `SwarmNetwork` (Verbindungsröhren + Glow + Signalpartikel zwischen beweglichen Objekten) und `MyceliumNetwork` (Myzel-Linien, Hotspots, verzweigte Arme) | three, JS, **GLSL-ShaderMaterial** | `src/senses/netzwerk/` |
 | E | `vogel_motion_sinn` | Motion-Sinn: Partikel-Trails aus animierten Vertices (`createMotionParticleEffect`, `AnimatedVertexSampler`, `ParticleTrailBuffer`, Emissionsprofile, Target-Adapter) | three, JS (bereits als Modul refaktoriert) | `src/senses/motion/` |
-| F | `360_sinn_modul` | Rundum-Sinn: `LittlePlanetRenderer` — Szene in Cubemap capturen, Little-Planet-Projektion als Fullscreen-Pass | three, JS, **GLSL-ShaderMaterial + WebGLCubeRenderTarget** | `src/senses/rundum/` |
 | G | `SynthModulHandy` | Synthesizer: Tone.js-Engine, 8 Klang-Sinne × 3–6 Varianten (`senses/registry.js`), Layer-/Stimmen-System, Mapping-Backend (`FlightMap`), räumliches Hören, Rack-UI mit Patch-Kabeln | Tone 14.8.49, JS + eigenes CSS | `src/synth/` (vendored, UI bleibt) |
 
 **Nicht übernommen** (Demo-/Testumgebungen): alle Demo-Welten (`ShaderSinneModul/src/world`,
@@ -42,12 +41,11 @@ Renderer/Kamera/Loops/HTTP-Configs, `SynthModulHandy/5/` (eingefrorener Altstand
 | `netzwerk` | D | Kollektiv-Wahrnehmung: leuchtendes Kommunikationsnetz zwischen Schwarm-Kreaturen + Myzel im Boden |
 | `motion` | E | Bewegungssehen: nur Bewegung ist sichtbar — Partikel-Trails der Schwarmtiere statt Meshes |
 | `magnetfeld` | C | Magnetrezeption: der Himmel zeigt das Erdmagnetfeld (9 Visualisierungs-Modi, mischbar) |
-| `rundum` | F | 360°-Wahrnehmung: Little-Planet-Rundumblick als alternative Kameraprojektion |
 | Synth | G | Jede visuelle Ebene bekommt eine Klang-Ebene; Sounddesign läuft weiter über die erhaltene Synth-UI |
 
 Mapping Synth-Klang-Sinne ↔ visuelle Sinne (Vorbelegung, im Code als eine Konstante änderbar):
 `echo→echo`, `uv→licht`, `duft→chemie`, `magnetfeld→magnet`, `motion→motion`,
-`netzwerk→rhythmus`, `rundum→sicht`, `farben→luft`. (`infrarot` hat noch keine eigene
+`netzwerk→rhythmus`, `farben→luft`. (`infrarot` hat noch keine eigene
 Synth-Entsprechung — offene Sounddesign-Frage, s. §6.)
 
 ---
@@ -106,15 +104,6 @@ Synth-Entsprechung — offene Sounddesign-Frage, s. §6.)
   animierte Flügel — kein GLB im Repo); `setEnabled` über das `motion`-Signal (Quell-Meshes
   verstecken übernimmt der Host laut Empfehlungs-API); Update in der Frame-Loop.
 - **Weglassen:** Svelte-Demo-Routen, Lab-Referenz.
-
-### F — 360 / Little Planet
-- **Übernehmen:** `LittlePlanetRenderer`-Konzept + alle Optionen (`cubeSize, near, far, zoom,
-  yawOffset, exposure, contrast, vignette, centerLift`), Render-Ablauf (CubeCamera capture →
-  Fullscreen-Projektion, hiddenObjects, Yaw aus Kamera-Forward).
-- **Anpassen:** Port nach TS; **GLSL-Fragment-Shader → TSL** (`cubeTexture`-Node), Cube-Target
-  über den WebGPU-Pfad; Einbindung als **View-Mode** (exklusiv, kein Layer): aktiviert über das
-  `rundum`-Signal, ersetzt den normalen `renderer.render`-Pass.
-- **Weglassen:** nichts weiter (Modul ist bereits kernig); `types.d.ts` entfällt durch TS-Port.
 
 ### G — Synthesizer (UI/UX bleibt!)
 - **Übernehmen:** alles außer der Demo-Flugwelt: `core/` (Engine, SenseLayer, 4 Stimmen,
@@ -201,7 +190,7 @@ Motion-Moduls.
 | S7 | Kreaturen-Substrat: Boids-Vogelschwarm + Pilz-Spawns | ✅ fertig |
 | S8 | Netzwerk portieren (TSL-Ports der Shader, Knoten aus S7, UI, Signal) | ✅ fertig |
 | S9 | Motion-Partikel portieren (Targets aus S7, UI, Signal) | ✅ fertig |
-| S10 | Rundum/Little-Planet portieren (TSL/WebGPU-Port, View-Mode, UI, Signal) | ✅ fertig |
+| S10 | Rundum/Little-Planet portieren (TSL/WebGPU-Port, View-Mode, UI, Signal) | ⛔ später ersatzlos entfernt |
 | S11 | Synth integrieren (vendoren, Overlay, Signal-Quellen-Modul, Layer-Kopplung, Tone-Dependency) | ✅ fertig |
 | S12 | Feinschliff: Sense-Cues auf dem Bus, Doku (AGENT.md), Gates + Build + Runtime-Smoke-Test, Masterplan-Abschluss | ✅ fertig |
 
@@ -284,6 +273,9 @@ S10 Render-Pfad). Der Synth kommt zuletzt (S11), weil er alle Sense-Signale kons
   `setRenderOverride()` ersetzt den Render-Pass solange das Signal an ist (in XR
   übersprungen). near/far werden auf die 6 Kind-Kameras der CubeCamera geschrieben
   (das Prototyp-Setzen auf der CubeCamera selbst war wirkungslos).
+  **Wieder entfernt:** der Rundum-Sinn ist ersatzlos gestrichen — `src/senses/rundum/`
+  und der Renderer-Hook `setRenderOverride()` sind gelöscht, die Sinnes-Vokabel zählt
+  jetzt acht Ebenen (alle echte Layer, kein View-Mode mehr).
 - S11: Synth integriert. Der Designer-Code liegt UNVERÄNDERT (UI/UX/Kabel/Rezepte) als
   vendored App unter `src/synth/vendor/` (Tone fest 14.8.49, Biome-ignoriert, für tsc
   unsichtbar) und läuft auf einer eigenen Seite `synth.html` — weiterhin standalone
@@ -311,4 +303,3 @@ S10 Render-Pfad). Der Synth kommt zuletzt (S11), weil er alle Sense-Signale kons
 - Duftzonen an echte Vegetation koppeln, sobald es Pflanzen-Assets gibt (derzeit
   biome-gewichtete Streuung).
 - Prototyp-Ordner im Root löschen, sobald das Team sie nicht mehr als Referenz braucht.
-- VR-Pfad des Rundum-Sinns (im XR-Modus wird der Little-Planet-Pass übersprungen).

@@ -59,13 +59,6 @@ export interface Renderer {
    * session presents: a headset must never be handed a frameless loop.
    */
   setRenderPaused(paused: boolean): void;
-  /**
-   * Replace the default `render(scene, camera)` pass with a custom one (e.g. the
-   * 360° little-planet projection). The override receives a `defaultRender` thunk so
-   * it can fall back. Pass `null` to restore the default pass. Ignored while an XR
-   * session presents (the headset owns the projection).
-   */
-  setRenderOverride(override: ((defaultRender: () => void) => void) | null): void;
   /** Stop the loop, drop listeners, and release GPU resources. */
   dispose(): void;
 }
@@ -133,15 +126,11 @@ export async function createRenderer(): Promise<Renderer> {
     renderer.setSize(window.innerWidth, window.innerHeight);
   };
 
-  let renderOverride: ((defaultRender: () => void) => void) | null = null;
   let renderPaused = false;
 
   function start(onFrame?: (dtSeconds: number) => void): void {
     window.addEventListener("resize", onResize);
     let lastMs = 0;
-    const defaultRender = (): void => {
-      renderer.render(scene, camera);
-    };
     renderer.setAnimationLoop((nowMs: number) => {
       const dtSeconds = lastMs === 0 ? 0 : (nowMs - lastMs) / 1000;
       lastMs = nowMs;
@@ -149,11 +138,7 @@ export async function createRenderer(): Promise<Renderer> {
       if (renderPaused && !renderer.xr.isPresenting) {
         return; // an opaque menu covers the canvas — stream the world, draw nothing
       }
-      if (renderOverride && !renderer.xr.isPresenting) {
-        renderOverride(defaultRender);
-      } else {
-        defaultRender();
-      }
+      renderer.render(scene, camera);
     });
   }
 
@@ -177,9 +162,6 @@ export async function createRenderer(): Promise<Renderer> {
     },
     setRenderPaused(paused: boolean): void {
       renderPaused = paused;
-    },
-    setRenderOverride(override): void {
-      renderOverride = override;
     },
     dispose,
   };

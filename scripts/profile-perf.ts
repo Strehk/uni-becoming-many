@@ -103,17 +103,7 @@ const rows: Record<string, Awaited<ReturnType<typeof measure>>> = {};
 // still stream + simulate; this is the world's fixed cost.
 rows["void (kein Sinn)"] = await measure(2500);
 
-const senses = [
-  "Farben",
-  "Echo",
-  "Infrarot",
-  "UV",
-  "Duft",
-  "Netzwerk",
-  "Motion",
-  "Magnetfeld",
-  "Rundum",
-];
+const senses = ["Farben", "Echo", "Infrarot", "UV", "Duft", "Netzwerk", "Motion", "Magnetfeld"];
 for (const s of senses) {
   await solo(s);
   rows[s] = await measure(2500);

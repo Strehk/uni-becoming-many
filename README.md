@@ -4,7 +4,7 @@ Eine spekulative VR-Experience über kollektive Wahrnehmung, ökologische Verbun
 Frage, wie Realität überhaupt entsteht. Man fliegt als Gleiter durch eine zunächst weiße, fast
 leere Welt und erweitert die eigene Wahrnehmung Schritt für Schritt durch die Sinnessysteme
 anderer Lebensformen — Echoortung, Bewegungssehen, UV, Thermalsicht, chemische Wahrnehmung,
-Magnetfeldsinn, Schwarm-Netzwerk, 360°-Rundumblick. Die Sinne werden **gelayert, nicht ersetzt**:
+Magnetfeldsinn, Schwarm-Netzwerk. Die Sinne werden **gelayert, nicht ersetzt**:
 Die Welt wird mit jeder Ebene dichter, bis sie in Phase 3 bewusst überfordert und die Layer
 Schicht für Schicht wieder abgetragen werden, bis nur noch der Wind bleibt.
 

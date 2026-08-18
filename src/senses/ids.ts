@@ -1,5 +1,5 @@
 /**
- * The canonical sense vocabulary — the nine layerable perceptions of Becoming Many.
+ * The canonical sense vocabulary — the eight layerable perceptions of Becoming Many.
  *
  * Every module that reacts to a sense (terrain shader layers, scent particles, the
  * swarm network, the synth bridge, the Theatre envelopes, the dev UI) speaks in these
@@ -7,9 +7,8 @@
  * modules can all import it without cycles.
  *
  * Senses are LAYERS, not exclusive modes: each has an intensity 0..1 in
- * `signals.sense[id]`, and any combination may be active at once. (`rundum` is the
- * one exception in behaviour — it swaps the camera projection — but it shares the
- * same signal contract.)
+ * `signals.sense[id]`, and any combination may be active at once — every one of them
+ * composites into the same world rather than replacing the view.
  */
 export type SenseId =
   | "farben"
@@ -19,8 +18,7 @@ export type SenseId =
   | "duft"
   | "netzwerk"
   | "motion"
-  | "magnetfeld"
-  | "rundum";
+  | "magnetfeld";
 
 /** Canonical module ids. Keep this as the full set of real sense modules so
  *  signals, Theatre, synth cues and optional panels don't lose a cell when the
@@ -34,7 +32,6 @@ export const SENSE_ORDER: readonly SenseId[] = [
   "netzwerk",
   "motion",
   "magnetfeld",
-  "rundum",
 ];
 
 /** Senses that perceive only the AIR, not the world's surfaces. While solely an
@@ -46,7 +43,7 @@ export const AIR_ONLY_SENSES: ReadonlySet<SenseId> = new Set(["duft"]);
 export type SenseKeySlot = SenseId | null;
 
 /** Manual performance order. `null` is Luft: all sense layers off, white void.
- *  Ten slots on the digit row: keys 1–9 map to slots 1–9, key 0 to slot 10. */
+ *  Nine slots on the digit row: keys 1–9 map to slots 1–9. */
 export const SENSE_KEY_ORDER: readonly SenseKeySlot[] = [
   null,
   "echo",
@@ -57,7 +54,6 @@ export const SENSE_KEY_ORDER: readonly SenseKeySlot[] = [
   "duft",
   "magnetfeld",
   "netzwerk",
-  "rundum",
 ];
 
 export const SENSE_LABELS: Record<SenseId, string> = {
@@ -69,7 +65,6 @@ export const SENSE_LABELS: Record<SenseId, string> = {
   netzwerk: "Schwarm-Netzwerk",
   motion: "Bewegungssehen",
   magnetfeld: "Magnetfeld",
-  rundum: "360°-Rundumblick",
 };
 
 export function isSenseId(value: unknown): value is SenseId {
@@ -89,5 +84,4 @@ export const SENSE_SYNTH_MAP: Partial<Record<SenseId, string>> = {
   netzwerk: "rhythmus",
   motion: "motion",
   magnetfeld: "magnet",
-  rundum: "sicht",
 };

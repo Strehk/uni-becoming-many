@@ -146,7 +146,7 @@ export function createSenseControls(
     dot.className = "sc-dot";
     const title = document.createElement("span");
     title.className = "sc-title";
-    const key = (index + 1) % 10; // the digit key for this slot — slot 10 sits on "0"
+    const key = index + 1; // the digit key for this slot — nine slots on 1–9
     title.textContent = id === null ? `${key} · Luft` : `${key} · ${SENSE_LABELS[id]}`;
     const pct = document.createElement("b");
     pct.className = "sc-pct";

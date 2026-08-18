@@ -53,7 +53,6 @@ import { AIR_ONLY_SENSES, SENSE_ORDER, createSenses } from "./senses/index.ts";
 import { createMagnetfeldSense } from "./senses/magnetfeld/index.ts";
 import { createMotionSense } from "./senses/motion/index.ts";
 import { createNetzwerkSense } from "./senses/netzwerk/index.ts";
-import { LITTLE_PLANET_DEFAULTS, createRundumSense } from "./senses/rundum/index.ts";
 import { loadSenseState, savedSenseState, serializeSenseState } from "./senses/state.ts";
 import { bus, signals } from "./signals/index.ts";
 import { createSynthOverlay } from "./synth/index.ts";
@@ -334,19 +333,8 @@ window.addEventListener("pagehide", () => netzwerk.dispose());
 const motion = createMotionSense(renderer.scene, bus, creatures);
 window.addEventListener("pagehide", () => motion.dispose());
 
-// Rundum sense: the little-planet 360° projection replaces the render pass while
-// `signals.sense.rundum` is up (skipped in XR — the headset owns projection).
-const rundum = createRundumSense(renderer, bus);
-window.addEventListener("pagehide", () => rundum.dispose());
-
-// The five standalone sense descriptors (the shader senses serialize themselves).
-const senseModules = [
-  magnetfeld.controls,
-  duft.controls,
-  netzwerk.controls,
-  motion.controls,
-  rundum.controls,
-];
+// The four standalone sense descriptors (the shader senses serialize themselves).
+const senseModules = [magnetfeld.controls, duft.controls, netzwerk.controls, motion.controls];
 
 // Restore the committed sense look before the panels build: the shader senses'
 // params/blend/order via the SenseSystem, the standalone senses' params over the
@@ -538,8 +526,6 @@ const perfRouter = createPerfRouter({
     duftCount: savedSenseState.modules.duft.count,
     duftCheapNoise: savedSenseState.modules.duft.cheapNoise,
     motionLifetimeFrames: savedSenseState.modules.motion.lifetimeFrames,
-    rundumCubeSize: LITTLE_PLANET_DEFAULTS.cubeSize,
-    rundumCaptureInterval: LITTLE_PLANET_DEFAULTS.captureInterval,
   },
 });
 

@@ -229,23 +229,6 @@ export const SENSE_PROFILES: Record<AtmosphereId, SenseProfile> = {
     rimColor: 0x5cf0c8,
     dustStrength: 1,
   },
-  // 9 — 360° vision: warm, wide, near-continuous — the projection does the work.
-  rundum: {
-    id: "rundum",
-    label: SENSE_LABELS.rundum,
-    viewRadius: 560,
-    revealSoftness: 70,
-    depthLevels: 32,
-    fogNear: 80,
-    fogFar: 520,
-    rimPower: 1.5,
-    rimStrength: 0.3,
-    colorNear: 0x9aa06a,
-    colorFar: 0x6a7a88,
-    fogColor: 0x0c0a12,
-    rimColor: 0xffd9a0,
-    dustStrength: 1,
-  },
 };
 
 /**
