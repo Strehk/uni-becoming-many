@@ -25,7 +25,10 @@ page.on("console", (m) => logs.push(`[${m.type()}] ${m.text()}`));
 page.on("pageerror", (e) => logs.push(`[pageerror] ${e.message}`));
 
 await page.goto(URL, { waitUntil: "domcontentloaded" });
-await page.waitForSelector("text=Anleitung (Experiment)", { timeout: 30000 });
+// The operator entries live in the settings now, not on the start screen.
+await page.waitForSelector("text=Einstellungen", { timeout: 30000 });
+await page.click("text=Einstellungen");
+await page.waitForTimeout(600);
 await page.click("text=Anleitung (Experiment)");
 await page.waitForTimeout(600);
 console.log(

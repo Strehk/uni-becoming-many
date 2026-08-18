@@ -8,7 +8,8 @@
  *   - `pitch` — W/S: how far to tilt travel up/down. Feed into `Player.look`; the player treats
  *     it as an absolute offset, so on release the spring back to 0 re-levels (altitude kept).
  *
- * Both axes spring back to 0 when the keys release. Nothing here touches the player, renderer,
+ * Both axes spring back to 0 when the keys release — slower than they left it, so the flight
+ * settles out of a turn instead of snapping level. Nothing here touches the player, renderer,
  * or the controller: it only listens for keys and reports intent, so it drops in anywhere and
  * lifts out again with a single `dispose()`. Tick `update(dtSeconds)` once per frame to advance
  * the spring before reading `locomotion`.
@@ -27,10 +28,19 @@ export type KeyboardControlsOptions = Readonly<{
   /** Throttle multiplier while Shift is held. Defaults to 2. */
   boost?: number;
   /**
-   * Spring rate toward the target deflection, per second. Higher is snappier, lower is
-   * looser/floatier. Frame-rate independent. Defaults to 10.
+   * Spring rate toward a HELD deflection, per second. Higher is snappier, lower is
+   * looser/floatier. Frame-rate independent. Defaults to 3.2 — a glider's stick, not a
+   * switch: about a third of a second to reach full deflection.
    */
   stiffness?: number;
+  /**
+   * Spring rate back to centre once the key is released, per second. Deliberately slower
+   * than `stiffness` (defaults to 1.7): an aircraft settles out of a turn, it does not snap
+   * level, and since pitch here aims the flight path itself, a hard return would kick the
+   * whole trajectory. This asymmetry is most of what makes the keyboard feel flown rather
+   * than pressed.
+   */
+  releaseStiffness?: number;
 }>;
 
 /**
@@ -77,7 +87,8 @@ export interface KeyboardControls {
 export function createKeyboardControls(options: KeyboardControlsOptions = {}): KeyboardControls {
   const target = options.target ?? window;
   const boost = options.boost ?? 2;
-  const stiffness = options.stiffness ?? 10;
+  const stiffness = options.stiffness ?? 3.2;
+  const releaseStiffness = options.releaseStiffness ?? 1.7;
 
   const pressed = new Set<string>();
 
@@ -113,14 +124,22 @@ export function createKeyboardControls(options: KeyboardControlsOptions = {}): K
     return goal === 0 && Math.abs(next) < SETTLE_EPSILON ? 0 : next;
   };
 
+  /** Frame-rate-independent exponential approach at `rate` — same easing at 8 ms or 33 ms. */
+  const factorFor = (rate: number, dtSeconds: number): number => 1 - Math.exp(-rate * dtSeconds);
+
   const update = (dtSeconds: number): void => {
     if (dtSeconds <= 0) {
       return;
     }
-    const factor = 1 - Math.exp(-stiffness * dtSeconds);
-    locomotion.pitch = spring(locomotion.pitch, target_.pitch, factor);
-    locomotion.turn = spring(locomotion.turn, target_.turn, factor);
-    locomotion.throttle = spring(locomotion.throttle, target_.throttle, factor);
+    // Each axis eases at the rate its own direction of travel calls for: pushing into a
+    // deflection is the pilot's intent and may arrive briskly, returning to centre is the
+    // aircraft settling and takes its time.
+    const held = factorFor(stiffness, dtSeconds);
+    const releasing = factorFor(releaseStiffness, dtSeconds);
+    const rate = (goal: number): number => (goal === 0 ? releasing : held);
+    locomotion.pitch = spring(locomotion.pitch, target_.pitch, rate(target_.pitch));
+    locomotion.turn = spring(locomotion.turn, target_.turn, rate(target_.turn));
+    locomotion.throttle = spring(locomotion.throttle, target_.throttle, held);
   };
 
   const isBound = (code: string): boolean =>

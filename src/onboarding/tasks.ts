@@ -51,9 +51,14 @@ export interface TaskDef {
 }
 
 /**
- * The lesson: learn to steer, learn to climb and sink, then put it together by flying
- * through something. Arrows first, then real objects in the room — the sign teaches the
- * gesture, the gate asks for it.
+ * The lesson: learn to steer, learn to climb and sink, then put it together by flying through
+ * something. Arrows first, then real objects in the room — the sign teaches the gesture, the
+ * gate asks for it.
+ *
+ * The climb/sink amounts are deliberately modest. The airspace has a ceiling (the player's
+ * `maxAltitude`, which the timeline may lower further), and a task that asks for more height
+ * than is left above the flier can never be finished — the sign would just sit there while
+ * they hold the stick. Eight metres is unmistakable to fly and fits under any authored roof.
  */
 export const TASKS: readonly TaskDef[] = [
   {
@@ -80,7 +85,7 @@ export const TASKS: readonly TaskDef[] = [
     shape: "arrow-up",
     hint: "Steigen",
     sign: 1,
-    amount: 12,
+    amount: 8,
     dissolveFrom: [0, -1],
   },
   {
@@ -89,7 +94,7 @@ export const TASKS: readonly TaskDef[] = [
     shape: "arrow-down",
     hint: "Sinken",
     sign: -1,
-    amount: 10,
+    amount: 8,
     dissolveFrom: [0, 1],
   },
   {
