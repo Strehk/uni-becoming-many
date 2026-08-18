@@ -1,46 +1,32 @@
 // ── Becoming Many — Onboarding (EXPERIMENT) ────────────────────
 //
-// A wordless flying lesson made of air, and a gate on the piece: the timeline does not
-// start until the flier has actually flown. The opening is a white void with nothing but
-// drifting motes, so the lesson borrows that very material rather than laying an overlay
-// over it — dust gathers into a sign, the sign FILLS as you do the thing it asks for, and
-// when it is full it bursts and lets go.
+// A wordless flying lesson made of air, and a gate on the piece: the timeline does not start
+// until the flier has actually flown. The opening is a white void with nothing but drifting
+// motes, so the lesson borrows that very material rather than laying an overlay over it.
 //
-// It is a second, small mote field rather than a hijacking of `src/atmosphere` — the
-// atmosphere belongs to the whole piece and must not grow a teaching mode. It wears the
-// same sense uniforms, the same dark-fleck-in-fog colouring and the same soft round dot,
-// so the two read as one air.
+// The life of one mote, which is the whole idea:
 //
-// Three things carry the interaction, and all three live in the material:
+//   1. It hangs in the air, an ordinary speck like the atmosphere's.
+//   2. A task begins: it is drawn out of the air into the sign, growing as it goes, and it
+//      breathes there on two mismatched rates — a sign made of air, never a decal.
+//   3. The task is flown, and the sign is eaten away ACROSS its width from the side you are
+//      flying away from. When the front passes this mote, it is RELEASED.
+//   4. Released, it simply stops — keeping the world position it had at that instant and
+//      shrinking back to a speck. The flier passes it like any other dust.
+//   5. The next task gathers it back out of the air.
 //
-//   • **Fill** — every mote knows its RANK along the stroke (0 at the tail, 1 at the tip).
-//     Motes below the task's progress are firm and dark, the rest stay a faint outline. So
-//     the sign is always fully legible (you can see what is being asked) while the filled
-//     part answers, live, "yes — what you are doing right now is working".
-//   • **Pulse** — a bright wave travels along the rank while the task is open, which both
-//     animates the arrow and points along it.
-//   • **Burst** — on completion the motes push outward and flare, then dissolve.
+// That is why positions are computed on the CPU and uploaded as WORLD coordinates: a released
+// mote must stay where it was while the sign itself keeps riding in front of the eye, and
+// remembering a per-mote position across frames in the shader would mean a compute pass for
+// 260 points the CPU can place for free.
 //
-// Progress itself is measured off the FLIGHT, not off the keys (see tasks.ts), so the same
-// lesson works on the keyboard, on a phone's tilt and on the ICAROS machine.
+// Progress is measured off the FLIGHT, not off the keys (see tasks.ts), so the same lesson
+// works on the keyboard, on a phone's tilt and on the ICAROS machine.
 //
 // IMPORTANT — see AGENT.md "WebGPU rendering": node fns from `three/tsl`, classes from
 // `three/webgpu`. No GLSL.
 
-import {
-  attribute,
-  float,
-  fract,
-  hash,
-  instanceIndex,
-  mix,
-  positionView,
-  sin,
-  smoothstep,
-  uniform,
-  uv,
-  vec3,
-} from "three/tsl";
+import { attribute, float, mix, positionView, smoothstep, uniform, uv, vec3 } from "three/tsl";
 import * as THREE from "three/webgpu";
 import type { KitUniforms } from "../render/uniforms.ts";
 import type { OnboardingConcept } from "./concepts.ts";
@@ -51,15 +37,16 @@ export type { OnboardingConcept } from "./concepts.ts";
 
 /** Motes in the guiding field. Few and fat reads as air; many and fine reads as print. */
 const COUNT = 260;
-/** Radius of the resting cloud the motes drift in before they gather (m). */
-const CLOUD_RADIUS = 3.2;
 /** How far ahead the signs hang (m), and how big they are. */
 const SIGN_DISTANCE = 9;
 const SIGN_SCALE = 2.0;
 /** Inside this distance a gate counts as flown through (m). */
 const GATE_PASSED = 6;
-/** Mote radius (m). Far larger than an atmosphere speck — these are the stroke itself. */
-const MOTE_RADIUS = 0.2;
+/** Radius of a mote in the sign (m) and once released back into the air (m). */
+const MOTE_RADIUS = 0.13;
+const DUST_RADIUS = 0.05;
+/** How far a mote in the sign breathes (m). */
+const WOBBLE = 0.19;
 const TAU = 6.2831853;
 
 export interface CreateOnboardingOptions {
@@ -87,14 +74,14 @@ export interface Onboarding {
   dispose(): void;
 }
 
-type Phase = "gather" | "work" | "success" | "release" | "gap" | "done";
+type Phase = "gather" | "work" | "release" | "gap" | "done";
 
 export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
   const group = new THREE.Group();
   group.name = "onboarding-guide";
   opts.scene.add(group);
 
-  // ── geometry: a quad per mote, its resting place, its point on the sign, its rank ──
+  // ── geometry ──
   const base = new THREE.PlaneGeometry(1, 1);
   const position = base.getAttribute("position");
   const uvAttr = base.getAttribute("uv");
@@ -106,105 +93,47 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
   geometry.setAttribute("position", position);
   geometry.setAttribute("uv", uvAttr);
 
-  const rest = new Float32Array(COUNT * 3);
-  for (let i = 0; i < COUNT; i++) {
-    const dir = new THREE.Vector3(
-      Math.random() * 2 - 1,
-      Math.random() * 2 - 1,
-      Math.random() * 2 - 1,
-    ).normalize();
-    const r = CLOUD_RADIUS * Math.cbrt(Math.random());
-    rest[i * 3 + 0] = dir.x * r;
-    rest[i * 3 + 1] = dir.y * r * 0.7;
-    rest[i * 3 + 2] = dir.z * r;
-  }
-  geometry.setAttribute("guideRest", new THREE.InstancedBufferAttribute(rest, 3));
+  const positions = new Float32Array(COUNT * 3); // world space, CPU-written (see header)
+  const positionAttr = new THREE.InstancedBufferAttribute(positions, 3);
+  positionAttr.setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute("guidePos", positionAttr);
 
-  const targets = new Float32Array(COUNT * 3);
-  const targetAttr = new THREE.InstancedBufferAttribute(targets, 3);
-  targetAttr.setUsage(THREE.DynamicDrawUsage);
-  geometry.setAttribute("guideTarget", targetAttr);
+  const sizes = new Float32Array(COUNT);
+  const sizeAttr = new THREE.InstancedBufferAttribute(sizes, 1);
+  sizeAttr.setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute("guideSize", sizeAttr);
   geometry.instanceCount = COUNT;
 
-  // ── uniforms ──
-  const uForm = uniform(0); // cloud → sign
-  const uProgress = uniform(0); // how much of the sign is filled in
-  const uSuccess = uniform(0); // the completion burst
-  const uDissolve = uniform(new THREE.Vector3(0, 0, 0)); // direction the sign is eaten from
-  const uSpan = uniform(new THREE.Vector2(0, 1)); // projection min + range along that axis
-  const uFade = uniform(0);
-  const uClock = uniform(0);
+  /** The sign's points in its own frame (+x right, +y up), rewritten per task. */
+  const targets = new Float32Array(COUNT * 3);
+  /** Where each mote sits along the dissolve axis, 0 (last to go) … 1 (first to go). */
+  const along = new Float32Array(COUNT);
+  /** Motes that have been given up and now hang still in the world. */
+  const released = new Uint8Array(COUNT);
+  /** A released mote's world position — also where a gathering mote starts from. */
+  const free = new Float32Array(COUNT * 3);
+  /** Per-mote size jitter and phase, so the stroke is not made of identical dots. */
+  const jitter = new Float32Array(COUNT);
+  const stagger = new Float32Array(COUNT);
+  for (let i = 0; i < COUNT; i++) {
+    jitter[i] = 0.8 + Math.random() * 0.45;
+    stagger[i] = Math.random();
+  }
 
-  // ── material ──
+  // ── material: it only reads the two CPU-written attributes ──
+  const uFade = uniform(0); // the field's own presence
+
   const material = new THREE.SpriteNodeMaterial();
-  // Opaque pass with alpha test, exactly like the atmosphere: the WebGPU WebXR path does
-  // not present the transparent pass, so a blended field would vanish in the headset.
+  // Opaque pass with alpha test, exactly like the atmosphere: the WebGPU WebXR path does not
+  // present the transparent pass, so a blended field would vanish in the headset.
   material.transparent = false;
   material.depthWrite = true;
   material.alphaTest = 0.5;
   material.alphaToCoverage = true;
   material.sizeAttenuation = true;
 
-  const restPos = attribute<"vec3">("guideRest", "vec3");
-  const target = attribute<"vec3">("guideTarget", "vec3");
-
-  // Per-mote stagger, so the sign gathers and dissolves like settling dust.
-  const stagger = hash(instanceIndex);
-  const gathered = smoothstep(stagger.mul(0.4), stagger.mul(0.4).add(0.6), uForm);
-
-  // Where this mote sits along the dissolve axis, 0 (last to go) … 1 (first to go). Straight
-  // across the shape — a mote at the right-hand end leaves first when the sign eats from the
-  // right, no matter where it falls in the drawing order.
-  const along = target.dot(uDissolve).sub(uSpan.x).div(uSpan.y).clamp(0.0, 1.0);
-  // Everything beyond the front has already been given up. The front walks across as the
-  // task is flown, and `givenUp` is how far gone a mote is: it drifts off and shrinks away.
-  const front = uProgress.oneMinus();
-  const givenUp = smoothstep(front, front.add(0.14), along).mul(uProgress.min(1.0));
-
-  // A slow wave travelling against the dissolve, i.e. along the arrow — it keeps the sign
-  // alive and points the way.
-  const wave = fract(along.add(uClock.mul(0.3)))
-    .oneMinus()
-    .pow(5.0);
-
-  const phase = stagger.mul(TAU);
-  const drift = vec3(
-    sin(uClock.mul(0.5).add(phase)),
-    sin(uClock.mul(0.35).add(phase.mul(1.7))),
-    sin(uClock.mul(0.42).add(phase.mul(2.3))),
-  ).mul(0.35);
-
-  // …and the same breathing, much smaller, while gathered: the sign is made of air and must
-  // never stand still like a decal.
-  // Deliberately incommensurable rates, so the motes never fall into a common rhythm and
-  // the sign keeps breathing instead of pulsing.
-  const wobble = vec3(
-    sin(uClock.mul(0.41).add(phase)).add(sin(uClock.mul(0.97).add(phase.mul(2.3))).mul(0.4)),
-    sin(uClock.mul(0.33).add(phase.mul(1.4))).add(sin(uClock.mul(0.79).add(phase)).mul(0.4)),
-    sin(uClock.mul(0.27).add(phase.mul(2.1))),
-  ).mul(0.19);
-
-  // On success every mote pushes outward from the sign's middle — the sign blows apart
-  // rather than merely fading, so completion is unmistakable.
-  const burst = target.normalize().mul(uSuccess.mul(2.4));
-  // Given-up motes blow away along the dissolve axis, with a little sideways wander so they
-  // scatter like dust rather than sliding off on rails.
-  const blown = uDissolve.mul(givenUp.mul(3.2)).add(drift.mul(givenUp.mul(1.6)));
-  const signPos = target.add(wobble).add(burst).add(blown);
-  material.positionNode = mix(restPos.add(drift), signPos, gathered);
-
-  // Earned stroke vs. outline is carried by SIZE, not by opacity. The field renders in the
-  // opaque pass with `alphaTest` (the atmosphere's VR-safe setup), which discards anything
-  // under half alpha — a "faint" mote would not be faint there, it would be gone. So an
-  // unearned mote is a fine speck, an earned one a fat one, and the stroke visibly thickens
-  // along its length as the task is flown.
-  const signSize = givenUp
-    .oneMinus() // a mote that has been given up shrinks to nothing as it drifts off
-    .mul(wave.mul(0.25).add(1.0));
-  material.scaleNode = float(MOTE_RADIUS)
-    .mul(hash(instanceIndex.add(101)).mul(0.45).add(0.8))
-    .mul(mix(float(0.25), signSize, gathered))
-    .mul(uSuccess.mul(0.5).add(1.0));
+  material.positionNode = attribute<"vec3">("guidePos", "vec3");
+  material.scaleNode = attribute<"float">("guideSize", "float");
 
   // Look: the atmosphere's dark fleck wearing the sense fog, so the guide is the same air.
   const dist = positionView.z.negate();
@@ -215,10 +144,11 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
   material.colorNode = mix(vec3(0.0, 0.0, 0.0), opts.uniforms.fogColor, fogT);
 
   const r = uv().sub(0.5).length().mul(2.0);
-  const disc = smoothstep(float(1.0), float(0.0), r);
-  // Opacity only carries the round dot and the field's own fade — every other distinction
-  // lives in the size above, for the alphaTest reason given there.
-  material.opacityNode = disc.mul(0.95).mul(uFade);
+  // Released motes stay where they were let go, so the flier eventually passes right through
+  // them — without the atmosphere's near fade they would smear across the whole view a metre
+  // from the eye. Same numbers as the dust, so the two behave alike up close.
+  const nearFade = smoothstep(float(1.5), float(6.0), dist);
+  material.opacityNode = smoothstep(float(1.0), float(0.0), r).mul(nearFade).mul(0.95).mul(uFade);
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
@@ -242,6 +172,7 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
   const lastSample: FlightSample = { x: 0, y: 0, z: 0, yaw: 0 };
   /** How much of the asked-for motion has been made, in the task's own unit. */
   let earned = 0;
+
   const gatePos = new THREE.Vector3();
   let gateStartDistance = 1;
   let gatePlanted = false;
@@ -249,6 +180,10 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
   const camPos = new THREE.Vector3();
   const camQuat = new THREE.Quaternion();
   const forward = new THREE.Vector3();
+  const right = new THREE.Vector3();
+  const up = new THREE.Vector3();
+  const anchor = new THREE.Vector3();
+  const scratch = new THREE.Vector3();
 
   const task = (): TaskDef | undefined => TASKS[index];
 
@@ -257,20 +192,18 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
     phaseName = current ? "gather" : "done";
     elapsed = 0;
     progress = 0;
-    uProgress.value = 0;
-    uSuccess.value = 0;
-    gatePlanted = false;
     earned = 0;
+    gatePlanted = false;
+    released.fill(0); // whatever is hanging in the air is gathered back up
     Object.assign(lastSample, sample);
     if (!current) return;
+
     const scale = current.kind === "gate" ? (current.radius ?? 6) : SIGN_SCALE;
     fillShape(current.shape, targets, COUNT, scale);
-    targetAttr.needsUpdate = true;
 
-    // Measure the shape along the dissolve axis, so the front can walk across it in a
-    // straight sweep no matter how the strokes happen to be laid out.
+    // Measure the shape along the dissolve axis, so the front can walk across it in a straight
+    // sweep no matter how the strokes happen to be laid out.
     const [ax, ay] = current.dissolveFrom;
-    uDissolve.value.set(ax, ay, 0);
     let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
     for (let i = 0; i < COUNT; i++) {
@@ -278,7 +211,11 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
       if (p < min) min = p;
       if (p > max) max = p;
     }
-    uSpan.value.set(min, Math.max(1e-3, max - min));
+    const range = Math.max(1e-3, max - min);
+    for (let i = 0; i < COUNT; i++) {
+      const p = (targets[i * 3] ?? 0) * ax + (targets[i * 3 + 1] ?? 0) * ay;
+      along[i] = ax === 0 && ay === 0 ? 0 : (p - min) / range;
+    }
   };
 
   const restart = (sample: FlightSample): void => {
@@ -288,29 +225,80 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
   };
 
   /** Signs ride in front of the eye; gates are planted once and then stand in the world. */
-  const place = (current: TaskDef | undefined): void => {
+  const placeAnchor = (current: TaskDef | undefined): void => {
     opts.camera.getWorldPosition(camPos);
     opts.camera.getWorldQuaternion(camQuat);
     forward.set(0, 0, -1).applyQuaternion(camQuat);
+    right.set(1, 0, 0).applyQuaternion(camQuat);
+    up.set(0, 1, 0).applyQuaternion(camQuat);
 
     if (current?.kind === "gate") {
       if (!gatePlanted) {
-        // Plant it along the HEADING, level with the flier — not along the gaze. The gaze
-        // may still be tilted from the climb task that just ended, which would hang the ring
-        // above or below the path and make it unreachable without anyone understanding why.
-        forward.y = 0;
-        if (forward.lengthSq() < 1e-6) forward.set(0, 0, -1);
-        forward.normalize();
-        gatePos.copy(camPos).addScaledVector(forward, current.distance ?? 70);
+        // Plant it along the HEADING, level with the flier — not along the gaze. The gaze may
+        // still be tilted from the climb task that just ended, which would hang the ring above
+        // or below the path and make it unreachable without anyone understanding why.
+        scratch.copy(forward);
+        scratch.y = 0;
+        if (scratch.lengthSq() < 1e-6) scratch.set(0, 0, -1);
+        scratch.normalize();
+        gatePos.copy(camPos).addScaledVector(scratch, current.distance ?? 70);
         gateStartDistance = Math.max(1, camPos.distanceTo(gatePos));
         gatePlanted = true;
       }
-      group.position.copy(gatePos);
-      group.quaternion.copy(camQuat); // face the flier, so it stays a ring to aim at
+      anchor.copy(gatePos);
       return;
     }
-    group.position.copy(camPos).addScaledVector(forward, SIGN_DISTANCE);
-    group.quaternion.copy(camQuat);
+    anchor.copy(camPos).addScaledVector(forward, SIGN_DISTANCE);
+  };
+
+  /** Place every mote for this frame — see the life-of-a-mote note in the header. */
+  const placeMotes = (formMix: number): void => {
+    for (let i = 0; i < COUNT; i++) {
+      const i3 = i * 3;
+      const own = stagger[i] ?? 0;
+      const gathered = Math.max(0, Math.min(1, (formMix - own * 0.4) / 0.6));
+
+      // The front walks across the sign as the task is flown; whoever it passes lets go.
+      if (released[i] === 0 && progress > 0 && 1 - (along[i] ?? 0) < progress) {
+        released[i] = 1;
+        free[i3] = positions[i3] ?? 0;
+        free[i3 + 1] = positions[i3 + 1] ?? 0;
+        free[i3 + 2] = positions[i3 + 2] ?? 0;
+      }
+
+      if (released[i] === 1) {
+        // Stopped: it keeps its world place and is a speck again. The flier passes it.
+        positions[i3] = free[i3] ?? 0;
+        positions[i3 + 1] = free[i3 + 1] ?? 0;
+        positions[i3 + 2] = free[i3 + 2] ?? 0;
+        sizes[i] = DUST_RADIUS * (jitter[i] ?? 1);
+        continue;
+      }
+
+      // Two mismatched rates per axis: the motes never fall into a common rhythm, so the sign
+      // keeps breathing instead of pulsing.
+      const phase = own * TAU;
+      const wobbleX = Math.sin(clock * 0.41 + phase) + 0.4 * Math.sin(clock * 0.97 + phase * 2.3);
+      const wobbleY = Math.sin(clock * 0.33 + phase * 1.4) + 0.4 * Math.sin(clock * 0.79 + phase);
+      const wobbleZ = Math.sin(clock * 0.27 + phase * 2.1);
+
+      scratch
+        .copy(anchor)
+        .addScaledVector(right, (targets[i3] ?? 0) + wobbleX * WOBBLE)
+        .addScaledVector(up, (targets[i3 + 1] ?? 0) + wobbleY * WOBBLE)
+        .addScaledVector(forward, (targets[i3 + 2] ?? 0) + wobbleZ * WOBBLE);
+
+      // Gathering: out of wherever it was left hanging, into the sign.
+      const fx = free[i3] ?? scratch.x;
+      const fy = free[i3 + 1] ?? scratch.y;
+      const fz = free[i3 + 2] ?? scratch.z;
+      positions[i3] = fx + (scratch.x - fx) * gathered;
+      positions[i3 + 1] = fy + (scratch.y - fy) * gathered;
+      positions[i3 + 2] = fz + (scratch.z - fz) * gathered;
+      sizes[i] = (DUST_RADIUS + (MOTE_RADIUS - DUST_RADIUS) * gathered) * (jitter[i] ?? 1);
+    }
+    positionAttr.needsUpdate = true;
+    sizeAttr.needsUpdate = true;
   };
 
   return {
@@ -343,31 +331,27 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
       }
       mesh.visible = true;
       clock += dtSeconds;
-      uClock.value = clock;
 
       const current = task();
-      place(current);
+      placeAnchor(current);
       if (phaseName === "done" || !current) {
-        uForm.value = 0;
+        placeMotes(0);
         return;
       }
       elapsed += dtSeconds;
 
       switch (phaseName) {
         case "gather": {
-          uForm.value = Math.min(1, elapsed / 1.0);
-          // Nothing counts until the ask is legible — the flier cannot answer a question
-          // they have not been shown yet.
+          // Nothing counts until the ask is legible — the flier cannot answer a question they
+          // have not been shown yet.
           Object.assign(lastSample, sample);
-          if (elapsed >= 1.0) {
+          if (elapsed >= 1.2) {
             phaseName = "work";
             elapsed = 0;
           }
           break;
         }
         case "work": {
-          uForm.value = 1;
-          // The demo staging runs itself, so the look can be judged without flying.
           if (concept === "demo") {
             progress = Math.min(1, progress + dtSeconds / 2.5);
           } else if (current.kind === "gate") {
@@ -380,51 +364,38 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
             // Flown THROUGH, not merely approached — that is what finishes a gate.
             if (camPos.distanceTo(gatePos) < GATE_PASSED) progress = 1;
           } else {
-            // Wrong-way flying gives ground back; standing still simply holds. The task
-            // waits — it is a lesson, not a timed exam.
+            // Wrong-way flying gives ground back; standing still simply holds. The task waits.
             const gain = taskGain(current, lastSample, sample);
             earned = Math.max(0, earned + gain);
             progress = Math.min(1, earned / current.amount);
           }
           Object.assign(lastSample, sample);
-          uProgress.value = progress;
           if (DEBUG) {
             debugTimer += dtSeconds;
             if (debugTimer > 0.5) {
               debugTimer = 0;
               console.log(
-                `[onboarding] ${current.id} y=${sample.y.toFixed(1)} earned=${earned.toFixed(2)}/${current.amount.toFixed(2)} p=${progress.toFixed(2)}`,
+                `[onboarding] ${current.id} earned=${earned.toFixed(2)}/${current.amount.toFixed(2)} p=${progress.toFixed(2)}`,
               );
             }
           }
+          // The sign has been eaten away entirely — nothing left to dissolve, so move on.
           if (progress >= 1) {
-            phaseName = "success";
-            elapsed = 0;
-          }
-          break;
-        }
-        case "success": {
-          uProgress.value = 1;
-          uSuccess.value = Math.min(1, elapsed / 0.35);
-          if (elapsed >= 0.55) {
             phaseName = "release";
             elapsed = 0;
           }
           break;
         }
         case "release": {
-          uSuccess.value = 1;
-          uForm.value = Math.max(0, 1 - elapsed / 0.8);
-          if (elapsed >= 0.8) {
+          // A held beat with the last motes hanging where they were let go, then on.
+          if (elapsed >= 0.6) {
             phaseName = "gap";
             elapsed = 0;
           }
           break;
         }
         case "gap": {
-          uForm.value = 0;
-          uSuccess.value = 0;
-          if (elapsed >= 0.7) {
+          if (elapsed >= 0.5) {
             index++;
             if (index >= TASKS.length) {
               phaseName = "done";
@@ -440,6 +411,12 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
           break;
         }
       }
+
+      // Gates never dissolve, so their motes stay gathered; a sign fades its remaining motes
+      // back into the air over the gap.
+      const gathering = phaseName === "gather" ? Math.min(1, elapsed / 1.2) : 1;
+      const letting = phaseName === "gap" ? Math.max(0, 1 - elapsed / 0.5) : gathering;
+      placeMotes(letting);
     },
 
     dispose(): void {
