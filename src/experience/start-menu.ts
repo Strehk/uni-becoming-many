@@ -276,7 +276,7 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
 
     const onboarding = entry(
       "Anleitung (Experiment)",
-      "Eine wortlose Einführung aus Luftpartikeln — drei Fassungen zum Vergleichen.",
+      "Eine wortlose Flugschule aus Luftpartikeln. Das Stück beginnt erst danach.",
       "quiet",
       renderOnboarding,
     );
@@ -302,8 +302,8 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     const lede = document.createElement("p");
     lede.className = "bm-menu__lede";
     lede.textContent =
-      "Ein Versuch: Die Luftpartikel selbst zeigen, wie geflogen wird — sie sammeln sich zu " +
-      "einem Zeichen und lösen sich wieder auf. Drei Fassungen, alle im leeren Startraum.";
+      "Ein Versuch: Die Luftpartikel selbst bringen das Fliegen bei. Jede Aufgabe füllt sich, " +
+      "während du sie fliegst — erst wenn alle geschafft sind, beginnt das Stück.";
     head.append(title, lede);
 
     const list = document.createElement("div");

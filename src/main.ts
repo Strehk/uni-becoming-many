@@ -137,6 +137,21 @@ window.addEventListener("pagehide", () => life.dispose());
 const atmosphere = createAtmosphere({ scene: renderer.scene, uniforms: senses.uniforms });
 window.addEventListener("pagehide", () => atmosphere.dispose());
 
+/**
+ * The rig's heading, in radians, straight off its quaternion — the rotated forward axis.
+ *
+ * NOT `rig.rotation.y`: an Euler's middle angle is confined to ±90° and folds back beyond it
+ * (x and z jump to π instead), so a rig that keeps turning right reports itself turning back
+ * again — which is precisely what the lesson's turn tasks measure. This has no such seam.
+ * (Only the sine/cosine of the forward vector are needed, so no Vector3 is allocated.)
+ */
+const playerHeading = (): number => {
+  const { x, y, z, w } = player.rig.quaternion;
+  const forwardX = -2 * (x * z + w * y);
+  const forwardZ = -(1 - 2 * (x * x + y * y));
+  return Math.atan2(forwardX, forwardZ);
+};
+
 // EXPERIMENT — the wordless flight lesson: a second, small mote field that gathers into
 // signs in front of the player (see src/onboarding). Dormant unless the start menu asks
 // for it, and made of the same air as the atmosphere above, so the empty room stays empty.
@@ -145,6 +160,8 @@ const onboarding = createOnboarding({
   uniforms: senses.uniforms,
   camera: renderer.camera,
   concept: appSettings.onboardingConcept,
+  // Finishing the lesson is what starts the piece — no separate "press Enter" gate.
+  onComplete: () => clock.resume(),
 });
 window.addEventListener("pagehide", () => onboarding.dispose());
 
@@ -677,7 +694,11 @@ if (!useTheatreStudio) {
    * sensor is the one failure that aborts the start: without it the mobile mode has no
    * steering at all. Shared by the ordinary entry and by the onboarding experiment.
    */
-  const beginFlight = async (next: ExperienceConfig, mode: ExperienceMode): Promise<boolean> => {
+  const beginFlight = async (
+    next: ExperienceConfig,
+    mode: ExperienceMode,
+    options: { skipGate?: boolean } = {},
+  ): Promise<boolean> => {
     if (mode === "mobile") {
       if (!(await gyro.enable())) {
         return false;
@@ -690,8 +711,12 @@ if (!useTheatreStudio) {
     // Fullscreen in every mode; only the phone gets the landscape lock.
     await enterImmersiveViewport({ lockLandscape: mode === "mobile" });
     rewindToStart(next);
-    clock.pause(); // stay frozen at t=0 until the gate fires
-    armStartGate(mode === "mobile");
+    clock.pause(); // stay frozen at t=0 until the gate (or the lesson) says go
+    if (options.skipGate === true) {
+      setInterfaceMode("playback");
+    } else {
+      armStartGate(mode === "mobile");
+    }
     return true;
   };
 
@@ -731,10 +756,14 @@ if (!useTheatreStudio) {
     async onOnboarding(next, mode, concept) {
       appSettings = { ...appSettings, onboardingConcept: concept };
       saveAppSettings(appSettings);
-      const started = await beginFlight(next, mode);
+      const started = await beginFlight(next, mode, { skipGate: true });
       if (!started) {
         return false;
       }
+      // The lesson itself is the gate now: the timeline stays at t=0 until the last task
+      // has been flown (see the onComplete wiring where `onboarding` is created).
+      startGate?.dispose();
+      startGate = undefined;
       onboarding.setConcept(concept);
       onboarding.setActive(true);
       return true;
@@ -900,7 +929,14 @@ renderer.start((dtSeconds) => {
   life.update(dtSeconds); // 7. pump time / unrest / intensity / sense into the flora uniforms
   grass.update(dtSeconds); // GPU grass: snap, repaint field texture, dispatch compute (void-gated)
   atmosphere.update(dtSeconds); // 8. pump player pose + virtual clock into the dust uniforms
-  onboarding.update(dtSeconds); // EXPERIMENT: the particle lesson, dormant unless asked for
+  // EXPERIMENT: the particle lesson reads the flight itself (heading + altitude), so its
+  // progress means "this is working" on the keyboard, the phone and the ICAROS alike.
+  onboarding.update(dtSeconds, {
+    x: player.rig.position.x,
+    y: player.rig.position.y,
+    z: player.rig.position.z,
+    yaw: playerHeading(),
+  });
   m5Panel.update(); // dev console readout (self-throttled to ~8/s)
 });
 

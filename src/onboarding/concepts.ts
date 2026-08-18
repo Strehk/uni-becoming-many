@@ -1,10 +1,14 @@
-// ── Becoming Many — Onboarding concepts (EXPERIMENT) ───────────
+// ── Becoming Many — Onboarding stagings (EXPERIMENT) ───────────
 //
-// The catalogue of stagings, kept apart from the field itself so the menu and the settings
-// can name a concept without pulling three.js in behind them. PURE DATA.
+// Kept apart from the field itself so the menu and the settings can name a staging without
+// pulling three.js in behind them. PURE DATA.
 
-/** Which staging of the wordless flight lesson runs. */
-export type OnboardingConcept = "zeichen" | "strom" | "tor";
+/** How the lesson runs. */
+export type OnboardingConcept =
+  /** The real thing: each task waits until it has actually been flown. */
+  | "tutorial"
+  /** Hands-off run-through at a fixed pace — for judging the look without flying. */
+  | "demo";
 
 export const ONBOARDING_CONCEPTS: readonly {
   readonly id: OnboardingConcept;
@@ -12,25 +16,20 @@ export const ONBOARDING_CONCEPTS: readonly {
   readonly note: string;
 }[] = [
   {
-    id: "zeichen",
-    label: "Zeichen",
-    note: "Der Staub sammelt sich zu Pfeilen und einem Ring, hält kurz und löst sich wieder auf.",
+    id: "tutorial",
+    label: "Tutorial",
+    note: "Erst wenn du die Aufgabe wirklich geflogen bist, kommt die nächste — danach beginnt das Stück.",
   },
   {
-    id: "strom",
-    label: "Strom",
-    note: "Kein Symbol — die Luft zieht in die Richtung, in die du steuern sollst.",
-  },
-  {
-    id: "tor",
-    label: "Tore",
-    note: "Ringe stehen im Raum. Fliege hindurch, dann erscheint der nächste.",
+    id: "demo",
+    label: "Vorführung",
+    note: "Läuft von selbst durch, ohne dass du fliegen musst — nur zum Ansehen.",
   },
 ];
 
-export const DEFAULT_ONBOARDING_CONCEPT: OnboardingConcept = "zeichen";
+export const DEFAULT_ONBOARDING_CONCEPT: OnboardingConcept = "tutorial";
 
-/** Narrow an unknown (a stored setting, a URL param) to a concept. */
+/** Narrow an unknown (a stored setting, a URL param) to a staging. */
 export function asOnboardingConcept(value: unknown): OnboardingConcept | null {
-  return value === "zeichen" || value === "strom" || value === "tor" ? value : null;
+  return value === "tutorial" || value === "demo" ? value : null;
 }

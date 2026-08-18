@@ -1,27 +1,28 @@
 // ── Becoming Many — Onboarding (EXPERIMENT) ────────────────────
 //
-// A wordless flight lesson made of air. The piece opens in a white void with nothing but
-// drifting motes, and this borrows that same material to say "steer right", "climb",
-// "fly through here" — dust gathers into a sign, holds, and lets go again. No labels, no
-// overlay, nothing that reads as UI: the emptiness stays the emptiness.
+// A wordless flying lesson made of air, and a gate on the piece: the timeline does not
+// start until the flier has actually flown. The opening is a white void with nothing but
+// drifting motes, so the lesson borrows that very material rather than laying an overlay
+// over it — dust gathers into a sign, the sign FILLS as you do the thing it asks for, and
+// when it is full it bursts and lets go.
 //
-// It is a SECOND, small mote field rather than a hijacking of `src/atmosphere` — the
-// atmosphere belongs to the whole piece and must not grow a teaching mode. This field
-// wears the same look (the sense `KitUniforms`, the same dark-fleck-in-fog colouring, the
-// same soft round dot) so the two read as one air.
+// It is a second, small mote field rather than a hijacking of `src/atmosphere` — the
+// atmosphere belongs to the whole piece and must not grow a teaching mode. It wears the
+// same sense uniforms, the same dark-fleck-in-fog colouring and the same soft round dot,
+// so the two read as one air.
 //
-// Three concepts are on offer, because the right answer here is a question of taste and
-// wants to be flown, not argued (the start menu picks one):
+// Three things carry the interaction, and all three live in the material:
 //
-//   • `zeichen` — signs form in front of you: → ← ↑ ↓ and a ring. The most explicit.
-//   • `strom`   — no glyph at all; the dust simply STREAMS the way you should go, and you
-//                 read the direction off the motion the way you read wind off a field.
-//   • `tor`     — world-fixed rings hang ahead; flying through one dissolves it and the
-//                 next appears. The lesson is the doing.
+//   • **Fill** — every mote knows its RANK along the stroke (0 at the tail, 1 at the tip).
+//     Motes below the task's progress are firm and dark, the rest stay a faint outline. So
+//     the sign is always fully legible (you can see what is being asked) while the filled
+//     part answers, live, "yes — what you are doing right now is working".
+//   • **Pulse** — a bright wave travels along the rank while the task is open, which both
+//     animates the arrow and points along it.
+//   • **Burst** — on completion the motes push outward and flare, then dissolve.
 //
-// Shape → motes: `shapes.ts` samples strokes into points; the material blends each mote
-// between its resting place in the cloud and its point on the sign, staggered per mote so
-// the sign gathers and dissolves rather than snapping.
+// Progress itself is measured off the FLIGHT, not off the keys (see tasks.ts), so the same
+// lesson works on the keyboard, on a phone's tilt and on the ICAROS machine.
 //
 // IMPORTANT — see AGENT.md "WebGPU rendering": node fns from `three/tsl`, classes from
 // `three/webgpu`. No GLSL.
@@ -29,6 +30,7 @@
 import {
   attribute,
   float,
+  fract,
   hash,
   instanceIndex,
   mix,
@@ -42,7 +44,8 @@ import {
 import * as THREE from "three/webgpu";
 import type { KitUniforms } from "../render/uniforms.ts";
 import type { OnboardingConcept } from "./concepts.ts";
-import { type ShapeId, fillShape } from "./shapes.ts";
+import { fillShape } from "./shapes.ts";
+import { type FlightSample, TASKS, type TaskDef, gateProgress, taskGain } from "./tasks.ts";
 
 export type { OnboardingConcept } from "./concepts.ts";
 
@@ -50,14 +53,11 @@ export type { OnboardingConcept } from "./concepts.ts";
 const COUNT = 900;
 /** Radius of the resting cloud the motes drift in before they gather (m). */
 const CLOUD_RADIUS = 3.2;
-/** How far ahead the signs hang (m). */
-const SIGN_DISTANCE = 7;
-/** Sign size (m) — the arrow spans roughly twice this. */
-const SIGN_SCALE = 1.6;
-/** Where a gate is planted ahead of the player (m), and how near counts as "through". */
-const GATE_DISTANCE = 26;
-const GATE_SCALE = 3.4;
-const GATE_PASSED = 5;
+/** How far ahead the signs hang (m), and how big they are. */
+const SIGN_DISTANCE = 9;
+const SIGN_SCALE = 2.0;
+/** Inside this distance a gate counts as flown through (m). */
+const GATE_PASSED = 6;
 /** Mote radius (m), matching the atmosphere's speck size. */
 const MOTE_RADIUS = 0.075;
 const TAU = 6.2831853;
@@ -66,67 +66,35 @@ export interface CreateOnboardingOptions {
   scene: THREE.Scene;
   /** The live sense uniforms — the same set terrain, flora and dust wear. */
   uniforms: KitUniforms;
-  /** The presenting camera; the signs are placed relative to where it looks. */
+  /** The presenting camera; signs are placed relative to where it looks. */
   camera: THREE.Camera;
   concept?: OnboardingConcept;
+  /** Called once when the last task is done — the host starts the piece here. */
+  onComplete?: () => void;
 }
 
 export interface Onboarding {
   readonly group: THREE.Group;
-  /** Switch staging and start it from the top. */
+  /** The task now running, for a host that wants to show its hint. */
+  readonly currentHint: string;
+  /** 0..1 through the whole lesson. */
+  readonly overallProgress: number;
   setConcept(concept: OnboardingConcept): void;
-  /** Run the lesson from the beginning (also re-arms after it has finished). */
-  restart(): void;
-  /** Fade the whole field out and stop stepping (the lesson is over / never asked for). */
+  /** Arm the lesson from the top (or fade it away). */
   setActive(active: boolean): void;
-  update(dtSeconds: number): void;
+  /** Advance one frame. `sample` is where the flier is now. */
+  update(dtSeconds: number, sample: FlightSample): void;
   dispose(): void;
 }
 
-/** One beat of a lesson. */
-interface Beat {
-  readonly shape: ShapeId;
-  /** Seconds to gather, to hold, to let go. */
-  readonly gather: number;
-  readonly hold: number;
-  readonly release: number;
-  /** Direction the stream flows in, for the `strom` concept (local x/y). */
-  readonly flow?: readonly [number, number];
-}
-
-const SIGN_BEATS: readonly Beat[] = [
-  { shape: "arrow-right", gather: 1.1, hold: 1.4, release: 0.9 },
-  { shape: "arrow-left", gather: 1.1, hold: 1.4, release: 0.9 },
-  { shape: "arrow-up", gather: 1.1, hold: 1.4, release: 0.9 },
-  { shape: "arrow-down", gather: 1.1, hold: 1.4, release: 0.9 },
-  { shape: "ring", gather: 1.3, hold: 1.8, release: 1.2 },
-];
-
-const FLOW_BEATS: readonly Beat[] = [
-  { shape: "arc-right", gather: 1.2, hold: 2.2, release: 1.0, flow: [1, 0] },
-  { shape: "arc-left", gather: 1.2, hold: 2.2, release: 1.0, flow: [-1, 0] },
-  { shape: "arrow-up", gather: 1.2, hold: 2.0, release: 1.0, flow: [0, 1] },
-  { shape: "arrow-down", gather: 1.2, hold: 2.0, release: 1.0, flow: [0, -1] },
-];
-
-const GATE_BEATS: readonly Beat[] = [
-  { shape: "ring", gather: 1.4, hold: 999, release: 1.0 },
-  { shape: "ring", gather: 1.4, hold: 999, release: 1.0 },
-  { shape: "ring", gather: 1.4, hold: 999, release: 1.0 },
-];
-
-function beatsFor(concept: OnboardingConcept): readonly Beat[] {
-  if (concept === "strom") return FLOW_BEATS;
-  if (concept === "tor") return GATE_BEATS;
-  return SIGN_BEATS;
-}
+type Phase = "gather" | "work" | "success" | "release" | "gap" | "done";
 
 export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
   const group = new THREE.Group();
   group.name = "onboarding-guide";
   opts.scene.add(group);
 
-  // ── geometry: a quad per mote, plus its resting place and its point on the sign ──
+  // ── geometry: a quad per mote, its resting place, its point on the sign, its rank ──
   const base = new THREE.PlaneGeometry(1, 1);
   const position = base.getAttribute("position");
   const uvAttr = base.getAttribute("uv");
@@ -138,8 +106,8 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
   geometry.setAttribute("position", position);
   geometry.setAttribute("uv", uvAttr);
 
-  // Resting places: a soft ball of dust around the anchor, denser toward the middle.
   const rest = new Float32Array(COUNT * 3);
+  const ranks = new Float32Array(COUNT);
   for (let i = 0; i < COUNT; i++) {
     const dir = new THREE.Vector3(
       Math.random() * 2 - 1,
@@ -150,21 +118,23 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
     rest[i * 3 + 0] = dir.x * r;
     rest[i * 3 + 1] = dir.y * r * 0.7;
     rest[i * 3 + 2] = dir.z * r;
+    ranks[i] = (i + 0.5) / COUNT; // `fillShape` walks the strokes in index order
   }
   geometry.setAttribute("guideRest", new THREE.InstancedBufferAttribute(rest, 3));
+  geometry.setAttribute("guideRank", new THREE.InstancedBufferAttribute(ranks, 1));
 
   const targets = new Float32Array(COUNT * 3);
   const targetAttr = new THREE.InstancedBufferAttribute(targets, 3);
-  targetAttr.setUsage(THREE.DynamicDrawUsage); // rewritten on every shape change
+  targetAttr.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("guideTarget", targetAttr);
   geometry.instanceCount = COUNT;
 
   // ── uniforms ──
-  const uForm = uniform(0); // 0 = resting cloud, 1 = fully gathered
-  const uFade = uniform(0); // whole-field presence
+  const uForm = uniform(0); // cloud → sign
+  const uProgress = uniform(0); // how much of the sign is filled in
+  const uSuccess = uniform(0); // the completion burst
+  const uFade = uniform(0);
   const uClock = uniform(0);
-  const uFlow = uniform(new THREE.Vector3(0, 0, 0)); // streaming direction (concept "strom")
-  const uFlowMix = uniform(0);
 
   // ── material ──
   const material = new THREE.SpriteNodeMaterial();
@@ -178,13 +148,22 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
 
   const restPos = attribute<"vec3">("guideRest", "vec3");
   const target = attribute<"vec3">("guideTarget", "vec3");
+  const rank = attribute<"float">("guideRank", "float");
 
-  // Per-mote stagger: each one starts gathering at its own moment, so the sign assembles
-  // and dissolves like settling dust instead of snapping into place.
+  // Per-mote stagger, so the sign gathers and dissolves like settling dust.
   const stagger = hash(instanceIndex);
-  const local = smoothstep(stagger.mul(0.45), stagger.mul(0.45).add(0.55), uForm);
+  const gathered = smoothstep(stagger.mul(0.4), stagger.mul(0.4).add(0.6), uForm);
 
-  // Resting drift — the same slow breathing the atmosphere motes have.
+  // Filled = this mote's stretch of the stroke has been earned. Soft edge, so the fill
+  // creeps along the arrow instead of stepping.
+  const filled = smoothstep(rank.sub(0.05), rank.add(0.02), uProgress);
+
+  // A bright wave running tail → tip while the task is open: it animates the arrow and
+  // says which way it points.
+  const wave = fract(rank.sub(uClock.mul(0.35)))
+    .oneMinus()
+    .pow(6.0);
+
   const phase = stagger.mul(TAU);
   const drift = vec3(
     sin(uClock.mul(0.5).add(phase)),
@@ -192,18 +171,23 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
     sin(uClock.mul(0.42).add(phase.mul(2.3))),
   ).mul(0.35);
 
-  // Streaming: while gathered, the motes travel along the flow direction and wrap, so the
-  // sign reads as a current rather than a picture. `uFlowMix` gates it per concept.
-  const travel = uClock.mul(0.9).add(stagger.mul(3.0)).mod(3.0).sub(1.5);
-  const streamed = target.add(uFlow.mul(travel).mul(uFlowMix));
+  // On success every mote pushes outward from the sign's middle — the sign blows apart
+  // rather than merely fading, so completion is unmistakable.
+  const burst = target.normalize().mul(uSuccess.mul(2.4));
+  material.positionNode = mix(restPos.add(drift), target.add(burst), gathered);
 
-  material.positionNode = mix(restPos.add(drift), streamed, local);
-  material.scaleNode = float(MOTE_RADIUS).mul(hash(instanceIndex.add(101)).mul(0.5).add(0.75));
+  // Earned stroke vs. outline is carried by SIZE, not by opacity. The field renders in the
+  // opaque pass with `alphaTest` (the atmosphere's VR-safe setup), which discards anything
+  // under half alpha — a "faint" mote would not be faint there, it would be gone. So an
+  // unearned mote is a fine speck, an earned one a fat one, and the stroke visibly thickens
+  // along its length as the task is flown.
+  const signSize = mix(float(0.5), float(1.5), filled).add(wave.mul(0.45));
+  material.scaleNode = float(MOTE_RADIUS)
+    .mul(hash(instanceIndex.add(101)).mul(0.5).add(0.75))
+    .mul(mix(float(0.45), signSize, gathered))
+    .mul(uSuccess.mul(0.6).add(1.0));
 
-  // Look: the atmosphere's dark fleck wearing the sense fog, so the guide is made of the
-  // same air as everything else. Resting motes stay faint; gathered ones firm up.
-  // Depth comes from view space (like the mosquito sprites) — the mote's own distance,
-  // live, without needing a world position the node graph cannot see.
+  // Look: the atmosphere's dark fleck wearing the sense fog, so the guide is the same air.
   const dist = positionView.z.negate();
   const fogT = dist
     .sub(opts.uniforms.fogNear)
@@ -213,70 +197,84 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
 
   const r = uv().sub(0.5).length().mul(2.0);
   const disc = smoothstep(float(1.0), float(0.0), r);
-  material.opacityNode = disc.mul(mix(float(0.1), float(1.0), local)).mul(uFade);
+  // Opacity only carries the round dot and the field's own fade — every other distinction
+  // lives in the size above, for the alphaTest reason given there.
+  material.opacityNode = disc.mul(0.95).mul(uFade);
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
   mesh.renderOrder = 3;
   group.add(mesh);
 
-  // ── state ──
-  let concept: OnboardingConcept = opts.concept ?? "zeichen";
-  let beats = beatsFor(concept);
+  // ── lesson state ──
+  let concept: OnboardingConcept = opts.concept ?? "tutorial";
   let index = 0;
-  let phaseName: "gather" | "hold" | "release" | "gap" | "done" = "gather";
+  let phaseName: Phase = "gather";
   let elapsed = 0;
   let active = false;
   let fade = 0;
   let clock = 0;
-  /** World placement for the gate concept — set once when the beat starts. */
-  const gateAnchor = new THREE.Vector3();
+  let progress = 0;
+  let completed = false;
+  const DEBUG = new URLSearchParams(window.location.search).get("onboardingDebug") === "1";
+  let debugTimer = 0;
+
+  /** Last frame's sample; turning and climbing are accumulated from frame to frame. */
+  const lastSample: FlightSample = { x: 0, y: 0, z: 0, yaw: 0 };
+  /** How much of the asked-for motion has been made, in the task's own unit. */
+  let earned = 0;
+  const gatePos = new THREE.Vector3();
+  let gateStartDistance = 1;
   let gatePlanted = false;
 
   const camPos = new THREE.Vector3();
   const camQuat = new THREE.Quaternion();
   const forward = new THREE.Vector3();
 
-  const applyShape = (beat: Beat): void => {
-    const scale = concept === "tor" ? GATE_SCALE : SIGN_SCALE;
-    fillShape(beat.shape, targets, COUNT, scale);
-    targetAttr.needsUpdate = true;
-    uFlow.value.set(beat.flow?.[0] ?? 0, beat.flow?.[1] ?? 0, 0);
-    uFlowMix.value = concept === "strom" && beat.flow ? 1 : 0;
-  };
+  const task = (): TaskDef | undefined => TASKS[index];
 
-  const startBeat = (): void => {
-    const beat = beats[index];
-    if (!beat) {
-      phaseName = "done";
-      return;
-    }
-    phaseName = "gather";
+  const startTask = (sample: FlightSample): void => {
+    const current = task();
+    phaseName = current ? "gather" : "done";
     elapsed = 0;
+    progress = 0;
+    uProgress.value = 0;
+    uSuccess.value = 0;
     gatePlanted = false;
-    applyShape(beat);
+    earned = 0;
+    Object.assign(lastSample, sample);
+    if (!current) return;
+    const scale = current.kind === "gate" ? (current.radius ?? 6) : SIGN_SCALE;
+    fillShape(current.shape, targets, COUNT, scale);
+    targetAttr.needsUpdate = true;
   };
 
-  const restart = (): void => {
+  const restart = (sample: FlightSample): void => {
     index = 0;
-    startBeat();
+    completed = false;
+    startTask(sample);
   };
-  restart();
 
-  /** Place the field: signs ride in front of the eye, gates stand still in the world. */
-  const place = (): void => {
+  /** Signs ride in front of the eye; gates are planted once and then stand in the world. */
+  const place = (current: TaskDef | undefined): void => {
     opts.camera.getWorldPosition(camPos);
     opts.camera.getWorldQuaternion(camQuat);
     forward.set(0, 0, -1).applyQuaternion(camQuat);
 
-    if (concept === "tor") {
+    if (current?.kind === "gate") {
       if (!gatePlanted) {
-        gateAnchor.copy(camPos).addScaledVector(forward, GATE_DISTANCE);
+        // Plant it along the HEADING, level with the flier — not along the gaze. The gaze
+        // may still be tilted from the climb task that just ended, which would hang the ring
+        // above or below the path and make it unreachable without anyone understanding why.
+        forward.y = 0;
+        if (forward.lengthSq() < 1e-6) forward.set(0, 0, -1);
+        forward.normalize();
+        gatePos.copy(camPos).addScaledVector(forward, current.distance ?? 70);
+        gateStartDistance = Math.max(1, camPos.distanceTo(gatePos));
         gatePlanted = true;
       }
-      group.position.copy(gateAnchor);
-      // Face the player, so the ring is always a ring to fly through rather than an ellipse.
-      group.quaternion.copy(camQuat);
+      group.position.copy(gatePos);
+      group.quaternion.copy(camQuat); // face the flier, so it stays a ring to aim at
       return;
     }
     group.position.copy(camPos).addScaledVector(forward, SIGN_DISTANCE);
@@ -286,21 +284,24 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
   return {
     group,
 
-    setConcept(next: OnboardingConcept): void {
-      concept = next;
-      beats = beatsFor(next);
-      restart();
+    get currentHint(): string {
+      return task()?.hint ?? "";
     },
 
-    restart,
+    get overallProgress(): number {
+      return TASKS.length === 0 ? 1 : Math.min(1, (index + progress) / TASKS.length);
+    },
+
+    setConcept(next: OnboardingConcept): void {
+      concept = next;
+    },
 
     setActive(next: boolean): void {
       active = next;
-      if (next) restart();
+      if (next) restart({ x: 0, y: 0, z: 0, yaw: 0 });
     },
 
-    update(dtSeconds: number): void {
-      // Ease the field in and out, so switching it off never snaps.
+    update(dtSeconds: number, sample: FlightSample): void {
       const targetFade = active && phaseName !== "done" ? 1 : 0;
       fade += (targetFade - fade) * Math.min(1, dtSeconds / 0.5);
       uFade.value = fade;
@@ -311,58 +312,101 @@ export function createOnboarding(opts: CreateOnboardingOptions): Onboarding {
       mesh.visible = true;
       clock += dtSeconds;
       uClock.value = clock;
-      place();
 
-      if (phaseName === "done") {
+      const current = task();
+      place(current);
+      if (phaseName === "done" || !current) {
         uForm.value = 0;
         return;
       }
-      const beat = beats[index];
-      if (!beat) return;
       elapsed += dtSeconds;
 
-      // A gate is held not by a timer but by the flight: it dissolves once you are through.
-      if (concept === "tor" && phaseName === "hold") {
-        const reached = camPos.distanceTo(gateAnchor) < GATE_PASSED;
-        if (reached) {
-          phaseName = "release";
-          elapsed = 0;
-        }
-      }
-
       switch (phaseName) {
-        case "gather":
-          uForm.value = Math.min(1, elapsed / beat.gather);
-          if (elapsed >= beat.gather) {
-            phaseName = "hold";
+        case "gather": {
+          uForm.value = Math.min(1, elapsed / 1.0);
+          // Nothing counts until the ask is legible — the flier cannot answer a question
+          // they have not been shown yet.
+          Object.assign(lastSample, sample);
+          if (elapsed >= 1.0) {
+            phaseName = "work";
             elapsed = 0;
           }
           break;
-        case "hold":
+        }
+        case "work": {
           uForm.value = 1;
-          if (elapsed >= beat.hold) {
+          // The demo staging runs itself, so the look can be judged without flying.
+          if (concept === "demo") {
+            progress = Math.min(1, progress + dtSeconds / 2.5);
+          } else if (current.kind === "gate") {
+            progress = gateProgress(sample, {
+              x: gatePos.x,
+              y: gatePos.y,
+              z: gatePos.z,
+              startDistance: gateStartDistance,
+            });
+            // Flown THROUGH, not merely approached — that is what finishes a gate.
+            if (camPos.distanceTo(gatePos) < GATE_PASSED) progress = 1;
+          } else {
+            // Wrong-way flying gives ground back; standing still simply holds. The task
+            // waits — it is a lesson, not a timed exam.
+            const gain = taskGain(current, lastSample, sample);
+            earned = Math.max(0, earned + gain);
+            progress = Math.min(1, earned / current.amount);
+          }
+          Object.assign(lastSample, sample);
+          uProgress.value = progress;
+          if (DEBUG) {
+            debugTimer += dtSeconds;
+            if (debugTimer > 0.5) {
+              debugTimer = 0;
+              console.log(
+                `[onboarding] ${current.id} y=${sample.y.toFixed(1)} earned=${earned.toFixed(2)}/${current.amount.toFixed(2)} p=${progress.toFixed(2)}`,
+              );
+            }
+          }
+          if (progress >= 1) {
+            phaseName = "success";
+            elapsed = 0;
+          }
+          break;
+        }
+        case "success": {
+          uProgress.value = 1;
+          uSuccess.value = Math.min(1, elapsed / 0.35);
+          if (elapsed >= 0.55) {
             phaseName = "release";
             elapsed = 0;
           }
           break;
-        case "release":
-          uForm.value = Math.max(0, 1 - elapsed / beat.release);
-          if (elapsed >= beat.release) {
+        }
+        case "release": {
+          uSuccess.value = 1;
+          uForm.value = Math.max(0, 1 - elapsed / 0.8);
+          if (elapsed >= 0.8) {
             phaseName = "gap";
             elapsed = 0;
           }
           break;
-        case "gap":
+        }
+        case "gap": {
           uForm.value = 0;
-          if (elapsed >= 0.6) {
+          uSuccess.value = 0;
+          if (elapsed >= 0.7) {
             index++;
-            if (index >= beats.length) {
+            if (index >= TASKS.length) {
               phaseName = "done";
+              if (!completed) {
+                completed = true;
+                if (DEBUG) console.log("[onboarding] fertig — das Stueck beginnt");
+                opts.onComplete?.(); // the lesson is over — the piece may begin
+              }
             } else {
-              startBeat();
+              startTask(sample);
             }
           }
           break;
+        }
       }
     },
 
