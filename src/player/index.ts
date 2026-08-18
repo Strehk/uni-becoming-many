@@ -34,6 +34,11 @@ import * as THREE from "three/webgpu";
 /** Normalized steering, each component in [-1, 1]. Zero input flies straight and level. */
 export type Steering = Readonly<{ pitch: number; roll: number }>;
 
+/** How briskly the soft floor carries a low-flying rig back up, per second. */
+const FLOOR_RECOVERY = 3.5;
+/** The floor that is never crossed, whatever the dive — the camera stays out of the hill. */
+const HARD_CLEARANCE = 0.8;
+
 /** Ground clearance kept in free flight — just enough to stay out of the terrain. */
 const FREE_CLEARANCE = 0.6;
 
@@ -88,7 +93,11 @@ export type PlayerOptions = Readonly<{
    * least `clearance` above it, so the player can never sink into the terrain.
    */
   floor?: (x: number, z: number) => number | null;
-  /** Metres to keep between the rig and the terrain floor. Defaults to 3. */
+  /**
+   * Metres to keep between the rig and the terrain floor. Defaults to 3. This is a SOFT
+   * floor — dipping below it eases the rig back up rather than pinning it, so skimming low
+   * over rolling ground stays smooth (see `applyBounds`).
+   */
   clearance?: number;
   /**
    * Maximum altitude above the terrain floor, in metres. Caps how high pitch can climb, so the
@@ -193,7 +202,7 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
     // Terrain bounds: keep the rig within the airspace — at least `clearance` above the ground
     // and at most `maxAltitude` above it. Runs even when paused so a chunk streaming in underfoot
     // still lifts us. A null floor means "no surface known here yet" — leave altitude untouched.
-    applyBounds();
+    applyBounds(dtSeconds);
   }
 
   function flyFree(dtSeconds: number, input: FreeFlight): void {
@@ -225,14 +234,29 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
     }
   }
 
-  function applyBounds(): void {
+  /**
+   * Keep the rig in the airspace — but fly it back in rather than snapping it.
+   *
+   * A hard clamp to `ground + clearance` means that anyone flying low is pinned to the
+   * terrain's own shape, and every ridge and hollow arrives as a jolt. So the floor is a soft
+   * one: below it the rig is eased up (a few metres per second of correction), which reads as
+   * the aircraft being carried by the ground rather than stopped by it. A hard limit still
+   * sits just underneath, so no amount of diving puts the camera inside the hill.
+   */
+  function applyBounds(dtSeconds: number): void {
     if (!floor) return;
     const ground = floor(rig.position.x, rig.position.z);
     if (ground === null) return;
-    const min = ground + clearance;
+
+    const soft = ground + clearance;
+    const hard = ground + HARD_CLEARANCE;
+    if (rig.position.y < soft) {
+      const ease = 1 - Math.exp(-FLOOR_RECOVERY * dtSeconds);
+      rig.position.y += (soft - rig.position.y) * ease;
+      if (rig.position.y < hard) rig.position.y = hard;
+    }
     const max = ground + maxAltitude;
-    if (rig.position.y < min) rig.position.y = min;
-    else if (rig.position.y > max) rig.position.y = max;
+    if (rig.position.y > max) rig.position.y = max;
   }
 
   function look(pitch: number): void {

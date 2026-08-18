@@ -391,7 +391,9 @@ const player = createPlayer(renderer.camera, {
   speed: 6,
   climbRate: 14,
   maxAltitude: 100,
-  clearance: 4,
+  // Low enough to really skim the ground — the floor is soft (see applyBounds), so coming
+  // down here reads as being carried by the terrain, not as hitting a lid.
+  clearance: 1.5,
   floor: (x, z) => world.groundHeightAt(x, z),
 });
 renderer.scene.add(player.rig);
