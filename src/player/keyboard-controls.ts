@@ -31,17 +31,16 @@ export type KeyboardControlsOptions = Readonly<{
   /** Throttle multiplier while Shift is held. Defaults to 2. */
   boost?: number;
   /**
-   * Spring rate toward a HELD deflection, per second. Higher is snappier, lower is
-   * looser/floatier. Frame-rate independent. Defaults to 3.2 — a glider's stick, not a
-   * switch: about a third of a second to reach full deflection.
+   * Roughly how long a control takes to reach a held deflection, in seconds. Defaults to
+   * 0.55 — a glider's stick, not a switch.
    */
-  stiffness?: number;
+  holdTime?: number;
   /**
-   * Spring rate back to centre once a TURN key is released, per second. Deliberately slower
-   * than `stiffness` (defaults to 1.7): an aircraft settles out of a turn, it does not snap
-   * out of it.
+   * How long a control takes to come back to centre once released, in seconds. Deliberately
+   * longer than `holdTime` (defaults to 0.9): an aircraft settles out of a turn, it does not
+   * snap out of it.
    */
-  releaseStiffness?: number;
+  releaseTime?: number;
   /**
    * How fast W/S move the nose, in units of full deflection per second. Defaults to 0.9, so
    * about a second and a bit from level to the steepest climb — an elevator being wound in,
@@ -94,8 +93,8 @@ export interface KeyboardControls {
 export function createKeyboardControls(options: KeyboardControlsOptions = {}): KeyboardControls {
   const target = options.target ?? window;
   const boost = options.boost ?? 2;
-  const stiffness = options.stiffness ?? 3.2;
-  const releaseStiffness = options.releaseStiffness ?? 1.7;
+  const holdTime = options.holdTime ?? 0.55;
+  const releaseTime = options.releaseTime ?? 0.9;
   const pitchRate = options.pitchRate ?? 0.9;
 
   const pressed = new Set<string>();
@@ -126,35 +125,78 @@ export function createKeyboardControls(options: KeyboardControlsOptions = {}): K
     target_.throttle = shiftHeld() ? boost : 1;
   };
 
-  // Frame-rate-independent exponential approach: same easing whether the frame is 8ms or 33ms.
-  const spring = (current: number, goal: number, factor: number): number => {
-    const next = current + (goal - current) * factor;
-    return goal === 0 && Math.abs(next) < SETTLE_EPSILON ? 0 : next;
+  /**
+   * Critically damped approach — the classic camera-move ease.
+   *
+   * An exponential approach (`x += (goal - x) * k`) reaches its top speed INSTANTLY: the
+   * moment a key goes down the value is already moving at full rate, which is exactly the
+   * jolt one sees. A critically damped spring carries a velocity, so it accelerates into the
+   * move and decelerates out of it, and never overshoots. `smoothTime` is roughly how long
+   * the move takes. Frame-rate independent (the closed form, not an Euler step).
+   */
+  const smoothDamp = (
+    current: number,
+    goal: number,
+    state: { velocity: number },
+    smoothTime: number,
+    dtSeconds: number,
+  ): number => {
+    const omega = 2 / Math.max(0.0001, smoothTime);
+    const x = omega * dtSeconds;
+    const decay = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+    const change = current - goal;
+    const temp = (state.velocity + omega * change) * dtSeconds;
+    state.velocity = (state.velocity - omega * temp) * decay;
+    const next = goal + (change + temp) * decay;
+    return goal === 0 && Math.abs(next) < SETTLE_EPSILON && Math.abs(state.velocity) < 0.05
+      ? 0
+      : next;
   };
 
-  /** Frame-rate-independent exponential approach at `rate` — same easing at 8 ms or 33 ms. */
-  const factorFor = (rate: number, dtSeconds: number): number => 1 - Math.exp(-rate * dtSeconds);
+  const turnState = { velocity: 0 };
+  const pitchState = { velocity: 0 };
+  const throttleState = { velocity: 0 };
+  /** The eased elevator input; `locomotion.pitch` is its integral (the held attitude). */
+  let pitchDrive = 0;
 
   const update = (dtSeconds: number): void => {
     if (dtSeconds <= 0) {
       return;
     }
-    // Turning eases at the rate its own direction of travel calls for: pushing into a
-    // deflection is the pilot's intent and may arrive briskly, returning to centre is the
-    // aircraft settling and takes its time.
-    const held = factorFor(stiffness, dtSeconds);
-    const releasing = factorFor(releaseStiffness, dtSeconds);
-    locomotion.turn = spring(locomotion.turn, target_.turn, target_.turn === 0 ? releasing : held);
-    locomotion.throttle = spring(locomotion.throttle, target_.throttle, held);
+    // Turning eases at the pace its own direction of travel calls for: rolling into a turn is
+    // the pilot's intent and may arrive briskly, coming out of it is the aircraft settling and
+    // takes its time.
+    locomotion.turn = smoothDamp(
+      locomotion.turn,
+      target_.turn,
+      turnState,
+      target_.turn === 0 ? releaseTime : holdTime,
+      dtSeconds,
+    );
+    locomotion.throttle = smoothDamp(
+      locomotion.throttle,
+      target_.throttle,
+      throttleState,
+      holdTime,
+      dtSeconds,
+    );
 
-    // Pitch is INTEGRATED, not sprung: W and S wind the nose up and down, and it stays where
-    // it is left — the same bargain the heading already makes. Clamped to full deflection so
-    // the player's `lookAngle` still bounds how steep it can get.
-    const pitchInput = target_.pitch;
-    if (pitchInput !== 0) {
+    // The elevator itself is eased, and the ATTITUDE is its integral: W and S wind the nose up
+    // and down, and it stays where it is left — the same bargain the heading already makes.
+    // Easing the input rather than the angle is what keeps a climb from starting and stopping
+    // with a snap. Clamped to full deflection, so the player's `lookAngle` still bounds how
+    // steep it can get.
+    pitchDrive = smoothDamp(
+      pitchDrive,
+      target_.pitch,
+      pitchState,
+      target_.pitch === 0 ? releaseTime : holdTime,
+      dtSeconds,
+    );
+    if (pitchDrive !== 0) {
       locomotion.pitch = Math.max(
         -1,
-        Math.min(1, locomotion.pitch + pitchInput * pitchRate * dtSeconds),
+        Math.min(1, locomotion.pitch + pitchDrive * pitchRate * dtSeconds),
       );
     }
   };
