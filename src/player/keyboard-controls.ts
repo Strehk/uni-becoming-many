@@ -5,11 +5,14 @@
  *   - `turn` — A/D: which way to curve the heading. Feed into `Player.update`'s `roll`; the
  *     player integrates it, so the turn persists (you can come about) and the spring only eases
  *     the curve in and out.
- *   - `pitch` — W/S: how far to tilt travel up/down. Feed into `Player.look`; the player treats
- *     it as an absolute offset, so on release the spring back to 0 re-levels (altitude kept).
+ *   - `pitch` — W/S: the ATTITUDE of the nose, held. Feed into `Player.look`; the player treats
+ *     it as an absolute angle, and this module integrates it: the keys raise and lower the nose,
+ *     and where you leave it is where it stays.
  *
- * Both axes spring back to 0 when the keys release — slower than they left it, so the flight
- * settles out of a turn instead of snapping level. Nothing here touches the player, renderer,
+ * The two axes behave alike on purpose, and it is the whole feel of the thing: a key sets a RATE
+ * of change, and what it changes — course, attitude — persists once the key is let go. Nothing
+ * self-corrects. Pitch used to spring back to level instead, which pulled the flight path
+ * straight every time the hand left the key. Nothing here touches the player, renderer,
  * or the controller: it only listens for keys and reports intent, so it drops in anywhere and
  * lifts out again with a single `dispose()`. Tick `update(dtSeconds)` once per frame to advance
  * the spring before reading `locomotion`.
@@ -34,13 +37,17 @@ export type KeyboardControlsOptions = Readonly<{
    */
   stiffness?: number;
   /**
-   * Spring rate back to centre once the key is released, per second. Deliberately slower
+   * Spring rate back to centre once a TURN key is released, per second. Deliberately slower
    * than `stiffness` (defaults to 1.7): an aircraft settles out of a turn, it does not snap
-   * level, and since pitch here aims the flight path itself, a hard return would kick the
-   * whole trajectory. This asymmetry is most of what makes the keyboard feel flown rather
-   * than pressed.
+   * out of it.
    */
   releaseStiffness?: number;
+  /**
+   * How fast W/S move the nose, in units of full deflection per second. Defaults to 0.9, so
+   * about a second and a bit from level to the steepest climb — an elevator being wound in,
+   * not a switch.
+   */
+  pitchRate?: number;
 }>;
 
 /**
@@ -89,6 +96,7 @@ export function createKeyboardControls(options: KeyboardControlsOptions = {}): K
   const boost = options.boost ?? 2;
   const stiffness = options.stiffness ?? 3.2;
   const releaseStiffness = options.releaseStiffness ?? 1.7;
+  const pitchRate = options.pitchRate ?? 0.9;
 
   const pressed = new Set<string>();
 
@@ -131,15 +139,24 @@ export function createKeyboardControls(options: KeyboardControlsOptions = {}): K
     if (dtSeconds <= 0) {
       return;
     }
-    // Each axis eases at the rate its own direction of travel calls for: pushing into a
+    // Turning eases at the rate its own direction of travel calls for: pushing into a
     // deflection is the pilot's intent and may arrive briskly, returning to centre is the
     // aircraft settling and takes its time.
     const held = factorFor(stiffness, dtSeconds);
     const releasing = factorFor(releaseStiffness, dtSeconds);
-    const rate = (goal: number): number => (goal === 0 ? releasing : held);
-    locomotion.pitch = spring(locomotion.pitch, target_.pitch, rate(target_.pitch));
-    locomotion.turn = spring(locomotion.turn, target_.turn, rate(target_.turn));
+    locomotion.turn = spring(locomotion.turn, target_.turn, target_.turn === 0 ? releasing : held);
     locomotion.throttle = spring(locomotion.throttle, target_.throttle, held);
+
+    // Pitch is INTEGRATED, not sprung: W and S wind the nose up and down, and it stays where
+    // it is left — the same bargain the heading already makes. Clamped to full deflection so
+    // the player's `lookAngle` still bounds how steep it can get.
+    const pitchInput = target_.pitch;
+    if (pitchInput !== 0) {
+      locomotion.pitch = Math.max(
+        -1,
+        Math.min(1, locomotion.pitch + pitchInput * pitchRate * dtSeconds),
+      );
+    }
   };
 
   const isBound = (code: string): boolean =>
