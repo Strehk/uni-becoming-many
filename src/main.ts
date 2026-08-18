@@ -25,7 +25,12 @@ import {
   type ExperienceInterfaceMode,
   createInterfaceModeController,
 } from "./experience/interface-mode.ts";
-import { type AppSettings, loadAppSettings, saveAppSettings } from "./experience/settings.ts";
+import {
+  type AppSettings,
+  type ExperienceMode,
+  loadAppSettings,
+  saveAppSettings,
+} from "./experience/settings.ts";
 import { type StartGate, createStartGate } from "./experience/start-gate.ts";
 import { createStartMenu } from "./experience/start-menu.ts";
 import { createFloraFaunaController } from "./flora-fauna/index.ts";
@@ -38,6 +43,7 @@ import { type Grass, createGrass } from "./grass/index.ts";
 import { createLife } from "./life/index.ts";
 import { createController } from "./m5/index.ts";
 import { createMinimap } from "./minimap/index.ts";
+import { createOnboarding } from "./onboarding/index.ts";
 import { findPreset } from "./perf/presets.ts";
 import { createPerfRouter } from "./perf/router.ts";
 import { applyPerfState, perfStateFrom, savedPerfState, serializePerfState } from "./perf/state.ts";
@@ -130,6 +136,17 @@ window.addEventListener("pagehide", () => life.dispose());
 // playerPose + time); shares the sense uniforms so it fades at the same view edge.
 const atmosphere = createAtmosphere({ scene: renderer.scene, uniforms: senses.uniforms });
 window.addEventListener("pagehide", () => atmosphere.dispose());
+
+// EXPERIMENT — the wordless flight lesson: a second, small mote field that gathers into
+// signs in front of the player (see src/onboarding). Dormant unless the start menu asks
+// for it, and made of the same air as the atmosphere above, so the empty room stays empty.
+const onboarding = createOnboarding({
+  scene: renderer.scene,
+  uniforms: senses.uniforms,
+  camera: renderer.camera,
+  concept: appSettings.onboardingConcept,
+});
+window.addEventListener("pagehide", () => onboarding.dispose());
 
 // Streaming terrain: a chunked, worker-generated world that loads around the player.
 // It shares the senses' atmosphere uniforms (sense transitions restyle the world live),
@@ -653,6 +670,31 @@ if (!useTheatreStudio) {
     });
   };
 
+  /**
+   * Begin in one of the three modes. Everything a mode needs that a browser only grants
+   * inside a user gesture — the tilt sensor on iOS, fullscreen — has to happen here, in the
+   * click that led to it, before any await that isn't part of asking. Refusing the tilt
+   * sensor is the one failure that aborts the start: without it the mobile mode has no
+   * steering at all. Shared by the ordinary entry and by the onboarding experiment.
+   */
+  const beginFlight = async (next: ExperienceConfig, mode: ExperienceMode): Promise<boolean> => {
+    if (mode === "mobile") {
+      if (!(await gyro.enable())) {
+        return false;
+      }
+    } else {
+      gyro.disable();
+    }
+    appSettings = { ...appSettings, mode };
+    saveAppSettings(appSettings);
+    // Fullscreen in every mode; only the phone gets the landscape lock.
+    await enterImmersiveViewport({ lockLandscape: mode === "mobile" });
+    rewindToStart(next);
+    clock.pause(); // stay frozen at t=0 until the gate fires
+    armStartGate(mode === "mobile");
+    return true;
+  };
+
   const startMenu = createStartMenu({
     config: experienceConfig,
     settings: appSettings,
@@ -684,21 +726,17 @@ if (!useTheatreStudio) {
      * asking. Refusing the tilt sensor is the one failure that aborts the start:
      * without it the mobile mode has no steering at all.
      */
-    async onStart(next, mode) {
-      if (mode === "mobile") {
-        if (!(await gyro.enable())) {
-          return false;
-        }
-      } else {
-        gyro.disable();
-      }
-      appSettings = { ...appSettings, mode };
+    onStart: beginFlight,
+
+    async onOnboarding(next, mode, concept) {
+      appSettings = { ...appSettings, onboardingConcept: concept };
       saveAppSettings(appSettings);
-      // Fullscreen in every mode; only the phone gets the landscape lock.
-      await enterImmersiveViewport({ lockLandscape: mode === "mobile" });
-      rewindToStart(next);
-      clock.pause(); // stay frozen at t=0 until the gate fires
-      armStartGate(mode === "mobile");
+      const started = await beginFlight(next, mode);
+      if (!started) {
+        return false;
+      }
+      onboarding.setConcept(concept);
+      onboarding.setActive(true);
       return true;
     },
 
@@ -862,6 +900,7 @@ renderer.start((dtSeconds) => {
   life.update(dtSeconds); // 7. pump time / unrest / intensity / sense into the flora uniforms
   grass.update(dtSeconds); // GPU grass: snap, repaint field texture, dispatch compute (void-gated)
   atmosphere.update(dtSeconds); // 8. pump player pose + virtual clock into the dust uniforms
+  onboarding.update(dtSeconds); // EXPERIMENT: the particle lesson, dormant unless asked for
   m5Panel.update(); // dev console readout (self-throttled to ~8/s)
 });
 

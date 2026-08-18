@@ -16,6 +16,7 @@
 // menu it cannot see.
 
 import { asset } from "../asset-url.ts";
+import { ONBOARDING_CONCEPTS, type OnboardingConcept } from "../onboarding/concepts.ts";
 import { PRESETS } from "../perf/presets.ts";
 import { CUSTOM_PRESET_ID, type PerfRouter } from "../perf/router.ts";
 import { isSenseId } from "../senses/ids.ts";
@@ -52,6 +53,15 @@ export interface StartMenuOptions {
    * false if any of it was refused, in which case the menu stays up and says so.
    */
   onStart(config: ExperienceConfig, mode: ExperienceMode): Promise<boolean>;
+  /**
+   * EXPERIMENT: begin the flight with the wordless particle lesson running in front of it.
+   * Same contract as `onStart` — false means it never got going and the menu stays up.
+   */
+  onOnboarding(
+    config: ExperienceConfig,
+    mode: ExperienceMode,
+    concept: OnboardingConcept,
+  ): Promise<boolean>;
   /** Re-take the phone's current pose as "fly straight". */
   onCalibrate(): void;
   /**
@@ -143,6 +153,21 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     button.disabled = false;
     if (!started) {
       return; // the host explains why in the note line
+    }
+    saveExperienceConfig(config);
+    setScreen("none");
+  };
+
+  /** Same as `startExperience`, with the particle lesson armed in front of the flight. */
+  const startOnboarding = async (
+    concept: OnboardingConcept,
+    button: HTMLButtonElement,
+  ): Promise<void> => {
+    button.disabled = true;
+    const started = await options.onOnboarding(cloneConfig(config), settings.mode, concept);
+    button.disabled = false;
+    if (!started) {
+      return;
     }
     saveExperienceConfig(config);
     setScreen("none");
@@ -249,7 +274,65 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
       },
     );
 
-    list.append(...starts, settingsEntry, pair, configure);
+    const onboarding = entry(
+      "Anleitung (Experiment)",
+      "Eine wortlose Einführung aus Luftpartikeln — drei Fassungen zum Vergleichen.",
+      "quiet",
+      renderOnboarding,
+    );
+
+    list.append(...starts, settingsEntry, pair, onboarding, configure);
+    screen.append(head, list, note);
+  }
+
+  // ── Screen: onboarding concepts (EXPERIMENT) ───────────────────
+  // Three stagings of the same idea — the air itself teaches the flight. They differ in
+  // how literal they are, which is a question only flying them can settle, so the screen
+  // simply offers all three and starts the piece with the chosen one.
+  function renderOnboarding(): void {
+    setScreen("settings");
+    screen.replaceChildren();
+    screen.classList.remove("bm-menu__screen--wide");
+
+    const head = document.createElement("div");
+    head.className = "bm-menu__head";
+    const title = document.createElement("h1");
+    title.className = "bm-menu__title bm-menu__title--small";
+    title.textContent = "Anleitung";
+    const lede = document.createElement("p");
+    lede.className = "bm-menu__lede";
+    lede.textContent =
+      "Ein Versuch: Die Luftpartikel selbst zeigen, wie geflogen wird — sie sammeln sich zu " +
+      "einem Zeichen und lösen sich wieder auf. Drei Fassungen, alle im leeren Startraum.";
+    head.append(title, lede);
+
+    const list = document.createElement("div");
+    list.className = "bm-menu__list";
+    const note = document.createElement("p");
+    note.className = "bm-menu__note";
+    note.dataset["bmStatus"] = "";
+
+    for (const [index, concept] of ONBOARDING_CONCEPTS.entries()) {
+      const button = menuItem(`${concept.label} starten`, index === 0 ? "primary" : "normal");
+      const show = (): void => {
+        note.textContent = concept.note;
+      };
+      button.addEventListener("pointerenter", show);
+      button.addEventListener("focus", show);
+      button.addEventListener("pointerleave", () => {
+        note.textContent = "";
+      });
+      button.addEventListener("click", () => {
+        setSettings({ ...settings, onboardingConcept: concept.id });
+        void startOnboarding(concept.id, button);
+      });
+      list.append(button);
+    }
+
+    const back = menuItem("Zurück", "quiet");
+    back.addEventListener("click", renderHome);
+    list.append(back);
+
     screen.append(head, list, note);
   }
 
