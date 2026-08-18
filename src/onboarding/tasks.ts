@@ -40,6 +40,14 @@ export interface TaskDef {
   /** Gate only: how far ahead it is planted, and its radius. */
   readonly distance?: number;
   readonly radius?: number;
+  /**
+   * The direction the sign dissolves FROM, in its own frame (+x right, +y up). As the task
+   * is flown, motes on that side leave first and the sign eats itself away across to the
+   * other side — fly left and the right-hand end blows away. Straight across the shape, not
+   * along its strokes: what should read is the direction, not the drawing order.
+   * `[0, 0]` means "does not dissolve" (the gates, which grow instead).
+   */
+  readonly dissolveFrom: readonly [number, number];
 }
 
 /**
@@ -55,6 +63,7 @@ export const TASKS: readonly TaskDef[] = [
     hint: "Nach rechts",
     sign: 1,
     amount: Math.PI * 0.5,
+    dissolveFrom: [-1, 0], // flying right eats the sign from the left
   },
   {
     id: "turn-left",
@@ -63,9 +72,26 @@ export const TASKS: readonly TaskDef[] = [
     hint: "Nach links",
     sign: -1,
     amount: Math.PI * 0.5,
+    dissolveFrom: [1, 0],
   },
-  { id: "climb", kind: "climb", shape: "arrow-up", hint: "Steigen", sign: 1, amount: 12 },
-  { id: "sink", kind: "climb", shape: "arrow-down", hint: "Sinken", sign: -1, amount: 10 },
+  {
+    id: "climb",
+    kind: "climb",
+    shape: "arrow-up",
+    hint: "Steigen",
+    sign: 1,
+    amount: 12,
+    dissolveFrom: [0, -1],
+  },
+  {
+    id: "sink",
+    kind: "climb",
+    shape: "arrow-down",
+    hint: "Sinken",
+    sign: -1,
+    amount: 10,
+    dissolveFrom: [0, 1],
+  },
   {
     id: "gate-1",
     kind: "gate",
@@ -75,6 +101,7 @@ export const TASKS: readonly TaskDef[] = [
     amount: 1,
     distance: 70,
     radius: 6,
+    dissolveFrom: [0, 0], // a gate grows as you close on it; it does not eat away
   },
   {
     id: "gate-2",
@@ -85,6 +112,7 @@ export const TASKS: readonly TaskDef[] = [
     amount: 1,
     distance: 80,
     radius: 5,
+    dissolveFrom: [0, 0],
   },
 ];
 

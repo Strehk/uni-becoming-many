@@ -123,8 +123,8 @@ export function fillShape(
   out: Float32Array,
   count: number,
   scale: number,
-  jitter = 0.035,
-  depth = 0.06,
+  jitter = 0.07,
+  depth = 0.1,
 ): boolean {
   const strokes = strokesFor(id);
   if (strokes.length === 0) {
