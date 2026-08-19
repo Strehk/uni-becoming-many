@@ -46,7 +46,7 @@ export type BridgeOptions = Readonly<{ store?: BridgeStore }>;
 export function createBridge(options: BridgeOptions = {}): Bridge {
   const store = options.store ?? createBridgeStore();
   const browserSockets = new Set<WebSocket>();
-  let deviceSocketCount = 0;
+  const deviceSockets = new Set<WebSocket>();
 
   const broadcast = (message: unknown): void => {
     if (browserSockets.size === 0) {
@@ -77,14 +77,14 @@ export function createBridge(options: BridgeOptions = {}): Bridge {
   const browserServer = new WebSocketServer({ noServer: true });
 
   deviceServer.on("connection", (socket) => {
-    deviceSocketCount += 1;
+    deviceSockets.add(socket);
     pipeline.setDeviceConnected(true);
     console.info("[m5] controller connected");
 
     socket.on("message", (data) => pipeline.ingest(data.toString()));
     socket.on("close", () => {
-      deviceSocketCount = Math.max(0, deviceSocketCount - 1);
-      if (deviceSocketCount === 0) {
+      deviceSockets.delete(socket);
+      if (deviceSockets.size === 0) {
         pipeline.setDeviceConnected(false);
         console.info("[m5] controller disconnected");
       }
@@ -171,6 +171,15 @@ export function createBridge(options: BridgeOptions = {}): Bridge {
         socket.close();
       }
       browserSockets.clear();
+      // Closing the WebSocketServer leaves live sockets alone — and a controller whose socket
+      // survives a dev-server restart keeps feeding the *disposed* pipeline: the firmware sees a
+      // healthy connection, never reconnects, and the new bridge sits at `deviceConnected: false`
+      // forever. Cut the device sockets so the firmware's reconnect loop finds the live bridge.
+      for (const socket of deviceSockets) {
+        socket.terminate();
+      }
+      deviceSockets.clear();
+      pipeline.setDeviceConnected(false);
       deviceServer.close();
       browserServer.close();
     },

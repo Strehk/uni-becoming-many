@@ -15,6 +15,7 @@
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { DEFAULT_DEVICE_PORT, TOKEN_PATH, createBridge } from "./index.ts";
+import { listLanHosts } from "./lan.ts";
 import { resolveStateDir } from "./state.ts";
 import { createStaticHandler } from "./static.ts";
 
@@ -30,7 +31,7 @@ const appServer = createServer((request, response) => {
   // The pairing page reads this to build the URL it writes to the controller over USB.
   if (new URL(request.url ?? "/", "http://localhost").pathname === TOKEN_PATH) {
     response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-    response.end(JSON.stringify({ token: bridge.pairingToken, devicePort }));
+    response.end(JSON.stringify({ token: bridge.pairingToken, devicePort, hosts: listLanHosts() }));
     return;
   }
   serveStatic(request, response);

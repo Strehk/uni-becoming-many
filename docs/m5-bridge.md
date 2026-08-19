@@ -49,6 +49,7 @@ Fehlerfall.
 | `src/m5/index.ts` | Client: `createController()` → `input` pro Frame lesen, `dispose()` am Ende. |
 | `bridge/index.ts` | `createBridge()` — beide Sockets, Token-Prüfung, Fan-out. |
 | `bridge/state.ts` | Persistenz in `M5_STATE_DIR` (Default `.m5/`). |
+| `bridge/lan.ts` | Die IPv4-Adressen dieses Rechners, physische Interfaces zuerst. |
 | `bridge/vite-plugin.ts` | Dev-Verdrahtung im Vite-Server. |
 | `bridge/serve.ts` + `static.ts` | Produktions-Entry: liefert `dist/` **und** beide Sockets. |
 | `src/pair/` | `/pair.html` — Controller per USB einrichten (Web Serial). |
@@ -116,6 +117,14 @@ Geglättet wird zuletzt — und nicht, solange der Neutralizer das Rig auf Null 
 Zusätzlich außerhalb der Stufen: wird der Device-Socket 1 s still (ohne sich zu schließen),
 publiziert die Bridge neutral, statt die letzte Lage zu halten.
 
+`dispose()` **trennt die Device-Sockets** — nicht bloß Höflichkeit gegenüber dem Controller. Der
+Dev-Server behält seinen :5184-Listener über einen Vite-Neustart hinweg (s. `vite-plugin.ts`);
+ein überlebender Controller-Socket würde danach die *entsorgte* Pipeline füttern. Die Firmware
+sähe eine gesunde Verbindung und würde nie neu verbinden, die neue Bridge bliebe auf
+`deviceConnected: false` stehen — und weil der Controller in diesem Zustand auch seinen
+Serial-Spiegel nicht mehr bedient, steht zugleich das Lage-Pad der Pairing-Seite still. Ein
+gekappter Socket lässt die Firmware innerhalb von 3 s wiederkommen.
+
 Die Konstanten sind auf die physische Maschine getunt. Sie haben Tests neben sich
 (`src/m5/pipeline/*.test.ts`, ebenfalls portiert) — wer eine ändert, ändert das Flugverhalten.
 
@@ -129,8 +138,16 @@ Ordnung ist: konfiguriert wird am Schreibtisch mit Kabel.
 
 1. M5 per USB anschließen, „Controller verbinden", Port im Browser-Dialog wählen.
 2. WLAN-SSID und -Passwort eintragen. Die **Bridge-URL** ist bereits vorbelegt — sie kommt aus
-   dem eigenen Hostnamen plus dem Token von `GET /api/m5/token`. Von der Station aus geöffnet ist
-   sie damit schon richtig.
+   `GET /api/m5/token`: Token, Device-Port und die IPv4-Adressen dieses Rechners. Die Auswahl
+   *Adresse dieser Station* zeigt sie alle, physische Interfaces zuerst; VM- und Container-Bridges
+   (`bridge100`, `docker0`, …) stehen unten und sind als `virtuell` markiert.
+
+   **Diese Auswahl ist der Punkt, an dem eine Einrichtung schiefgeht.** Wird die Seite auf
+   `https://192.168.64.1:5173` geöffnet — die Adresse einer VM-Bridge, die macOS anbietet —, dann
+   ist die vorbelegte Adresse aus dem WLAN des Controllers nicht erreichbar: der M5 hängt korrekt
+   im WLAN, wählt aber ins Leere (`tcpProbeOk: false`). Zu wählen ist die Adresse in dem Netz, in
+   dem auch der Controller landet. „Diagnose" vergleicht die IP des Controllers mit den
+   Kandidaten und trägt die passende von sich aus ein.
 3. „Auf den Controller schreiben" → die Seite schickt eine Zeile
    `{"type":"configure","ssid":…,"password":…,"serverUrl":"ws://…","deviceId":…}`.
 4. „Diagnose" prüft, ob der Controller WLAN und Bridge erreicht. Kabel abziehen.

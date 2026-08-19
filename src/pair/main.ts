@@ -10,9 +10,11 @@
  *   → {"type":"diagnose"}   → {"type":"reboot"}
  *   ← configureResult · diagnoseResult · status · register · heartbeat · orientation
  *
- * The bridge URL is pre-filled from this page's own hostname plus the bridge's device port, so
- * opening the page *from the station machine* already produces the right address. The pairing
- * token comes from the bridge over the same origin.
+ * The bridge URL is pre-filled from the addresses the bridge reports for itself (`/api/m5/token`)
+ * plus its device port. Deliberately *not* from this page's hostname alone: on a machine with a
+ * VM or container bridge, opening the page on `192.168.64.1` would write an address into the
+ * controller that only exists on this machine — the controller then joins the WiFi and dials
+ * into nothing. The picker lists every candidate, physical interfaces first.
  *
  * Web Serial is Chrome/Edge desktop only. That is the right constraint: the controller is
  * configured at a desk with a USB cable, never from inside the headset.
@@ -49,6 +51,7 @@ const el = <T extends HTMLElement>(key: string): T => {
 };
 
 const fields = {
+  host: el<HTMLSelectElement>("host"),
   ssid: el<HTMLInputElement>("ssid"),
   password: el<HTMLInputElement>("password"),
   serverUrl: el<HTMLInputElement>("serverUrl"),
@@ -64,12 +67,15 @@ const status = el("status");
 const logView = el("log");
 const level = el("level");
 const levelDot = el("levelDot");
+const levelState = el("levelState");
 const firmware = el("firmware");
 
 let port: SerialPort | null = null;
 let writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
 let reading: Promise<void> | null = null;
 const logLines: string[] = [];
+/** When the last orientation frame arrived, so a frozen pad can say so instead of just sitting. */
+let lastOrientationAt = 0;
 
 // --- Setup ------------------------------------------------------------------
 
@@ -145,27 +151,98 @@ function forgetWifi(): void {
   setStatus("WLAN-Zugangsdaten aus diesem Browser gelöscht.", "idle");
 }
 
+/** Candidate bridge addresses, as reported by the bridge itself plus this page's own hostname. */
+interface HostChoice {
+  readonly address: string;
+  readonly label: string;
+  readonly physical: boolean;
+}
+
+let hostChoices: readonly HostChoice[] = [];
+let devicePort = 5184;
+let pairingToken = "<token>";
+
 /**
- * Ask our own bridge for the pairing token and the device port, then build the URL the
- * controller should dial. Falls back to a template with a visible placeholder if the bridge is
- * not reachable — the page still works, the operator just fills the token in by hand.
+ * Ask our own bridge for the pairing token, the device port and the addresses this machine can be
+ * reached on, then build the URL the controller should dial. Falls back to a template with a
+ * visible placeholder if the bridge is not reachable — the page still works, the operator just
+ * fills the token in by hand.
  */
 async function prefillServerUrl(): Promise<void> {
-  const host = window.location.hostname;
   try {
     const response = await fetch("/api/m5/token", { cache: "no-store" });
     if (!response.ok) {
       throw new Error(String(response.status));
     }
     const body: unknown = await response.json();
-    const token = readString(body, "token");
-    const devicePort = readNumber(body, "devicePort") ?? 5184;
-    fields.serverUrl.value = `ws://${host}:${devicePort}/ws/device?pairing=${token ?? "<token>"}`;
+    pairingToken = readString(body, "token") ?? "<token>";
+    devicePort = readNumber(body, "devicePort") ?? 5184;
+    hostChoices = readHostChoices(body);
   } catch {
-    fields.serverUrl.value = `ws://${host}:5184/ws/device?pairing=<token>`;
     log("! Bridge nicht erreichbar — Pairing-Token bitte von Hand eintragen.");
   }
+  renderHostChoices();
 }
+
+/** The bridge's `hosts`, with this page's own hostname appended if it is not already among them. */
+function readHostChoices(body: unknown): readonly HostChoice[] {
+  const raw =
+    typeof body === "object" && body !== null ? (body as Record<string, unknown>)["hosts"] : null;
+  const choices: HostChoice[] = [];
+
+  for (const entry of Array.isArray(raw) ? raw : []) {
+    const address = readString(entry, "address");
+    if (address === null) {
+      continue;
+    }
+    const iface = readString(entry, "iface") ?? "?";
+    const physical =
+      typeof entry === "object" &&
+      entry !== null &&
+      (entry as Record<string, unknown>)["physical"] === true;
+    choices.push({
+      address,
+      label: physical ? `${address}  (${iface})` : `${address}  (${iface} — virtuell)`,
+      physical,
+    });
+  }
+
+  const own = window.location.hostname;
+  if (own !== "" && !choices.some((choice) => choice.address === own)) {
+    // Reverse proxy, mDNS name, tunnel: the bridge cannot know about it, the operator can.
+    choices.push({ address: own, label: `${own}  (diese Seite)`, physical: false });
+  }
+  return choices;
+}
+
+function renderHostChoices(): void {
+  fields.host.innerHTML = "";
+  if (hostChoices.length === 0) {
+    hostChoices = [
+      { address: window.location.hostname, label: window.location.hostname, physical: true },
+    ];
+  }
+  for (const choice of hostChoices) {
+    const option = document.createElement("option");
+    option.value = choice.address;
+    option.textContent = choice.label;
+    fields.host.append(option);
+  }
+  // First entry wins: bridge/lan.ts sorts physical interfaces to the front.
+  selectHost(hostChoices[0]?.address ?? window.location.hostname);
+
+  if (hostChoices.filter((choice) => choice.physical).length > 1) {
+    log("· Mehrere LAN-Adressen — die des WLANs wählen, in dem auch der Controller hängt.");
+  }
+}
+
+/** Point the picker at `address` and rewrite the bridge URL to match, keeping port and token. */
+function selectHost(address: string): void {
+  fields.host.value = address;
+  fields.serverUrl.value = `ws://${address}:${devicePort}/ws/device?pairing=${pairingToken}`;
+}
+
+fields.host.addEventListener("change", () => selectHost(fields.host.value));
 
 // --- Serial connection ------------------------------------------------------
 
@@ -314,6 +391,7 @@ function renderDiagnosis(frame: FirmwareFrame): void {
   const connected = frame["webSocketConnected"] === true;
   const tcpOk = frame["tcpProbeOk"] === true;
   const localIp = readString(frame, "localIp") ?? "";
+  const wsHost = readString(frame, "wsHost") ?? "";
   const lastError = readString(frame, "lastWebSocketError") ?? "";
 
   if (connected) {
@@ -325,13 +403,58 @@ function renderDiagnosis(frame: FirmwareFrame): void {
     return;
   }
   if (!tcpOk) {
-    const hint = "Läuft der Dev-Server, und ist die IP in der Bridge-URL die dieses Rechners?";
+    // The classic failure: the URL carries an address of this machine that the controller's
+    // network cannot route to — a VM bridge, a second LAN, a stale address from another site.
+    const better = closestHost(localIp);
+    if (better !== null && better !== wsHost) {
+      selectHost(better);
+      const wrong = wsHost === "" ? "die Bridge" : wsHost;
+      const fix = "jetzt eingetragen \u2014 noch einmal \u201eAuf den Controller schreiben\u201c.";
+      setStatus(
+        `WLAN ok (IP ${localIp}), aber ${wrong} ist aus diesem Netz nicht erreichbar. ` +
+          `${better} liegt im selben Netz wie der Controller und ist ${fix}`,
+        "error",
+      );
+      return;
+    }
+    const hint = "Läuft der Dev-Server auf diesem Rechner, und lässt die Firewall Port 5184 durch?";
     setStatus(`WLAN ok (IP ${localIp}), aber die Bridge ist nicht erreichbar. ${hint}`, "error");
     return;
   }
   const detail = lastError === "" ? "" : `: ${lastError}`;
   const hint = "Meist ein falscher Pairing-Token.";
   setStatus(`WLAN und Port ok (IP ${localIp}), aber kein WebSocket${detail}. ${hint}`, "error");
+}
+
+/**
+ * Which of this machine's addresses sits on the controller's network? Longest matching octet
+ * prefix rather than a netmask: the page does not know the mask, and "shares three octets" is
+ * decisive enough to name a suspect. Two octets is the floor — one is noise.
+ */
+function closestHost(deviceIp: string): string | null {
+  let best: string | null = null;
+  let bestScore = 1;
+  for (const choice of hostChoices) {
+    const score = sharedOctets(choice.address, deviceIp);
+    if (score > bestScore) {
+      best = choice.address;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function sharedOctets(left: string, right: string): number {
+  const a = left.split(".");
+  const b = right.split(".");
+  if (a.length !== 4 || b.length !== 4) {
+    return 0; // hostname, not an IPv4 — nothing to compare
+  }
+  let shared = 0;
+  while (shared < 4 && a[shared] === b[shared]) {
+    shared += 1;
+  }
+  return shared;
 }
 
 // --- Actions ----------------------------------------------------------------
@@ -374,6 +497,9 @@ function setConnected(connected: boolean): void {
   if (!connected) {
     levelDot.style.left = "50%";
     levelDot.style.top = "50%";
+    lastOrientationAt = 0;
+    level.dataset["stale"] = "false";
+    levelState.textContent = "Nicht verbunden.";
   }
 }
 
@@ -390,7 +516,32 @@ function renderLevel(pitch: number, roll: number): void {
   levelDot.style.left = `${50 + x * 45}%`;
   levelDot.style.top = `${50 - y * 45}%`;
   level.title = `pitch ${pitch.toFixed(1)}° · roll ${roll.toFixed(1)}°`;
+
+  lastOrientationAt = Date.now();
+  level.dataset["stale"] = "false";
+  levelState.textContent = `pitch ${pitch.toFixed(1)}° · roll ${roll.toFixed(1)}°`;
 }
+
+/**
+ * A dot that never moves looks exactly like a dot at rest. The firmware mirrors orientation to
+ * USB every 250 ms, so a second of silence means something upstream stopped — a stalled main
+ * loop, a half-open bridge socket, a dying cable. Say that, rather than showing a stale pose.
+ */
+const ORIENTATION_SILENT_MS = 1_000;
+
+setInterval(() => {
+  if (port === null || level.dataset["stale"] === "true") {
+    return;
+  }
+  if (Date.now() - lastOrientationAt < ORIENTATION_SILENT_MS) {
+    return;
+  }
+  level.dataset["stale"] = "true";
+  levelState.textContent =
+    lastOrientationAt === 0
+      ? "Noch keine Lage-Frames \u2014 der Controller sendet nichts über USB."
+      : "Keine Lage-Frames mehr \u2014 der Controller sendet nichts über USB.";
+}, 500);
 
 function log(line: string): void {
   logLines.push(line);
@@ -467,6 +618,10 @@ function pageHtml(): string {
       <button type="button" class="pair__link" data-pair="forget">Zugangsdaten vergessen</button>
     </p>
     <label class="pair__field">
+      <span>Adresse dieser Station <i>(die im WLAN des Controllers)</i></span>
+      <select data-pair="host"></select>
+    </label>
+    <label class="pair__field">
       <span>Bridge-URL <i>(muss ws:// sein — die Firmware kann kein wss://)</i></span>
       <input type="text" data-pair="serverUrl" autocomplete="off" spellcheck="false" />
     </label>
@@ -489,7 +644,8 @@ function pageHtml(): string {
       Live aus den Orientierungs-Frames des Controllers. Der Punkt gehört in die Mitte, wenn der
       Controller flach liegt — tut er das nicht, sitzt er verdreht in der Halterung.
     </p>
-    <div class="pair__level" data-pair="level"><i data-pair="levelDot"></i></div>
+    <div class="pair__level" data-pair="level" data-stale="false"><i data-pair="levelDot"></i></div>
+    <p class="pair__hint" data-pair="levelState">Nicht verbunden.</p>
   </section>
 
   <section class="pair__card">

@@ -160,7 +160,8 @@ body {
   font-size: 12px;
 }
 
-.pair__field input {
+.pair__field input,
+.pair__field select {
   min-height: 38px;
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -170,7 +171,8 @@ body {
   padding: 0 10px;
 }
 
-.pair__field input:focus {
+.pair__field input:focus,
+.pair__field select:focus {
   outline: none;
   border-color: rgba(125, 211, 252, 0.7);
 }
@@ -229,4 +231,10 @@ body {
   color: #a1a1aa;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* Kein Lage-Frame seit einer Sekunde: der Punkt zeigt dann eine alte Lage, keine aktuelle. */
+.pair__level[data-stale="true"] {
+  opacity: 0.4;
+  border-style: dashed;
 }

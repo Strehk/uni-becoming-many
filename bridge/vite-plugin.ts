@@ -12,6 +12,7 @@
 import { type Server as HttpServer, createServer } from "node:http";
 import type { Plugin, ViteDevServer } from "vite";
 import { type Bridge, DEFAULT_DEVICE_PORT, TOKEN_PATH, createBridge } from "./index.ts";
+import { listLanHosts } from "./lan.ts";
 
 /**
  * Editing anything under `bridge/` restarts the dev server, and Vite re-imports the config as a
@@ -62,7 +63,11 @@ export function m5Bridge(): Plugin {
       server.middlewares.use(TOKEN_PATH, (_request, response) => {
         response.setHeader("content-type", "application/json");
         response.setHeader("cache-control", "no-store");
-        response.end(JSON.stringify({ token: bridge.pairingToken, devicePort }));
+        // `hosts` so the page offers this machine's real LAN addresses instead of trusting the
+        // one the operator happened to open the page on — see bridge/lan.ts.
+        response.end(
+          JSON.stringify({ token: bridge.pairingToken, devicePort, hosts: listLanHosts() }),
+        );
       });
 
       // Only a real process exit tears the listener down — a restart reuses it above.
