@@ -711,8 +711,13 @@ if (!useTheatreStudio) {
     appSettings = { ...appSettings, mode };
     saveAppSettings(appSettings);
     applyFlightFeel(mode);
-    // Fullscreen in every mode; only the phone gets the landscape lock.
-    await enterImmersiveViewport({ lockLandscape: mode === "mobile" });
+    // Fullscreen for the flat modes; only the phone also gets the landscape lock. The ICAROS
+    // station is left alone: it runs attended, and taking its browser fullscreen puts the
+    // window out of the operator's reach for no gain — the machine is the frame there, not
+    // the screen.
+    if (mode !== "icaros") {
+      await enterImmersiveViewport({ lockLandscape: mode === "mobile" });
+    }
     rewindToStart(next);
     clock.pause(); // stay frozen at t=0 until the gate (or the lesson) says go
     if (options.skipGate === true) {
