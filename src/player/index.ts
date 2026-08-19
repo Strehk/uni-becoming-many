@@ -25,8 +25,9 @@
  * composes cleanly with head tracking instead of fighting it. The gimbal is identity unless the
  * debug pitch is used, so VR is unaffected.
  *
- * Convention (three.js): the rig looks down its local -Z, so "forward" is negative Z. Positive
- * pitch climbs (raises altitude); positive roll turns right.
+ * Convention (three.js): the rig looks down its local -Z, so "forward" is negative Z. `update`
+ * inverts both steering axes before using them (see the polarity note there), so on the glide
+ * model positive pitch *descends* and positive roll turns *left*.
  */
 import * as THREE from "three/webgpu";
 
@@ -166,9 +167,16 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
     if (dtSeconds <= 0) {
       return;
     }
+    // Steering polarity, fixed here rather than per source: the rig reads inverted on both axes
+    // against the convention above, so pull-back/lean-left is flipped once, in the one place every
+    // steering source (M5 rig, phone tilt, debug keyboard) passes through. The axes are not
+    // swapped — pitch still owns altitude, roll still owns heading.
+    const pitch = -input.pitch;
+    const roll = -input.roll;
+
     // Heading: integrate the roll rate into the rig as a yaw about world-up, so the new course
     // persists (turn and come about) and the horizon stays level — never a bank or flip.
-    rig.rotateOnWorldAxis(worldUp, -input.roll * yawRate * dtSeconds); // roll > 0 turns right
+    rig.rotateOnWorldAxis(worldUp, -roll * yawRate * dtSeconds); // roll > 0 turns left (inverted)
 
     if (!input.paused) {
       // Fly along where we're actually looking = rig heading * gimbal pitch. (The rig's parent is
@@ -179,7 +187,7 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
       rig.position.addScaledVector(forward, speed * (input.throttle ?? 1) * dtSeconds);
       // Altitude: pitch is a vertical rate — climb/descend straight up/down (positive = up)
       // without tilting the rig, so the view never pitches. The gained altitude persists.
-      rig.position.y += input.pitch * climbRate * dtSeconds;
+      rig.position.y += pitch * climbRate * dtSeconds;
     }
 
     // Terrain bounds: keep the rig within the airspace — at least `clearance` above the ground
