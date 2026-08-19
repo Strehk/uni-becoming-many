@@ -391,9 +391,7 @@ const player = createPlayer(renderer.camera, {
   speed: 6,
   climbRate: 14,
   maxAltitude: 100,
-  // Low enough to really skim the ground — the floor is soft (see applyBounds), so coming
-  // down here reads as being carried by the terrain, not as hitting a lid.
-  clearance: 1.5,
+  clearance: 4,
   floor: (x, z) => world.groundHeightAt(x, z),
 });
 renderer.scene.add(player.rig);
@@ -645,6 +643,8 @@ const setInterfaceMode = (mode: ExperienceInterfaceMode): void => {
 };
 if (useTheatreStudio) {
   setFlightMode("free"); // the studio boots straight into configure (see above)
+  keyboard.setDesktopFeel(true); // the configure route is a desk with a keyboard
+  player.setFloorFeel({ clearance: 1.5, soften: true });
 }
 
 // Gyro controls: the phone's own tilt, reported as the same {pitch, roll} rate pair
@@ -710,6 +710,7 @@ if (!useTheatreStudio) {
     }
     appSettings = { ...appSettings, mode };
     saveAppSettings(appSettings);
+    applyFlightFeel(mode);
     // Fullscreen in every mode; only the phone gets the landscape lock.
     await enterImmersiveViewport({ lockLandscape: mode === "mobile" });
     rewindToStart(next);
@@ -720,6 +721,20 @@ if (!useTheatreStudio) {
       armStartGate(mode === "mobile");
     }
     return true;
+  };
+
+  /**
+   * The desktop mode flies differently on purpose, and ONLY the desktop mode: a hand on WASD
+   * wants eased controls, an attitude that stays where it is put, and enough room to skim low
+   * without being knocked about by every ridge. The headset and the ICAROS rig are authored to
+   * their own feel and keep it — the values they had before any of this existed.
+   */
+  const applyFlightFeel = (mode: ExperienceMode): void => {
+    const desktop = mode === "desktop";
+    keyboard.setDesktopFeel(desktop);
+    player.setFloorFeel(
+      desktop ? { clearance: 1.5, soften: true } : { clearance: 4, soften: false },
+    );
   };
 
   const startMenu = createStartMenu({

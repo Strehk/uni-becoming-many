@@ -93,12 +93,14 @@ export type PlayerOptions = Readonly<{
    * least `clearance` above it, so the player can never sink into the terrain.
    */
   floor?: (x: number, z: number) => number | null;
-  /**
-   * Metres to keep between the rig and the terrain floor. Defaults to 3. This is a SOFT
-   * floor — dipping below it eases the rig back up rather than pinning it, so skimming low
-   * over rolling ground stays smooth (see `applyBounds`).
-   */
+  /** Metres to keep between the rig and the terrain floor. Defaults to 3. */
   clearance?: number;
+  /**
+   * Ease the rig back up when it dips below `clearance`, instead of pinning it there. Off by
+   * default: the authored flight keeps its hard floor. `setFloorFeel` turns it on for the
+   * desktop mode, where skimming low would otherwise jolt over every ridge.
+   */
+  softFloor?: boolean;
   /**
    * Maximum altitude above the terrain floor, in metres. Caps how high pitch can climb, so the
    * player can never leave the world's airspace. Terrain-relative like `clearance` (and using the
@@ -130,6 +132,13 @@ export interface Player {
    */
   look(pitch: number): void;
   /**
+   * Retune how the flight sits over the ground. The piece's own flight — the headset, the
+   * ICAROS rig — is authored to a fixed clearance and a hard floor, and that is the default;
+   * only the desktop mode asks for something else (see main.ts), because a hand on WASD wants
+   * to skim low without being knocked about by every ridge.
+   */
+  setFloorFeel(options: { clearance?: number; soften?: boolean }): void;
+  /**
    * Retune the altitude ceiling at runtime, in metres above the terrain floor (see
    * {@link PlayerOptions.maxAltitude}). Lets an authored source (the Theatre timeline) shape the
    * ceiling over the piece; applied on the next `update`'s bounds clamp. Values are used as-is.
@@ -152,7 +161,8 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
   const yawRate = options.yawRate ?? 0.8;
   const lookAngle = options.lookAngle ?? 0.7; // ~40° at full deflection
   const floor = options.floor;
-  const clearance = options.clearance ?? 3;
+  let clearance = options.clearance ?? 3;
+  let softFloor = options.softFloor === true;
   let maxAltitude = options.maxAltitude ?? 200; // mutable: the Theatre timeline can retune it live
 
   const rig = new THREE.Group();
@@ -235,28 +245,37 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
   }
 
   /**
-   * Keep the rig in the airspace — but fly it back in rather than snapping it.
+   * Keep the rig in the airspace.
    *
-   * A hard clamp to `ground + clearance` means that anyone flying low is pinned to the
-   * terrain's own shape, and every ridge and hollow arrives as a jolt. So the floor is a soft
-   * one: below it the rig is eased up (a few metres per second of correction), which reads as
-   * the aircraft being carried by the ground rather than stopped by it. A hard limit still
-   * sits just underneath, so no amount of diving puts the camera inside the hill.
+   * By default the floor is HARD — the rig is set to `ground + clearance`, which is what the
+   * authored flight expects. With `softFloor` on it is flown back in instead: below the line
+   * the rig is eased up a few metres per second, which reads as the aircraft being carried by
+   * the ground rather than stopped by it, and a low pass over rolling terrain stops jolting.
+   * A hard limit still sits underneath, so no amount of diving puts the camera in the hill.
    */
   function applyBounds(dtSeconds: number): void {
     if (!floor) return;
     const ground = floor(rig.position.x, rig.position.z);
     if (ground === null) return;
 
-    const soft = ground + clearance;
-    const hard = ground + HARD_CLEARANCE;
-    if (rig.position.y < soft) {
-      const ease = 1 - Math.exp(-FLOOR_RECOVERY * dtSeconds);
-      rig.position.y += (soft - rig.position.y) * ease;
-      if (rig.position.y < hard) rig.position.y = hard;
+    const min = ground + clearance;
+    if (rig.position.y < min) {
+      if (softFloor) {
+        const ease = 1 - Math.exp(-FLOOR_RECOVERY * dtSeconds);
+        rig.position.y += (min - rig.position.y) * ease;
+        const hard = ground + HARD_CLEARANCE;
+        if (rig.position.y < hard) rig.position.y = hard;
+      } else {
+        rig.position.y = min;
+      }
     }
     const max = ground + maxAltitude;
     if (rig.position.y > max) rig.position.y = max;
+  }
+
+  function setFloorFeel(options: { clearance?: number; soften?: boolean }): void {
+    if (options.clearance !== undefined) clearance = options.clearance;
+    if (options.soften !== undefined) softFloor = options.soften;
   }
 
   function look(pitch: number): void {
@@ -274,5 +293,5 @@ export function createPlayer(camera: THREE.Object3D, options: PlayerOptions = {}
     rig.removeFromParent();
   }
 
-  return { rig, update, flyFree, look, setMaxAltitude, dispose };
+  return { rig, update, flyFree, look, setFloorFeel, setMaxAltitude, dispose };
 }

@@ -5,14 +5,14 @@
  *   - `turn` — A/D: which way to curve the heading. Feed into `Player.update`'s `roll`; the
  *     player integrates it, so the turn persists (you can come about) and the spring only eases
  *     the curve in and out.
- *   - `pitch` — W/S: the ATTITUDE of the nose, held. Feed into `Player.look`; the player treats
- *     it as an absolute angle, and this module integrates it: the keys raise and lower the nose,
- *     and where you leave it is where it stays.
+ *   - `pitch` — W/S: the nose. Feed into `Player.look`.
  *
- * The two axes behave alike on purpose, and it is the whole feel of the thing: a key sets a RATE
- * of change, and what it changes — course, attitude — persists once the key is let go. Nothing
- * self-corrects. Pitch used to spring back to level instead, which pulled the flight path
- * straight every time the hand left the key. Nothing here touches the player, renderer,
+ * How pitch behaves depends on `setDesktopFeel`. In the DESKTOP mode the keys set a RATE and the
+ * attitude they reach PERSISTS — the same bargain the heading already makes, and the whole feel
+ * of the thing: nothing self-corrects, so the flight path stops being pulled straight every time
+ * the hand leaves the key. Everywhere else (the default) pitch springs back to level as before,
+ * because there the keyboard is a debug aid and must not sit in the way of the rig or the phone.
+ * Nothing here touches the player, renderer,
  * or the controller: it only listens for keys and reports intent, so it drops in anywhere and
  * lifts out again with a single `dispose()`. Tick `update(dtSeconds)` once per frame to advance
  * the spring before reading `locomotion`.
@@ -76,6 +76,17 @@ const TURN_KEYS: Readonly<Record<string, number>> = {
 
 export interface KeyboardControls {
   /**
+   * Turn the desktop flying feel on or off.
+   *
+   * ON (the desktop mode): controls ease in and out over a good half second, and the nose
+   * KEEPS the attitude it is left at — the same bargain the heading makes.
+   *
+   * OFF (the default, and what the ICAROS rig and the phone fly with): the old debug feel —
+   * quick, and the nose springs back to level on release, so the keyboard cannot sit in the
+   * way of the steering source that actually owns the flight.
+   */
+  setDesktopFeel(on: boolean): void;
+  /**
    * Live debug input, mutated in place. Advanced by `update(dtSeconds)`, so tick that first —
    * read this every frame; never cache the field values.
    */
@@ -93,8 +104,12 @@ export interface KeyboardControls {
 export function createKeyboardControls(options: KeyboardControlsOptions = {}): KeyboardControls {
   const target = options.target ?? window;
   const boost = options.boost ?? 2;
-  const holdTime = options.holdTime ?? 0.55;
-  const releaseTime = options.releaseTime ?? 0.9;
+  const desktopHold = options.holdTime ?? 0.55;
+  const desktopRelease = options.releaseTime ?? 0.9;
+  // The debug feel the other modes keep: quick, and the nose self-levels.
+  const DEBUG_HOLD = 0.12;
+  const DEBUG_RELEASE = 0.18;
+  let desktopFeel = false;
   const pitchRate = options.pitchRate ?? 0.9;
 
   const pressed = new Set<string>();
@@ -166,6 +181,8 @@ export function createKeyboardControls(options: KeyboardControlsOptions = {}): K
     // Turning eases at the pace its own direction of travel calls for: rolling into a turn is
     // the pilot's intent and may arrive briskly, coming out of it is the aircraft settling and
     // takes its time.
+    const holdTime = desktopFeel ? desktopHold : DEBUG_HOLD;
+    const releaseTime = desktopFeel ? desktopRelease : DEBUG_RELEASE;
     locomotion.turn = smoothDamp(
       locomotion.turn,
       target_.turn,
@@ -193,11 +210,17 @@ export function createKeyboardControls(options: KeyboardControlsOptions = {}): K
       target_.pitch === 0 ? releaseTime : holdTime,
       dtSeconds,
     );
-    if (pitchDrive !== 0) {
-      locomotion.pitch = Math.max(
-        -1,
-        Math.min(1, locomotion.pitch + pitchDrive * pitchRate * dtSeconds),
-      );
+    if (desktopFeel) {
+      if (pitchDrive !== 0) {
+        locomotion.pitch = Math.max(
+          -1,
+          Math.min(1, locomotion.pitch + pitchDrive * pitchRate * dtSeconds),
+        );
+      }
+    } else {
+      // Debug feel: the eased input IS the attitude, so letting go re-levels and the keyboard
+      // hands the flight straight back to whatever else is steering.
+      locomotion.pitch = pitchDrive;
     }
   };
 
@@ -233,8 +256,15 @@ export function createKeyboardControls(options: KeyboardControlsOptions = {}): K
   return {
     locomotion,
     update,
+
+    setDesktopFeel(on: boolean): void {
+      desktopFeel = on;
+    },
+
     get steering() {
-      // Keep control while a key is held or a spring is still unwinding back to center.
+      // Hold control while a key is down and while the springs are still unwinding. In the
+      // desktop feel a held attitude counts too — it is the keyboard's, and handing over
+      // mid-climb would have another source fight it; levelling out gives the flight back.
       return steeringHeld() || locomotion.pitch !== 0 || locomotion.turn !== 0;
     },
     dispose() {
