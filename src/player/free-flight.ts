@@ -6,21 +6,22 @@
  * for *inspecting* one — so the operator screens fly like Minecraft's creative mode instead:
  * stand still, look wherever you want, move along your gaze.
  *
- *   - **W/S** forward / back along the view, **A/D** strafe level, **Space** up, **Shift** down.
+ *   - **W/S** forward / back along the view, **A/D** strafe level, **↑/↓** up and down.
  *     Nothing accumulates and nothing carries: release and you stop.
+ *     (Space is deliberately NOT a flight key here — it belongs to the transport, which pauses
+ *     the timeline with it. A configure-mode flight must not fight the clock.)
  *   - **Ctrl** boosts the speed while held.
  *   - **Looking** has three interchangeable modes (the dev panel switches them live, because each
  *     one trades away something different):
  *       · `pointerlock` — click the canvas to capture the cursor, ESC releases it. Closest to
  *         Minecraft, but the panels need the cursor back.
  *       · `drag` — look only while a mouse button is held. The cursor stays free for the panels.
- *       · `keys` — arrow keys turn and tilt. No mouse at all.
+ *       · `keys` — **←/→** turn, **Q/E** tilt the view. No mouse at all. (Up and down are the
+ *         vertical thrusters, so looking up and down moved to Q/E.)
  *
  * Like the keyboard debug controls this module touches nothing else: it listens, and reports
  * intent through `input` (mutated in place). `Player.flyFree` is what acts on it.
  *
- * Space is swallowed while active (capture phase): it is the transport's pause key, and a creative
- * ascent should not scrub the timeline. **K** still pauses.
  */
 
 /** How the view is aimed. See the module docs — the dev panel switches this live. */
@@ -80,13 +81,9 @@ const PITCH_LIMIT = 1.48; // ~85°
 
 const FORWARD_KEYS: Readonly<Record<string, number>> = { KeyW: 1, KeyS: -1 };
 const STRAFE_KEYS: Readonly<Record<string, number>> = { KeyD: 1, KeyA: -1 };
-const LIFT_KEYS: Readonly<Record<string, number>> = {
-  Space: 1,
-  ShiftLeft: -1,
-  ShiftRight: -1,
-};
+const LIFT_KEYS: Readonly<Record<string, number>> = { ArrowUp: 1, ArrowDown: -1 };
 const YAW_KEYS: Readonly<Record<string, number>> = { ArrowRight: 1, ArrowLeft: -1 };
-const PITCH_KEYS: Readonly<Record<string, number>> = { ArrowUp: 1, ArrowDown: -1 };
+const PITCH_KEYS: Readonly<Record<string, number>> = { KeyE: 1, KeyQ: -1 };
 
 export function createFreeFlightControls(options: FreeFlightOptions = {}): FreeFlightControls {
   const target = options.target ?? document.body;
@@ -148,8 +145,8 @@ export function createFreeFlightControls(options: FreeFlightOptions = {}): FreeF
     input.boost = 1;
   };
 
-  // Capture phase: Space is the transport's pause key and Ctrl+key combinations are the browser's.
-  // While free flight is armed those belong to the flight, so the event stops here.
+  // Capture phase so the arrows never reach the page and scroll it. Nothing is swallowed
+  // beyond the flight's own keys — Space in particular stays with the transport.
   const onKeyDown = (event: Event): void => {
     if (!enabled || !(event instanceof KeyboardEvent) || isTyping()) {
       return;
@@ -158,10 +155,7 @@ export function createFreeFlightControls(options: FreeFlightOptions = {}): FreeF
       return;
     }
     pressed.add(event.code);
-    event.preventDefault(); // Space scrolls, arrows scroll
-    if (event.code === "Space") {
-      event.stopImmediatePropagation(); // …and would otherwise toggle the clock
-    }
+    event.preventDefault(); // the arrows would otherwise scroll the page
   };
 
   const onKeyUp = (event: Event): void => {
