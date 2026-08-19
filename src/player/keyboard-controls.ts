@@ -5,10 +5,14 @@
  *   - `turn` — A/D: which way to curve the heading. Feed into `Player.update`'s `roll`; the
  *     player integrates it, so the turn persists (you can come about) and the spring only eases
  *     the curve in and out.
- *   - `pitch` — W/S: how far to tilt travel up/down. Feed into `Player.look`; the player treats
- *     it as an absolute offset, so on release the spring back to 0 re-levels (altitude kept).
+ *   - `pitch` — W/S: the nose. Feed into `Player.look`.
  *
- * Both axes spring back to 0 when the keys release. Nothing here touches the player, renderer,
+ * How pitch behaves depends on `setDesktopFeel`. In the DESKTOP mode the keys set a RATE and the
+ * attitude they reach PERSISTS — the same bargain the heading already makes, and the whole feel
+ * of the thing: nothing self-corrects, so the flight path stops being pulled straight every time
+ * the hand leaves the key. Everywhere else (the default) pitch springs back to level as before,
+ * because there the keyboard is a debug aid and must not sit in the way of the rig or the phone.
+ * Nothing here touches the player, renderer,
  * or the controller: it only listens for keys and reports intent, so it drops in anywhere and
  * lifts out again with a single `dispose()`. Tick `update(dtSeconds)` once per frame to advance
  * the spring before reading `locomotion`.
@@ -27,10 +31,22 @@ export type KeyboardControlsOptions = Readonly<{
   /** Throttle multiplier while Shift is held. Defaults to 2. */
   boost?: number;
   /**
-   * Spring rate toward the target deflection, per second. Higher is snappier, lower is
-   * looser/floatier. Frame-rate independent. Defaults to 10.
+   * Roughly how long a control takes to reach a held deflection, in seconds. Defaults to
+   * 0.55 — a glider's stick, not a switch.
    */
-  stiffness?: number;
+  holdTime?: number;
+  /**
+   * How long a control takes to come back to centre once released, in seconds. Deliberately
+   * longer than `holdTime` (defaults to 0.9): an aircraft settles out of a turn, it does not
+   * snap out of it.
+   */
+  releaseTime?: number;
+  /**
+   * How fast W/S move the nose, in units of full deflection per second. Defaults to 0.9, so
+   * about a second and a bit from level to the steepest climb — an elevator being wound in,
+   * not a switch.
+   */
+  pitchRate?: number;
 }>;
 
 /**
@@ -60,6 +76,17 @@ const TURN_KEYS: Readonly<Record<string, number>> = {
 
 export interface KeyboardControls {
   /**
+   * Turn the desktop flying feel on or off.
+   *
+   * ON (the desktop mode): controls ease in and out over a good half second, and the nose
+   * KEEPS the attitude it is left at — the same bargain the heading makes.
+   *
+   * OFF (the default, and what the ICAROS rig and the phone fly with): the old debug feel —
+   * quick, and the nose springs back to level on release, so the keyboard cannot sit in the
+   * way of the steering source that actually owns the flight.
+   */
+  setDesktopFeel(on: boolean): void;
+  /**
    * Live debug input, mutated in place. Advanced by `update(dtSeconds)`, so tick that first —
    * read this every frame; never cache the field values.
    */
@@ -77,7 +104,13 @@ export interface KeyboardControls {
 export function createKeyboardControls(options: KeyboardControlsOptions = {}): KeyboardControls {
   const target = options.target ?? window;
   const boost = options.boost ?? 2;
-  const stiffness = options.stiffness ?? 10;
+  const desktopHold = options.holdTime ?? 0.55;
+  const desktopRelease = options.releaseTime ?? 0.9;
+  // The debug feel the other modes keep: quick, and the nose self-levels.
+  const DEBUG_HOLD = 0.12;
+  const DEBUG_RELEASE = 0.18;
+  let desktopFeel = false;
+  const pitchRate = options.pitchRate ?? 0.9;
 
   const pressed = new Set<string>();
 
@@ -107,20 +140,88 @@ export function createKeyboardControls(options: KeyboardControlsOptions = {}): K
     target_.throttle = shiftHeld() ? boost : 1;
   };
 
-  // Frame-rate-independent exponential approach: same easing whether the frame is 8ms or 33ms.
-  const spring = (current: number, goal: number, factor: number): number => {
-    const next = current + (goal - current) * factor;
-    return goal === 0 && Math.abs(next) < SETTLE_EPSILON ? 0 : next;
+  /**
+   * Critically damped approach — the classic camera-move ease.
+   *
+   * An exponential approach (`x += (goal - x) * k`) reaches its top speed INSTANTLY: the
+   * moment a key goes down the value is already moving at full rate, which is exactly the
+   * jolt one sees. A critically damped spring carries a velocity, so it accelerates into the
+   * move and decelerates out of it, and never overshoots. `smoothTime` is roughly how long
+   * the move takes. Frame-rate independent (the closed form, not an Euler step).
+   */
+  const smoothDamp = (
+    current: number,
+    goal: number,
+    state: { velocity: number },
+    smoothTime: number,
+    dtSeconds: number,
+  ): number => {
+    const omega = 2 / Math.max(0.0001, smoothTime);
+    const x = omega * dtSeconds;
+    const decay = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+    const change = current - goal;
+    const temp = (state.velocity + omega * change) * dtSeconds;
+    state.velocity = (state.velocity - omega * temp) * decay;
+    const next = goal + (change + temp) * decay;
+    return goal === 0 && Math.abs(next) < SETTLE_EPSILON && Math.abs(state.velocity) < 0.05
+      ? 0
+      : next;
   };
+
+  const turnState = { velocity: 0 };
+  const pitchState = { velocity: 0 };
+  const throttleState = { velocity: 0 };
+  /** The eased elevator input; `locomotion.pitch` is its integral (the held attitude). */
+  let pitchDrive = 0;
 
   const update = (dtSeconds: number): void => {
     if (dtSeconds <= 0) {
       return;
     }
-    const factor = 1 - Math.exp(-stiffness * dtSeconds);
-    locomotion.pitch = spring(locomotion.pitch, target_.pitch, factor);
-    locomotion.turn = spring(locomotion.turn, target_.turn, factor);
-    locomotion.throttle = spring(locomotion.throttle, target_.throttle, factor);
+    // Turning eases at the pace its own direction of travel calls for: rolling into a turn is
+    // the pilot's intent and may arrive briskly, coming out of it is the aircraft settling and
+    // takes its time.
+    const holdTime = desktopFeel ? desktopHold : DEBUG_HOLD;
+    const releaseTime = desktopFeel ? desktopRelease : DEBUG_RELEASE;
+    locomotion.turn = smoothDamp(
+      locomotion.turn,
+      target_.turn,
+      turnState,
+      target_.turn === 0 ? releaseTime : holdTime,
+      dtSeconds,
+    );
+    locomotion.throttle = smoothDamp(
+      locomotion.throttle,
+      target_.throttle,
+      throttleState,
+      holdTime,
+      dtSeconds,
+    );
+
+    // The elevator itself is eased, and the ATTITUDE is its integral: W and S wind the nose up
+    // and down, and it stays where it is left — the same bargain the heading already makes.
+    // Easing the input rather than the angle is what keeps a climb from starting and stopping
+    // with a snap. Clamped to full deflection, so the player's `lookAngle` still bounds how
+    // steep it can get.
+    pitchDrive = smoothDamp(
+      pitchDrive,
+      target_.pitch,
+      pitchState,
+      target_.pitch === 0 ? releaseTime : holdTime,
+      dtSeconds,
+    );
+    if (desktopFeel) {
+      if (pitchDrive !== 0) {
+        locomotion.pitch = Math.max(
+          -1,
+          Math.min(1, locomotion.pitch + pitchDrive * pitchRate * dtSeconds),
+        );
+      }
+    } else {
+      // Debug feel: the eased input IS the attitude, so letting go re-levels and the keyboard
+      // hands the flight straight back to whatever else is steering.
+      locomotion.pitch = pitchDrive;
+    }
   };
 
   const isBound = (code: string): boolean =>
@@ -155,8 +256,15 @@ export function createKeyboardControls(options: KeyboardControlsOptions = {}): K
   return {
     locomotion,
     update,
+
+    setDesktopFeel(on: boolean): void {
+      desktopFeel = on;
+    },
+
     get steering() {
-      // Keep control while a key is held or a spring is still unwinding back to center.
+      // Hold control while a key is down and while the springs are still unwinding. In the
+      // desktop feel a held attitude counts too — it is the keyboard's, and handing over
+      // mid-climb would have another source fight it; levelling out gives the flight back.
       return steeringHeld() || locomotion.pitch !== 0 || locomotion.turn !== 0;
     },
     dispose() {

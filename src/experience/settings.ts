@@ -9,6 +9,11 @@
 // Persisted in localStorage per device, so an exhibition machine keeps the tuning
 // it was set up with and a phone keeps its gyro calibration across reloads.
 
+import {
+  DEFAULT_ONBOARDING_CONCEPT,
+  type OnboardingConcept,
+  asOnboardingConcept,
+} from "../onboarding/concepts.ts";
 import { CUSTOM_PRESET_ID } from "../perf/router.ts";
 
 /**
@@ -50,6 +55,8 @@ export interface AppSettings {
   gyroRangeDegrees: number;
   /** Invert the front/back tilt, for anyone who reads it as "pull up to climb". */
   gyroInvertPitch: boolean;
+  /** EXPERIMENT: which staging of the wordless particle lesson the menu last offered. */
+  onboardingConcept: OnboardingConcept;
 }
 
 const STORAGE_KEY = "becoming-many:settings:v1";
@@ -65,6 +72,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   mode: "desktop",
   gyroRangeDegrees: 30,
   gyroInvertPitch: false,
+  onboardingConcept: DEFAULT_ONBOARDING_CONCEPT,
 };
 
 export function loadAppSettings(): AppSettings {
@@ -110,6 +118,7 @@ function normalize(input: unknown): AppSettings {
     gyroRangeDegrees: clamp(raw["gyroRangeDegrees"], 10, 60, d.gyroRangeDegrees),
     gyroInvertPitch:
       typeof raw["gyroInvertPitch"] === "boolean" ? raw["gyroInvertPitch"] : d.gyroInvertPitch,
+    onboardingConcept: asOnboardingConcept(raw["onboardingConcept"]) ?? d.onboardingConcept,
   };
 }
 

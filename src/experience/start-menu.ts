@@ -16,6 +16,7 @@
 // menu it cannot see.
 
 import { asset } from "../asset-url.ts";
+import { ONBOARDING_CONCEPTS, type OnboardingConcept } from "../onboarding/concepts.ts";
 import { PRESETS } from "../perf/presets.ts";
 import { CUSTOM_PRESET_ID, type PerfRouter } from "../perf/router.ts";
 import { isSenseId } from "../senses/ids.ts";
@@ -52,6 +53,15 @@ export interface StartMenuOptions {
    * false if any of it was refused, in which case the menu stays up and says so.
    */
   onStart(config: ExperienceConfig, mode: ExperienceMode): Promise<boolean>;
+  /**
+   * EXPERIMENT: begin the flight with the wordless particle lesson running in front of it.
+   * Same contract as `onStart` — false means it never got going and the menu stays up.
+   */
+  onOnboarding(
+    config: ExperienceConfig,
+    mode: ExperienceMode,
+    concept: OnboardingConcept,
+  ): Promise<boolean>;
   /** Re-take the phone's current pose as "fly straight". */
   onCalibrate(): void;
   /**
@@ -148,6 +158,21 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     setScreen("none");
   };
 
+  /** Same as `startExperience`, with the particle lesson armed in front of the flight. */
+  const startOnboarding = async (
+    concept: OnboardingConcept,
+    button: HTMLButtonElement,
+  ): Promise<void> => {
+    button.disabled = true;
+    const started = await options.onOnboarding(cloneConfig(config), settings.mode, concept);
+    button.disabled = false;
+    if (!started) {
+      return;
+    }
+    saveExperienceConfig(config);
+    setScreen("none");
+  };
+
   // ── Screen: start ──────────────────────────────────────────────
   function renderHome(): void {
     setScreen("home");
@@ -222,34 +247,58 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
       renderSettings,
     );
 
-    // Own page rather than a screen in here: pairing needs Web Serial and a USB cable, so it
-    // belongs at the desk before the flight — never mid-experience or in the headset.
-    const pair = entry(
-      "Controller einrichten",
-      "Für die Betreuung: den M5 am ICAROS über USB mit dieser Station verbinden.",
-      "quiet",
-      () => {
-        window.location.href = asset("pair.html");
-      },
-    );
+    list.append(...starts, settingsEntry);
+    screen.append(head, list, note);
+  }
 
-    const configure = entry(
-      "Ablauf konfigurieren",
-      "Für die Betreuung: wann welcher Sinn erwacht.",
-      "quiet",
-      () => {
-        const url = new URL(window.location.href);
-        if (url.searchParams.get("studio") !== "1") {
-          url.searchParams.set("studio", "1");
-          window.location.href = url.toString();
-          return;
-        }
-        options.onConfigure(cloneConfig(config));
-        renderConfig();
-      },
-    );
+  // ── Screen: onboarding concepts (EXPERIMENT) ───────────────────
+  // Three stagings of the same idea — the air itself teaches the flight. They differ in
+  // how literal they are, which is a question only flying them can settle, so the screen
+  // simply offers all three and starts the piece with the chosen one.
+  function renderOnboarding(): void {
+    setScreen("settings");
+    screen.replaceChildren();
+    screen.classList.remove("bm-menu__screen--wide");
 
-    list.append(...starts, settingsEntry, pair, configure);
+    const head = document.createElement("div");
+    head.className = "bm-menu__head";
+    const title = document.createElement("h1");
+    title.className = "bm-menu__title bm-menu__title--small";
+    title.textContent = "Anleitung";
+    const lede = document.createElement("p");
+    lede.className = "bm-menu__lede";
+    lede.textContent =
+      "Ein Versuch: Die Luftpartikel selbst bringen das Fliegen bei. Jede Aufgabe füllt sich, " +
+      "während du sie fliegst — erst wenn alle geschafft sind, beginnt das Stück.";
+    head.append(title, lede);
+
+    const list = document.createElement("div");
+    list.className = "bm-menu__list";
+    const note = document.createElement("p");
+    note.className = "bm-menu__note";
+    note.dataset["bmStatus"] = "";
+
+    for (const [index, concept] of ONBOARDING_CONCEPTS.entries()) {
+      const button = menuItem(`${concept.label} starten`, index === 0 ? "primary" : "normal");
+      const show = (): void => {
+        note.textContent = concept.note;
+      };
+      button.addEventListener("pointerenter", show);
+      button.addEventListener("focus", show);
+      button.addEventListener("pointerleave", () => {
+        note.textContent = "";
+      });
+      button.addEventListener("click", () => {
+        setSettings({ ...settings, onboardingConcept: concept.id });
+        void startOnboarding(concept.id, button);
+      });
+      list.append(button);
+    }
+
+    const back = menuItem("Zurück", "quiet");
+    back.addEventListener("click", renderHome);
+    list.append(back);
+
     screen.append(head, list, note);
   }
 
@@ -267,12 +316,13 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
     const lede = document.createElement("p");
     lede.className = "bm-menu__lede";
     lede.textContent =
-      "Gelten sofort und bleiben auf diesem Gerät gespeichert. Der Modus wird auf dem Startbild gewählt.";
+      "Gelten sofort und bleiben auf diesem Gerät gespeichert. Der Modus wird auf dem Startbild gewählt. " +
+      "Unten liegt, was vor der Vorstellung eingerichtet wird.";
     head.append(title, lede);
 
     const sections = document.createElement("div");
     sections.className = "bm-menu__sections";
-    sections.append(qualitySection(), controlSection());
+    sections.append(qualitySection(), controlSection(), operatorSection());
 
     const status = document.createElement("p");
     status.className = "bm-menu__status";
@@ -405,6 +455,54 @@ export function createStartMenu(options: StartMenuOptions): StartMenu {
   }
 
   // ── Screen: dramaturgy ─────────────────────────────────────────
+  /**
+   * The three things that are set up BEFORE an audience arrives, gathered in one place: the
+   * controller at the desk, the wordless flight lesson, the sense schedule. None of them
+   * belongs on the start screen, which the audience sees — it should offer the flight and
+   * nothing else.
+   */
+  function operatorSection(): HTMLElement {
+    const section = document.createElement("div");
+    const title = document.createElement("h2");
+    title.className = "bm-menu__section-title";
+    title.textContent = "Für die Betreuung";
+
+    const choices = document.createElement("div");
+    choices.className = "bm-menu__choices";
+
+    // Own page rather than a screen in here: pairing needs Web Serial and a USB cable, so it
+    // belongs at the desk before the flight — never mid-experience or in the headset.
+    const pair = actionButton(
+      "Controller einrichten",
+      "Den M5 am ICAROS über USB mit dieser Station verbinden.",
+    );
+    pair.addEventListener("click", () => {
+      window.location.href = asset("pair.html");
+    });
+
+    const onboarding = actionButton(
+      "Anleitung (Experiment)",
+      "Eine wortlose Flugschule aus Luftpartikeln. Das Stück beginnt erst danach.",
+    );
+    onboarding.addEventListener("click", renderOnboarding);
+
+    const configure = actionButton("Ablauf", "Wann welcher Sinn erwacht.");
+    configure.addEventListener("click", () => {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("studio") !== "1") {
+        url.searchParams.set("studio", "1");
+        window.location.href = url.toString();
+        return;
+      }
+      options.onConfigure(cloneConfig(config));
+      renderConfig();
+    });
+
+    choices.append(pair, onboarding, configure);
+    section.append(title, choices);
+    return section;
+  }
+
   function renderConfig(): void {
     setScreen("config");
     screen.replaceChildren();
@@ -582,6 +680,13 @@ function choiceButton(label: string, note: string): HTMLButtonElement {
   noteEl.className = "bm-menu__choice-note";
   noteEl.textContent = note;
   button.append(labelEl, noteEl);
+  return button;
+}
+
+/** A settings entry that performs an action — a choice's look without its pressed state. */
+function actionButton(label: string, note: string): HTMLButtonElement {
+  const button = choiceButton(label, note);
+  button.removeAttribute("aria-pressed");
   return button;
 }
 

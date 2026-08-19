@@ -25,7 +25,12 @@ import {
   type ExperienceInterfaceMode,
   createInterfaceModeController,
 } from "./experience/interface-mode.ts";
-import { type AppSettings, loadAppSettings, saveAppSettings } from "./experience/settings.ts";
+import {
+  type AppSettings,
+  type ExperienceMode,
+  loadAppSettings,
+  saveAppSettings,
+} from "./experience/settings.ts";
 import { type StartGate, createStartGate } from "./experience/start-gate.ts";
 import { createStartMenu } from "./experience/start-menu.ts";
 import { createFloraFaunaController } from "./flora-fauna/index.ts";
@@ -38,6 +43,7 @@ import { type Grass, createGrass } from "./grass/index.ts";
 import { createLife } from "./life/index.ts";
 import { createController } from "./m5/index.ts";
 import { createMinimap } from "./minimap/index.ts";
+import { createOnboarding } from "./onboarding/index.ts";
 import { findPreset } from "./perf/presets.ts";
 import { createPerfRouter } from "./perf/router.ts";
 import { applyPerfState, perfStateFrom, savedPerfState, serializePerfState } from "./perf/state.ts";
@@ -130,6 +136,34 @@ window.addEventListener("pagehide", () => life.dispose());
 // playerPose + time); shares the sense uniforms so it fades at the same view edge.
 const atmosphere = createAtmosphere({ scene: renderer.scene, uniforms: senses.uniforms });
 window.addEventListener("pagehide", () => atmosphere.dispose());
+
+/**
+ * The rig's heading, in radians, straight off its quaternion — the rotated forward axis.
+ *
+ * NOT `rig.rotation.y`: an Euler's middle angle is confined to ±90° and folds back beyond it
+ * (x and z jump to π instead), so a rig that keeps turning right reports itself turning back
+ * again — which is precisely what the lesson's turn tasks measure. This has no such seam.
+ * (Only the sine/cosine of the forward vector are needed, so no Vector3 is allocated.)
+ */
+const playerHeading = (): number => {
+  const { x, y, z, w } = player.rig.quaternion;
+  const forwardX = -2 * (x * z + w * y);
+  const forwardZ = -(1 - 2 * (x * x + y * y));
+  return Math.atan2(forwardX, forwardZ);
+};
+
+// EXPERIMENT — the wordless flight lesson: a second, small mote field that gathers into
+// signs in front of the player (see src/onboarding). Dormant unless the start menu asks
+// for it, and made of the same air as the atmosphere above, so the empty room stays empty.
+const onboarding = createOnboarding({
+  scene: renderer.scene,
+  uniforms: senses.uniforms,
+  camera: renderer.camera,
+  concept: appSettings.onboardingConcept,
+  // Finishing the lesson is what starts the piece — no separate "press Enter" gate.
+  onComplete: () => clock.resume(),
+});
+window.addEventListener("pagehide", () => onboarding.dispose());
 
 // Streaming terrain: a chunked, worker-generated world that loads around the player.
 // It shares the senses' atmosphere uniforms (sense transitions restyle the world live),
@@ -609,6 +643,8 @@ const setInterfaceMode = (mode: ExperienceInterfaceMode): void => {
 };
 if (useTheatreStudio) {
   setFlightMode("free"); // the studio boots straight into configure (see above)
+  keyboard.setDesktopFeel(true); // the configure route is a desk with a keyboard
+  player.setFloorFeel({ clearance: 1.5, soften: true });
 }
 
 // Gyro controls: the phone's own tilt, reported as the same {pitch, roll} rate pair
@@ -653,6 +689,59 @@ if (!useTheatreStudio) {
     });
   };
 
+  /**
+   * Begin in one of the three modes. Everything a mode needs that a browser only grants
+   * inside a user gesture — the tilt sensor on iOS, fullscreen — has to happen here, in the
+   * click that led to it, before any await that isn't part of asking. Refusing the tilt
+   * sensor is the one failure that aborts the start: without it the mobile mode has no
+   * steering at all. Shared by the ordinary entry and by the onboarding experiment.
+   */
+  const beginFlight = async (
+    next: ExperienceConfig,
+    mode: ExperienceMode,
+    options: { skipGate?: boolean } = {},
+  ): Promise<boolean> => {
+    if (mode === "mobile") {
+      if (!(await gyro.enable())) {
+        return false;
+      }
+    } else {
+      gyro.disable();
+    }
+    appSettings = { ...appSettings, mode };
+    saveAppSettings(appSettings);
+    applyFlightFeel(mode);
+    // Fullscreen for the flat modes; only the phone also gets the landscape lock. The ICAROS
+    // station is left alone: it runs attended, and taking its browser fullscreen puts the
+    // window out of the operator's reach for no gain — the machine is the frame there, not
+    // the screen.
+    if (mode !== "icaros") {
+      await enterImmersiveViewport({ lockLandscape: mode === "mobile" });
+    }
+    rewindToStart(next);
+    clock.pause(); // stay frozen at t=0 until the gate (or the lesson) says go
+    if (options.skipGate === true) {
+      setInterfaceMode("playback");
+    } else {
+      armStartGate(mode === "mobile");
+    }
+    return true;
+  };
+
+  /**
+   * The desktop mode flies differently on purpose, and ONLY the desktop mode: a hand on WASD
+   * wants eased controls, an attitude that stays where it is put, and enough room to skim low
+   * without being knocked about by every ridge. The headset and the ICAROS rig are authored to
+   * their own feel and keep it — the values they had before any of this existed.
+   */
+  const applyFlightFeel = (mode: ExperienceMode): void => {
+    const desktop = mode === "desktop";
+    keyboard.setDesktopFeel(desktop);
+    player.setFloorFeel(
+      desktop ? { clearance: 1.5, soften: true } : { clearance: 4, soften: false },
+    );
+  };
+
   const startMenu = createStartMenu({
     config: experienceConfig,
     settings: appSettings,
@@ -684,21 +773,21 @@ if (!useTheatreStudio) {
      * asking. Refusing the tilt sensor is the one failure that aborts the start:
      * without it the mobile mode has no steering at all.
      */
-    async onStart(next, mode) {
-      if (mode === "mobile") {
-        if (!(await gyro.enable())) {
-          return false;
-        }
-      } else {
-        gyro.disable();
-      }
-      appSettings = { ...appSettings, mode };
+    onStart: beginFlight,
+
+    async onOnboarding(next, mode, concept) {
+      appSettings = { ...appSettings, onboardingConcept: concept };
       saveAppSettings(appSettings);
-      // Fullscreen in every mode; only the phone gets the landscape lock.
-      await enterImmersiveViewport({ lockLandscape: mode === "mobile" });
-      rewindToStart(next);
-      clock.pause(); // stay frozen at t=0 until the gate fires
-      armStartGate(mode === "mobile");
+      const started = await beginFlight(next, mode, { skipGate: true });
+      if (!started) {
+        return false;
+      }
+      // The lesson itself is the gate now: the timeline stays at t=0 until the last task
+      // has been flown (see the onComplete wiring where `onboarding` is created).
+      startGate?.dispose();
+      startGate = undefined;
+      onboarding.setConcept(concept);
+      onboarding.setActive(true);
       return true;
     },
 
@@ -862,6 +951,14 @@ renderer.start((dtSeconds) => {
   life.update(dtSeconds); // 7. pump time / unrest / intensity / sense into the flora uniforms
   grass.update(dtSeconds); // GPU grass: snap, repaint field texture, dispatch compute (void-gated)
   atmosphere.update(dtSeconds); // 8. pump player pose + virtual clock into the dust uniforms
+  // EXPERIMENT: the particle lesson reads the flight itself (heading + altitude), so its
+  // progress means "this is working" on the keyboard, the phone and the ICAROS alike.
+  onboarding.update(dtSeconds, {
+    x: player.rig.position.x,
+    y: player.rig.position.y,
+    z: player.rig.position.z,
+    yaw: playerHeading(),
+  });
   m5Panel.update(); // dev console readout (self-throttled to ~8/s)
 });
 

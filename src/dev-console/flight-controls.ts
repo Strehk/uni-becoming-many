@@ -31,7 +31,7 @@ const MODES: readonly { id: FlightMode; label: string; title: string }[] = [
     id: "free",
     label: "Freiflug",
     title:
-      "Creative-Modus: W/A/S/D entlang der Blickrichtung, Space hoch, Shift runter, Strg schneller",
+      "Creative-Modus: W/A/S/D entlang der Blickrichtung, Pfeil hoch/runter steigen und sinken, Strg schneller",
   },
 ];
 
@@ -42,7 +42,7 @@ const LOOKS: readonly { id: LookMode; label: string; title: string }[] = [
     title: "Klick ins Bild fängt den Zeiger, ESC gibt ihn frei",
   },
   { id: "drag", label: "Maustaste", title: "Umsehen, solange eine Maustaste gehalten wird" },
-  { id: "keys", label: "Tasten", title: "Umsehen mit den Pfeiltasten, ganz ohne Maus" },
+  { id: "keys", label: "Tasten", title: "Umsehen mit ←/→ und Q/E, ganz ohne Maus" },
 ];
 
 export function createFlightControls(
@@ -78,7 +78,7 @@ export function createFlightControls(
 
   const hint = document.createElement("p");
   hint.className = "fl-hint";
-  hint.textContent = "Freiflug: W/A/S/D · Space hoch · Shift runter · Strg schneller · Pause mit K";
+  hint.textContent = "Freiflug: W/A/S/D · ↑/↓ steigen und sinken · Strg schneller";
 
   root.append(modeRow, lookRow, hint);
 
